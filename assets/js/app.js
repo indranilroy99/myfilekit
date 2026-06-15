@@ -9,10 +9,44 @@
     "AI Tools"
   ];
 
+  const featureHighlights = [
+    {
+      icon: "FAST",
+      title: "Fast local tools",
+      description: "Run common PDF, image, and document tasks quickly from one dashboard."
+    },
+    {
+      icon: "SAFE",
+      title: "Privacy-first",
+      description: "Process files in your browser wherever possible, without unnecessary uploads."
+    },
+    {
+      icon: "HUB",
+      title: "All-in-one workspace",
+      description: "Access PDF, image, business, signature, document, security, and AI tools from one place."
+    },
+    {
+      icon: "FIND",
+      title: "Search-first dashboard",
+      description: "Find the right tool quickly using a Spotlight-style search experience."
+    },
+    {
+      icon: "OS",
+      title: "Cross-platform",
+      description: "Run the project on macOS, Windows, and Linux with clear setup instructions."
+    },
+    {
+      icon: "GROW",
+      title: "Built to grow",
+      description: "Add new tools through a central registry without duplicating dashboard code."
+    }
+  ];
+
   const tools = Array.isArray(window.MyFileKitTools) ? window.MyFileKitTools : [];
   const searchInput = document.getElementById("toolSearch");
   const searchMeta = document.getElementById("searchMeta");
   const toolGroups = document.getElementById("toolGroups");
+  const featureGrid = document.getElementById("featureHighlights");
   const emptyState = document.getElementById("emptyState");
   const modal = document.getElementById("comingSoonModal");
   const modalTitle = document.getElementById("modalTitle");
@@ -110,6 +144,31 @@
       const grid = section.querySelector(".tool-grid");
       categoryTools.forEach((tool) => grid.appendChild(createToolCard(tool)));
       toolGroups.appendChild(section);
+    });
+  }
+
+  function renderFeatureHighlights() {
+    featureGrid.innerHTML = "";
+    featureHighlights.forEach((feature) => {
+      const card = document.createElement("article");
+      card.className = "feature-card";
+      card.innerHTML = `
+        <span class="feature-icon" aria-hidden="true">${escapeHtml(feature.icon)}</span>
+        <div>
+          <h3>${escapeHtml(feature.title)}</h3>
+          <p>${escapeHtml(feature.description)}</p>
+        </div>
+      `;
+      featureGrid.appendChild(card);
+    });
+  }
+
+  function restoreInitialHashScroll() {
+    if (!window.location.hash) return;
+    const target = document.getElementById(window.location.hash.slice(1));
+    if (!target) return;
+    window.requestAnimationFrame(() => {
+      target.scrollIntoView({ block: "start" });
     });
   }
 
@@ -260,5 +319,6 @@
   document.getElementById("mergePdfButton").addEventListener("click", mergePdf);
   document.getElementById("splitPdfButton").addEventListener("click", splitPdf);
   renderTools();
+  renderFeatureHighlights();
+  restoreInitialHashScroll();
 })();
-
