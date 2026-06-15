@@ -35,7 +35,7 @@ Only working tools are shown in the dashboard. Planned tools stay out of the pro
 - Category pages for PDF, image, business, signature, text/data, and developer tools.
 - Tool pages include Back, Forward, Dashboard, category navigation, and related tools.
 - Custom professional logo in the React shell and favicon.
-- Modern SaaS utility visual system with a light background, deep navy text, blue/green accents, rounded cards, minimal shadows, and a subtle warm texture.
+- Monochrome utility visual system with a light background, neutral borders, square controls, no decorative shadows, and a focused command-center feel.
 
 ## Privacy Model
 
