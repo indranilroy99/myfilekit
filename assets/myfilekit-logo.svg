@@ -3,35 +3,35 @@
   <desc id="desc">A professional layered document mark with a folded corner and an M-shaped file stroke.</desc>
   <defs>
     <linearGradient id="bg" x1="18" y1="12" x2="230" y2="244" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#f7f1e4"/>
-      <stop offset="1" stop-color="#d8d9cf"/>
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef4f7"/>
     </linearGradient>
     <linearGradient id="paper" x1="48" y1="31" x2="207" y2="222" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#fff8ea"/>
-      <stop offset="1" stop-color="#e5dac5"/>
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eaf2ff"/>
     </linearGradient>
     <linearGradient id="ink" x1="77" y1="69" x2="169" y2="177" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1f211c"/>
-      <stop offset="1" stop-color="#24314f"/>
+      <stop stop-color="#102033"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
     </linearGradient>
     <linearGradient id="earth" x1="39" y1="28" x2="207" y2="218" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#465341"/>
-      <stop offset=".56" stop-color="#8c5434"/>
-      <stop offset="1" stop-color="#c29345"/>
+      <stop stop-color="#1d4ed8"/>
+      <stop offset=".58" stop-color="#0ea5a4"/>
+      <stop offset="1" stop-color="#0f766e"/>
     </linearGradient>
     <filter id="shadow" x="16" y="10" width="224" height="230" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="18" stdDeviation="13" flood-color="#1f211c" flood-opacity=".22"/>
+      <feDropShadow dx="0" dy="18" stdDeviation="13" flood-color="#102033" flood-opacity=".18"/>
     </filter>
   </defs>
   <rect width="256" height="256" rx="58" fill="url(#bg)"/>
   <path d="M128 23c58.1 0 105 46.9 105 105 0 49.7-34.2 91.1-80.3 102.1" fill="none" stroke="url(#earth)" stroke-width="12" stroke-linecap="round"/>
   <path d="M92.1 226.9C51.7 212.1 23 173.5 23 128c0-31.4 13.7-59.8 35.7-79" fill="none" stroke="url(#earth)" stroke-width="12" stroke-linecap="round" opacity=".76"/>
   <g filter="url(#shadow)">
-    <path d="M65 50h91.8L203 96.2V202H65z" fill="#e9dfcc" stroke="#5f6258" stroke-opacity=".34" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M65 50h91.8L203 96.2V202H65z" fill="#e5eef8" stroke="#102033" stroke-opacity=".18" stroke-width="4" stroke-linejoin="round"/>
     <path d="M50 36h103.6L207 89.4V214H50z" fill="url(#paper)" stroke="url(#earth)" stroke-width="7" stroke-linejoin="round"/>
-    <path d="M153.6 36v53.4H207z" fill="#d8ccb8" stroke="url(#earth)" stroke-width="7" stroke-linejoin="round"/>
+    <path d="M153.6 36v53.4H207z" fill="#dbeafe" stroke="url(#earth)" stroke-width="7" stroke-linejoin="round"/>
   </g>
   <path d="M88 169V94l40 48 40-48v75" fill="none" stroke="url(#ink)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M91 190h76" fill="none" stroke="url(#ink)" stroke-width="12" stroke-linecap="round"/>
-  <circle cx="183" cy="181" r="10" fill="#8c5434"/>
+  <circle cx="183" cy="181" r="10" fill="#0ea5a4"/>
 </svg>

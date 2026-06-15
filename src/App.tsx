@@ -20,7 +20,6 @@ import {
   Upload,
 } from "lucide-react";
 import { AnimatedLogo } from "./components/AnimatedLogo";
-import { EtherealShadow } from "@/components/ui/etheral-shadow";
 import { ExpandingSearchDock } from "@/components/ui/expanding-search-dock-shadcnui";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
@@ -150,14 +149,6 @@ function Dashboard() {
   return (
     <div className="grid gap-8">
       <section className="hero-panel surface-panel wabi-edge overflow-hidden">
-        <EtherealShadow
-          className="wabi-shadow"
-          color="rgba(190, 190, 180, .3)"
-          animation={{ scale: 88, speed: 58 }}
-          noise={{ opacity: .56, scale: 1.28 }}
-          sizing="fill"
-          style={{ position: "absolute", inset: 0 }}
-        />
         <div className="relative z-10 mx-auto grid max-w-5xl justify-items-center gap-6 px-6 py-12 text-center md:px-10 lg:px-12 lg:py-16">
           <div className="grid justify-items-center gap-6">
             <div className="grid justify-items-center gap-4 sm:flex sm:items-center">
