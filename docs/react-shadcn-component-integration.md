@@ -32,12 +32,20 @@ src/components/ui/expanding-search-dock-shadcnui.tsx
 
 It is used in the app header as a compact desktop search control. Submitted searches route users back to the dashboard and apply the dashboard filter.
 
+The local ethereal shadow layer lives at:
+
+```text
+src/components/ui/etheral-shadow.tsx
+```
+
+It is used as a privacy-safe wabi-sabi background layer. The original demo depended on remote Framer image URLs for mask and noise textures; MyFileKit replaces those with local SVG/CSS gradients and grain so the dashboard keeps its local-first posture.
+
 Dependencies:
 
 - `framer-motion`
 - `lucide-react`
 
-The component uses the current Tailwind theme bridge in `src/styles.css` for shadcn-style class names such as `bg-card`, `border-border`, `hover:bg-muted`, and `text-muted-foreground`.
+The components use the current Tailwind theme bridge in `src/styles.css` for shadcn-style class names such as `bg-card`, `border-border`, `hover:bg-muted`, and `text-muted-foreground`.
 
 ## Adding shadcn Later
 
