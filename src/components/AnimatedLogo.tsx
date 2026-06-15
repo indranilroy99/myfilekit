@@ -6,16 +6,16 @@ export function AnimatedLogo({ compact = false }: { compact?: boolean }) {
         <defs>
           <linearGradient id="mfk-paper" x1="19" y1="8" x2="77" y2="88" gradientUnits="userSpaceOnUse">
             <stop stopColor="#ffffff" />
-            <stop offset="1" stopColor="#eaf2ff" />
+            <stop offset="1" stopColor="#f5f5f5" />
           </linearGradient>
           <linearGradient id="mfk-ink" x1="28" y1="20" x2="76" y2="82" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#102033" />
-            <stop offset="1" stopColor="#1d4ed8" />
+            <stop stopColor="#0a0a0a" />
+            <stop offset="1" stopColor="#737373" />
           </linearGradient>
           <linearGradient id="mfk-earth" x1="23" y1="17" x2="71" y2="85" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#1d4ed8" />
-            <stop offset=".58" stopColor="#0ea5a4" />
-            <stop offset="1" stopColor="#0f766e" />
+            <stop stopColor="#0a0a0a" />
+            <stop offset=".58" stopColor="#737373" />
+            <stop offset="1" stopColor="#a1a1a1" />
           </linearGradient>
         </defs>
         <path className="brand-logo-ring" d="M48 7c21.8 0 39.5 17.7 39.5 39.5 0 18.6-12.9 34.2-30.2 38.4" />
