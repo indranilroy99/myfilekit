@@ -1,50 +1,52 @@
 # React / shadcn Component Integration Notes
 
-MyFileKit v2 now uses React, TypeScript, Tailwind, and Vite. That means React components can be integrated cleanly, but the project is not yet a shadcn project.
+MyFileKit v2 now uses React, TypeScript, Tailwind, and Vite. It is shadcn-compatible, but it does not depend on the shadcn CLI yet.
 
 ## Current Stack
 
 - App entry: `src/main.tsx`
 - App shell and tool UI: `src/App.tsx`
 - Components: `src/components/`
+- shadcn-compatible UI components: `src/components/ui/`
 - Styles: `src/styles.css`
 - Tool registry: `src/registry/tools.registry.js`
 - Local processing services: `src/services/`
 
 ## shadcn Path
 
-If shadcn is added later, use the conventional folder:
+This project uses the conventional source-based folder:
 
 ```text
 src/components/ui
 ```
 
-That path matters because shadcn imports are usually configured around `@/components/ui/...`.
+The Vite and TypeScript configs map `@` to `src`, so imports such as `@/components/ui/expanding-search-dock-shadcnui` work cleanly. Keeping this folder matters because shadcn examples and registry components commonly expect the `@/components/ui/...` convention.
 
-## Provided Shader Component
+## Integrated Component
 
-The attached shader component requires:
+The expanding search dock lives at:
 
-- `three`
-- `@react-three/fiber`
-- optional `@paper-design/shaders-react`
-- optional `tw-animate-css`
-
-These are not part of the v2 app yet. They should only be added if the shader becomes part of a real product surface.
-
-Recommended install when needed:
-
-```bash
-npm install three @react-three/fiber
+```text
+src/components/ui/expanding-search-dock-shadcnui.tsx
 ```
 
-Optional demo dependencies:
+It is used in the app header as a compact desktop search control. Submitted searches route users back to the dashboard and apply the dashboard filter.
+
+Dependencies:
+
+- `framer-motion`
+- `lucide-react`
+
+The component uses the current Tailwind theme bridge in `src/styles.css` for shadcn-style class names such as `bg-card`, `border-border`, `hover:bg-muted`, and `text-muted-foreground`.
+
+## Adding shadcn Later
+
+If the project later needs the full shadcn CLI workflow, initialize it against the existing Vite, React, TypeScript, and Tailwind setup. Keep the component path as `src/components/ui` and keep the `@/*` alias mapped to `src/*`.
 
 ```bash
-npm install @paper-design/shaders-react
-npm install -D tw-animate-css
+npx shadcn@latest init
 ```
 
 ## Product Guidance
 
-Use shader/WebGL visuals carefully. MyFileKit is a tool-first workspace, so heavy visuals should not slow down the dashboard or interfere with file workflows. If used, the shader should be optional, responsive, and respect `prefers-reduced-motion`.
+Keep UI components connected to real tool workflows. Demo-only controls should not appear in the product shell unless they route, filter, download, or otherwise perform a visible user action.
