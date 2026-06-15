@@ -1,0 +1,16 @@
+{
+  "name": "myfilekit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Privacy-first browser-based toolkit for PDF, image, business, signature, document, security, and AI-assisted tools.",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "dev": "node scripts/serve.js",
+    "preview": "node scripts/serve.js",
+    "build": "node scripts/build-check.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
+
