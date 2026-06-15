@@ -38,7 +38,8 @@ Some browser capabilities vary by browser and operating system. Use the local de
 │   ├── myfilekit-logo.svg
 │   └── vendor/pdf-lib.min.js
 ├── docs/
-│   └── manual-test-checklist.md
+│   ├── manual-test-checklist.md
+│   └── react-shadcn-component-integration.md
 ├── invoice-generator/
 │   └── index.html
 ├── scripts/
