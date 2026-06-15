@@ -1,21 +1,31 @@
 # Security
 
-MyFileKit is a static browser app. The current product does not include server uploads, user accounts, sessions, cookies, databases, or remote file storage.
+MyFileKit is a local-first browser app built with Vite, React, TypeScript, and Tailwind. The current product does not include server uploads, user accounts, sessions, cookies, databases, or remote file storage.
 
 ## Local-First Boundary
 
 - Supported files are processed in the browser session.
 - The app does not intentionally transmit selected files to a backend.
-- The local dev server only serves files from this repository directory.
+- PDF processing uses a vendored local copy of `pdf-lib`.
 - The dashboard uses a Content Security Policy, disables framing, and avoids remote scripts.
+
+## Dependency Security
+
+Run:
+
+```bash
+npm run security:audit
+```
+
+This checks important local assets and runs `npm audit --audit-level=moderate`.
 
 ## Secure Development Rules
 
 - Do not add remote CDN scripts to production pages.
-- Do not use `innerHTML` with untrusted input unless the content is escaped first.
+- Do not use raw HTML rendering with untrusted input unless the content is escaped first.
 - Do not add visible tools before they work end to end.
 - Validate file type, count, and size before processing.
-- Keep dependencies minimal and run `npm run security:audit` before release.
+- Keep dependencies intentional and review new packages before release.
 
 ## Reporting Issues
 

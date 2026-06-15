@@ -34,7 +34,9 @@ function nodeMajor(version) {
 
 const checks = [
   ["dashboard", "index.html"],
-  ["styles", "assets/css/app.css"],
+  ["React entry", "src/main.tsx"],
+  ["Tailwind styles", "src/styles.css"],
+  ["Vite config", "vite.config.ts"],
   ["local PDF engine", "assets/vendor/pdf-lib.min.js"],
   ["tool registry", "src/registry/tools.registry.js"],
   ["invoice generator", "invoice-generator/index.html"]
@@ -57,9 +59,10 @@ log("Project checks:");
 for (const [label, file] of checks) {
   log(`- ${label}: ${fs.existsSync(path.join(root, file)) ? "found" : "missing"}`);
 }
-log("- dependencies: none to install");
-log("- app type: static browser app");
+log(`- dependencies: ${fs.existsSync(path.join(root, "node_modules")) ? "installed" : "run npm install"}`);
+log("- app type: Vite + React + TypeScript + Tailwind");
 log("");
 log("Next commands:");
+log("- npm install");
 log("- npm run dev");
-log("- open the local URL printed by the dev server");
+log("- open the local URL printed by Vite");

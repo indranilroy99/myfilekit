@@ -1,20 +1,37 @@
 {
   "name": "myfilekit",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "type": "module",
   "private": true,
   "description": "Privacy-first browser-based toolkit for PDF, image, business, signature, text, data, and developer utilities.",
   "scripts": {
     "setup": "node scripts/setup.js",
-    "dev": "node scripts/serve.js",
-    "preview": "node scripts/serve.js",
-    "build": "node scripts/build-check.js",
+    "dev": "vite --host 0.0.0.0 --port 4173",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "build": "vite build",
     "check": "node scripts/build-check.js",
     "test": "node --test",
     "security:audit": "node scripts/security-audit.js",
-    "preflight": "npm run setup && npm run check && npm run test && npm run security:audit"
+    "preflight": "npm run setup && npm run check && npm run test && npm run security:audit",
+    "version:patch": "node scripts/bump-version.js patch",
+    "version:minor": "node scripts/bump-version.js minor",
+    "version:major": "node scripts/bump-version.js major"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.1",
+    "@vitejs/plugin-react": "^6.0.2",
+    "lucide-react": "^1.18.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3"
   }
 }
