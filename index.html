@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' 'unsafe-inline' https://unpkg.com file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' 'unsafe-inline' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
   <title>MyFileKit</title>
@@ -11,152 +11,9 @@
   <link rel="stylesheet" href="assets/css/app.css">
 </head>
 <body>
-  <a class="skip-link" href="#tools">Skip to tools</a>
-  <header class="site-header">
-    <a class="brand" href="./" aria-label="MyFileKit home">
-      <img src="assets/myfilekit-logo.svg" alt="" width="44" height="44">
-      <span>MyFileKit</span>
-    </a>
-    <nav class="top-nav" aria-label="Primary navigation">
-      <a href="#tools">Tools</a>
-      <a href="#why-myfilekit">Why MyFileKit</a>
-      <a href="#workspace">Workspace</a>
-      <a href="invoice-generator/index.html">Invoice Generator</a>
-    </nav>
-  </header>
-
-  <main>
-    <section class="hero" aria-labelledby="hero-title">
-      <p class="eyebrow">Privacy-first file tools</p>
-      <h1 id="hero-title">MyFileKit</h1>
-      <p class="hero-subtitle">All-in-one file, PDF, image, business, and document tools.</p>
-      <p class="privacy-note">Process files locally in your browser wherever possible.</p>
-
-      <form class="spotlight" role="search" aria-label="Search tools" autocomplete="off">
-        <label class="sr-only" for="toolSearch">Search tools</label>
-        <span class="search-icon" aria-hidden="true">⌕</span>
-        <input id="toolSearch" type="search" placeholder="Search PDF, image, invoice, signature tools..." spellcheck="false">
-        <kbd>/</kbd>
-      </form>
-      <div class="search-meta" id="searchMeta" aria-live="polite"></div>
-    </section>
-
-    <section class="tools-shell" id="tools" aria-labelledby="tools-title">
-      <div class="section-heading">
-        <div>
-          <h2 id="tools-title">Tool Library</h2>
-          <p>Search or browse by category. Available tools open immediately; planned tools are clearly marked.</p>
-        </div>
-        <div class="legend" aria-label="Tool status legend">
-          <span class="badge badge-available">Available</span>
-          <span class="badge">Coming soon</span>
-          <span class="badge badge-local">Local processing</span>
-        </div>
-      </div>
-      <div id="toolGroups" class="tool-groups"></div>
-      <div id="emptyState" class="empty-state" hidden>
-        <h3>No matching tools</h3>
-        <p>Try a simpler search such as “pdf”, “image”, “invoice”, “signature”, or “compress”.</p>
-      </div>
-    </section>
-
-    <section class="highlights" id="why-myfilekit" aria-labelledby="why-title">
-      <div class="section-heading">
-        <div>
-          <h2 id="why-title">Why MyFileKit</h2>
-          <p>A practical toolkit foundation: fast, searchable, local-first, and built to grow without duplicating dashboard code.</p>
-        </div>
-      </div>
-      <div class="feature-grid" id="featureHighlights"></div>
-    </section>
-
-    <section class="workspace" id="workspace" aria-labelledby="workspace-title">
-      <div class="section-heading">
-        <div>
-          <h2 id="workspace-title">Workspace</h2>
-          <p>Current browser-based tools. Files stay on this device unless you choose to share them elsewhere.</p>
-        </div>
-      </div>
-      <div class="workspace-grid">
-        <article class="tool-panel" id="compress-image-tool">
-          <div class="panel-title">
-            <span class="panel-icon">IMG</span>
-            <div>
-              <h3>Compress Image</h3>
-              <p>Reduce JPG, PNG, or WebP file size.</p>
-            </div>
-          </div>
-          <div class="field">
-            <label for="imageInput">Image file</label>
-            <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp">
-          </div>
-          <div class="field-row">
-            <div class="field">
-              <label for="imageFormat">Output</label>
-              <select id="imageFormat">
-                <option value="image/jpeg">JPEG</option>
-                <option value="image/webp">WebP</option>
-                <option value="image/png">PNG</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="imageQuality">Quality</label>
-              <input id="imageQuality" type="range" min="0.25" max="0.95" step="0.05" value="0.72">
-            </div>
-          </div>
-          <button class="button button-primary" id="compressImageButton" type="button">Compress image</button>
-          <p class="result" id="imageResult">Choose an image to begin.</p>
-        </article>
-
-        <article class="tool-panel" id="merge-pdf-tool">
-          <div class="panel-title">
-            <span class="panel-icon">PDF</span>
-            <div>
-              <h3>Merge PDF</h3>
-              <p>Combine PDFs in selected order.</p>
-            </div>
-          </div>
-          <div class="field">
-            <label for="mergeInput">PDF files</label>
-            <input id="mergeInput" type="file" accept="application/pdf" multiple>
-          </div>
-          <button class="button button-primary" id="mergePdfButton" type="button">Merge PDFs</button>
-          <p class="result" id="mergeResult">Choose two or more PDF files.</p>
-        </article>
-
-        <article class="tool-panel" id="split-pdf-tool">
-          <div class="panel-title">
-            <span class="panel-icon">CUT</span>
-            <div>
-              <h3>Split PDF</h3>
-              <p>Export every page as a separate PDF.</p>
-            </div>
-          </div>
-          <div class="field">
-            <label for="splitInput">PDF file</label>
-            <input id="splitInput" type="file" accept="application/pdf">
-          </div>
-          <button class="button button-primary" id="splitPdfButton" type="button">Split PDF</button>
-          <p class="result" id="splitResult">Choose one PDF file.</p>
-          <div class="download-list" id="splitDownloads"></div>
-        </article>
-      </div>
-    </section>
-  </main>
-
-  <div class="modal" id="comingSoonModal" hidden>
-    <div class="modal-backdrop" data-close-modal></div>
-    <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-describedby="modalDescription">
-      <button class="modal-close" type="button" aria-label="Close" data-close-modal>×</button>
-      <p class="eyebrow">Coming soon</p>
-      <h2 id="modalTitle">Tool planned</h2>
-      <p id="modalDescription"></p>
-      <p class="modal-note">This card is intentionally marked as planned. It will not pretend to process files until the tool is implemented and tested.</p>
-    </section>
-  </div>
-
-  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js" defer></script>
-  <script src="assets/js/tools-registry.js" defer></script>
-  <script src="assets/js/app.js" defer></script>
+  <a class="skip-link" href="#app">Skip to app</a>
+  <div id="app" class="app-shell"></div>
+  <script src="assets/vendor/pdf-lib.min.js"></script>
+  <script type="module" src="src/main.js"></script>
 </body>
 </html>

@@ -1,80 +1,67 @@
 # MyFileKit
 
-MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, signature, document, security, and AI-assisted tools. It combines multiple small utilities into one dashboard with fast search and local file processing wherever possible.
+MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, signature, text, data, and developer utilities. It combines practical file tools into one clean dashboard with fast search and local file processing wherever possible.
 
-The project is currently a vanilla HTML, CSS, and JavaScript application. It does not require a frontend framework or a build step.
+The app is intentionally simple to run and host: vanilla HTML, CSS, and JavaScript with no frontend framework, no build step, no backend, no database, and no account system.
 
-## Available Tools
+## Working Tools
 
-- Invoice Generator: full invoice editor with templates, custom fields, payment details, TDS, signatures, logo controls, and print/PDF export.
-- Compress Image: browser-based image compression for JPG, PNG, and WebP.
-- Merge PDF: combines multiple PDFs in the browser.
-- Split PDF: exports PDF pages as separate files in the browser.
+- PDF: Merge PDF, Split / Extract PDF Pages, Delete PDF Pages, Rotate PDF Pages, Images to PDF.
+- Image: Compress Image, Resize Image, Convert Image, Crop Image, Rotate / Flip Image.
+- Business: Invoice Generator, Receipt Generator, Quote / Estimate Generator.
+- Signature: Draw Signature, Type Signature.
+- Text & Data: Text to PDF, Markdown Preview, JSON Formatter, CSV to JSON, JSON to CSV.
+- Developer Utilities: Base64 Encode / Decode, File Hash Generator.
 
-PDF merge and split use `pdf-lib` from a CDN. The dashboard itself remains static and can be opened directly from disk.
-
-## Coming Soon Tools
-
-MyFileKit already shows the planned tool library, but planned tools are intentionally marked as `Coming soon` and do not pretend to process files.
-
-Categories include:
-
-- PDF Tools
-- Image Tools
-- Business Tools
-- Signature Tools
-- Document Tools
-- Security Tools
-- AI Tools
+Only working tools are shown on the dashboard. Planned tools should stay in project notes until they have a real implementation.
 
 ## Privacy Model
 
-The current working tools process files in the browser wherever possible. Files selected in the dashboard are not uploaded to a MyFileKit server because this project does not currently include a backend.
+Supported tools run in the browser using local files selected by the user. MyFileKit does not include a server upload path, tracking code, authentication flow, or remote file storage.
 
-Some future tools, such as OCR, PDF repair, Office conversion, and AI document analysis, may require backend services. Those tools are marked as planned until a safe implementation exists.
-
-## Screenshots
-
-Screenshots will be added after the interface stabilizes.
+Some browser capabilities vary by browser and operating system. Use the local dev server for the most reliable behavior with JavaScript modules and vendored assets.
 
 ## Tech Stack
 
 - HTML
 - CSS
-- JavaScript
-- `pdf-lib` via CDN for browser-side PDF merge and split
-- Node.js scripts for local setup checks and a lightweight development server
-
-React, shadcn/ui, Tailwind, and TypeScript are not part of the production app yet. A reference shader component and integration notes are available in `examples/react-shadcn/` and `docs/react-shadcn-setup.md`.
+- JavaScript modules
+- Local vendored `pdf-lib` for browser-side PDF operations
+- Node.js scripts for setup, checks, tests, and a lightweight static dev server
 
 ## Project Structure
 
 ```text
 .
 ├── assets/
-│   ├── css/
-│   │   └── app.css
-│   ├── js/
-│   │   ├── app.js
-│   │   └── tools-registry.js
-│   └── myfilekit-logo.svg
+│   ├── css/app.css
+│   ├── myfilekit-logo.svg
+│   └── vendor/pdf-lib.min.js
 ├── docs/
-│   └── react-shadcn-setup.md
-├── examples/
-│   └── react-shadcn/
+│   └── manual-test-checklist.md
 ├── invoice-generator/
 │   └── index.html
 ├── scripts/
 │   ├── build-check.js
+│   ├── security-audit.js
 │   ├── serve.js
 │   └── setup.js
+├── src/
+│   ├── components/
+│   ├── registry/
+│   ├── services/
+│   ├── tools/
+│   ├── utils/
+│   ├── main.js
+│   └── router.js
+├── tests/
 ├── index.html
 ├── package.json
 ├── setup.ps1
 └── setup.sh
 ```
 
-## Installation
+## Run Locally
 
 Clone the repository:
 
@@ -83,9 +70,9 @@ git clone https://github.com/indranilroy99/myfilekit.git
 cd myfilekit
 ```
 
-Node.js 18 or later is recommended for the local development server. The app can also be opened directly by loading `index.html` in a browser.
+Node.js 18 or later is recommended.
 
-## macOS
+### macOS
 
 ```bash
 chmod +x setup.sh
@@ -93,19 +80,9 @@ chmod +x setup.sh
 npm run dev
 ```
 
-Open:
+Open `http://localhost:4173`.
 
-```text
-http://localhost:4173
-```
-
-Alternative:
-
-```bash
-python3 -m http.server 4173
-```
-
-## Windows
+### Windows
 
 From PowerShell:
 
@@ -114,15 +91,9 @@ From PowerShell:
 npm run dev
 ```
 
-Open:
+Open `http://localhost:4173`.
 
-```text
-http://localhost:4173
-```
-
-Alternative: use the VS Code Live Server extension and open the project folder.
-
-## Linux
+### Linux
 
 ```bash
 chmod +x setup.sh
@@ -130,37 +101,31 @@ chmod +x setup.sh
 npm run dev
 ```
 
-Open:
-
-```text
-http://localhost:4173
-```
-
-Alternative:
-
-```bash
-python3 -m http.server 4173
-```
+Open `http://localhost:4173`.
 
 ## npm Scripts
 
 ```bash
 npm run setup
 npm run dev
-npm run preview
-npm run build
+npm run check
+npm run test
+npm run security:audit
+npm run preflight
 ```
 
-- `setup` checks the operating system, Node.js version, npm availability, and required project files.
-- `dev` starts a small local static server on port `4173`.
-- `preview` runs the same local server.
-- `build` checks required files and JavaScript syntax. There is no compiled production build yet.
+- `setup` checks the operating system, Node.js version, npm availability, and important project files.
+- `dev` starts a local static server on port `4173`.
+- `check` validates required files and JavaScript syntax.
+- `test` runs Node.js unit tests for the registry and core helpers.
+- `security:audit` checks the local security baseline and vendored assets.
+- `preflight` runs the full local verification set.
 
 ## Dashboard Search
 
-The dashboard search filters tools by name, category, description, badges, and keywords.
+The dashboard search filters tools by name, category, description, badge, and keyword.
 
-Try searches such as:
+Try:
 
 - `merge pdf`
 - `compress image`
@@ -170,40 +135,15 @@ Try searches such as:
 - `resize image`
 - `convert jpg`
 - `receipt`
-
-When search is empty, tools are grouped by category. When search has a value, matching tools are shown as search results, with available tools first.
-
-## Troubleshooting
-
-If `npm run dev` fails:
-
-- Confirm Node.js 18 or later is installed.
-- Run `node scripts/setup.js` for diagnostics.
-- Try another port with `PORT=5000 npm run dev` on macOS/Linux.
-- On Windows PowerShell, use `$env:PORT=5000; npm run dev`.
-
-If PDF tools say the engine is still loading:
-
-- Wait a moment and try again.
-- Confirm the browser can load `https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js`.
-- Use the local dev server rather than opening files directly if your browser blocks CDN scripts from `file://` pages.
+- `json`
+- `hash`
 
 ## Development Guidelines
 
-- Keep the dashboard driven by `assets/js/tools-registry.js`.
-- Mark unfinished tools as `coming-soon`.
-- Do not add placeholder actions that appear to process files.
-- Prefer browser-side processing when practical.
-- Keep dependencies minimal.
+- Keep the dashboard driven by `src/registry/tools.registry.js`.
+- Keep each visible dashboard card connected to a working route.
+- Do not show unfinished tools as selectable dashboard cards.
+- Keep file processing local whenever practical.
+- Prefer small service modules over repeated logic in tool UI code.
 - Keep copy precise and avoid claims that are not implemented.
-- Preserve direct `index.html` usage where possible.
-
-## Roadmap
-
-- Add dedicated pages for available tools.
-- Implement image resize and image format conversion.
-- Add Images to PDF and PDF to Images.
-- Add PDF rotate, reorder, watermark, and page-number tools.
-- Add signature drawing and signature-to-PDF workflows.
-- Add quote, receipt, and estimate generators.
-- Evaluate backend support for Office conversion, OCR, PDF repair, redaction, and AI-assisted tools.
+- Run `npm run preflight` before pushing.

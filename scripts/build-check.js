@@ -1,16 +1,25 @@
 #!/usr/bin/env node
-const fs = require("node:fs");
-const path = require("node:path");
-const { spawnSync } = require("node:child_process");
-const vm = require("node:vm");
+import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import vm from "node:vm";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve(__dirname, "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const requiredFiles = [
   "index.html",
   "assets/css/app.css",
-  "assets/js/tools-registry.js",
-  "assets/js/app.js",
-  "invoice-generator/index.html"
+  "assets/myfilekit-logo.svg",
+  "assets/vendor/pdf-lib.min.js",
+  "src/main.js",
+  "src/router.js",
+  "src/registry/tools.registry.js",
+  "src/tools/tool-implementations.js",
+  "invoice-generator/index.html",
+  "README.md",
+  "SECURITY.md",
+  "CONTRIBUTING.md",
+  "docs/manual-test-checklist.md"
 ];
 
 let failed = false;
@@ -21,36 +30,14 @@ for (const file of requiredFiles) {
   if (!exists) failed = true;
 }
 
-for (const file of ["assets/js/tools-registry.js", "assets/js/app.js"]) {
-  const result = spawnSync(process.execPath, ["--check", path.join(root, file)], { encoding: "utf8" });
+const jsFiles = walk(path.join(root, "src")).filter((file) => file.endsWith(".js"));
+for (const file of [...jsFiles, path.join(root, "scripts", "setup.js"), path.join(root, "scripts", "serve.js"), path.join(root, "scripts", "security-audit.js")]) {
+  const result = spawnSync(process.execPath, ["--check", file], { encoding: "utf8" });
   if (result.status !== 0) {
     failed = true;
     process.stderr.write(result.stderr || result.stdout);
   } else {
-    process.stdout.write(`Syntax OK: ${file}\n`);
-  }
-}
-
-const exampleTsxFiles = [
-  "examples/react-shadcn/components/ui/background-paper-shaders.tsx",
-  "examples/react-shadcn/demo.tsx"
-];
-
-if (exampleTsxFiles.every((file) => fs.existsSync(path.join(root, file)))) {
-  const localTsc = path.join(root, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
-  if (fs.existsSync(localTsc)) {
-    const typescriptCheck = spawnSync(localTsc, ["--jsx", "react-jsx", "--moduleResolution", "bundler", "--module", "esnext", "--target", "es2022", "--noEmit", "--skipLibCheck", ...exampleTsxFiles.map((file) => path.join(root, file))], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-
-    if (typescriptCheck.status === 0) {
-      process.stdout.write("Syntax OK: React shadcn example TSX files\n");
-    } else {
-      process.stdout.write("Skipped strict TSX example check because React shader dependencies are not installed in the vanilla app.\n");
-    }
-  } else {
-    process.stdout.write("Skipped TSX example check because TypeScript is not installed in this vanilla app.\n");
+    process.stdout.write(`Syntax OK: ${path.relative(root, file)}\n`);
   }
 }
 
@@ -67,6 +54,19 @@ if (!invoiceScript) {
     failed = true;
     process.stderr.write(`${error.message}\n`);
   }
+}
+
+const dashboardHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
+if (/unpkg|cdn\.|https:\/\/|coming soon|ai-assisted|ai tools/i.test(dashboardHtml)) {
+  failed = true;
+  process.stderr.write("Dashboard HTML contains remote, coming-soon, or AI wording that should not be visible.\n");
+}
+
+function walk(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const resolved = path.join(directory, entry.name);
+    return entry.isDirectory() ? walk(resolved) : resolved;
+  });
 }
 
 process.exit(failed ? 1 : 0);
