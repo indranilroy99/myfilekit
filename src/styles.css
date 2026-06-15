@@ -10,18 +10,18 @@
 }
 
 :root {
-  --app-bg: #080909;
-  --ink: #f4f2ea;
-  --paper: #111210;
-  --paper-soft: #191a18;
-  --stone: #b7b4aa;
-  --line: rgba(244, 242, 234, .14);
-  --moss: #d7d5cc;
-  --indigo: #0b0d10;
-  --clay: #9c9991;
-  --ochre: #c8c2b2;
-  --shadow-soft: 0 28px 90px rgba(0, 0, 0, .42);
-  --shadow-lift: 0 38px 120px rgba(0, 0, 0, .58);
+  --app-bg: #f6f8fb;
+  --ink: #102033;
+  --paper: #ffffff;
+  --paper-soft: #eef4f7;
+  --stone: #66758a;
+  --line: rgba(16, 32, 51, .1);
+  --moss: #0f766e;
+  --indigo: #1d4ed8;
+  --clay: #0ea5a4;
+  --ochre: #38bdf8;
+  --shadow-soft: 0 18px 50px rgba(16, 32, 51, .08);
+  --shadow-lift: 0 24px 70px rgba(16, 32, 51, .13);
   font-family: "Aptos", "Segoe UI", system-ui, -apple-system, sans-serif;
   color: var(--ink);
   background: var(--app-bg);
@@ -40,13 +40,12 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at 18% 8%, rgba(190, 190, 180, .18), transparent 28%),
-    radial-gradient(circle at 72% 10%, rgba(95, 95, 90, .2), transparent 30%),
-    radial-gradient(circle at 86% 72%, rgba(210, 210, 200, .12), transparent 34%),
-    linear-gradient(rgba(255, 255, 255, .024) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, .018) 1px, transparent 1px),
+    radial-gradient(circle at 18% 4%, rgba(29, 78, 216, .08), transparent 30%),
+    radial-gradient(circle at 86% 12%, rgba(15, 118, 110, .08), transparent 28%),
+    linear-gradient(rgba(16, 32, 51, .026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 32, 51, .02) 1px, transparent 1px),
     var(--app-bg);
-  background-size: auto, auto, auto, 34px 34px, 34px 34px, auto;
+  background-size: auto, auto, 36px 36px, 36px 36px, auto;
 }
 
 body::before {
@@ -55,13 +54,12 @@ body::before {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  opacity: .42;
+  opacity: .18;
   background-image:
-    radial-gradient(circle at 12% 22%, rgba(255, 255, 255, .16) 0 1px, transparent 1px),
-    radial-gradient(circle at 68% 74%, rgba(255, 255, 255, .08) 0 1px, transparent 1px),
-    linear-gradient(115deg, transparent 0 46%, rgba(255, 255, 255, .08) 46% 47%, transparent 47%);
-  background-size: 19px 23px, 31px 29px, 260px 260px;
-  mix-blend-mode: screen;
+    radial-gradient(circle at 12% 22%, rgba(16, 32, 51, .1) 0 1px, transparent 1px),
+    radial-gradient(circle at 68% 74%, rgba(16, 32, 51, .06) 0 1px, transparent 1px);
+  background-size: 22px 24px, 34px 32px;
+  mix-blend-mode: multiply;
 }
 
 button,
@@ -76,7 +74,7 @@ button {
 }
 
 :focus-visible {
-  outline: 3px solid rgba(244, 242, 234, .28);
+  outline: 3px solid rgba(29, 78, 216, .22);
   outline-offset: 3px;
 }
 
@@ -98,15 +96,15 @@ button {
 }
 
 .font-display {
-  font-family: "Iowan Old Style", "Palatino Linotype", "Aptos Display", Georgia, serif;
+  font-family: "Aptos Display", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
 }
 
 .site-header {
-  border-bottom: 1px solid rgba(244, 242, 234, .12);
+  border-bottom: 1px solid rgba(16, 32, 51, .1);
   background:
-    linear-gradient(90deg, rgba(18, 19, 18, .94), rgba(10, 11, 11, .88)),
-    rgba(8, 9, 9, .9);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, .38);
+    linear-gradient(90deg, rgba(255, 255, 255, .94), rgba(248, 250, 252, .88)),
+    rgba(255, 255, 255, .9);
+  box-shadow: 0 10px 30px rgba(16, 32, 51, .06);
 }
 
 .surface-panel,
@@ -119,30 +117,30 @@ button {
 
 .surface-panel {
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, .075), transparent 42%),
+    linear-gradient(135deg, rgba(29, 78, 216, .035), transparent 40%),
     var(--paper);
   box-shadow: var(--shadow-soft);
 }
 
 .surface-card {
   background:
-    linear-gradient(160deg, rgba(255, 255, 255, .08), transparent 56%),
+    linear-gradient(160deg, rgba(15, 118, 110, .028), transparent 54%),
     var(--paper);
-  box-shadow: 0 10px 34px rgba(0, 0, 0, .32);
+  box-shadow: 0 10px 28px rgba(16, 32, 51, .06);
 }
 
 .surface-muted {
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, .07), transparent 52%),
+    linear-gradient(145deg, rgba(29, 78, 216, .045), transparent 52%),
     var(--paper-soft);
 }
 
 .wabi-edge {
-  border-radius: 30px 24px 34px 22px;
+  border-radius: 28px;
 }
 
 .wabi-card-edge {
-  border-radius: 24px 18px 28px 20px;
+  border-radius: 22px;
 }
 
 .wabi-noise {
@@ -151,7 +149,7 @@ button {
     radial-gradient(circle, rgba(31, 33, 28, .22) 0 1px, transparent 1px),
     radial-gradient(circle, rgba(255, 255, 255, .32) 0 1px, transparent 1px);
   background-position: 0 0, 11px 17px;
-  mix-blend-mode: screen;
+  mix-blend-mode: multiply;
 }
 
 .wabi-shadow {
@@ -170,52 +168,52 @@ button {
 .ink-button,
 .icon-tile,
 .available-badge {
-  background: linear-gradient(135deg, #f7f5ee, #b9b7ae);
-  color: #080909;
+  background: linear-gradient(135deg, #102033, #1d4ed8);
+  color: #fff;
 }
 
 .ink-button {
-  box-shadow: 0 18px 38px rgba(0, 0, 0, .4);
+  box-shadow: 0 16px 34px rgba(29, 78, 216, .2);
 }
 
 .nav-pill {
-  background: rgba(244, 242, 234, .08);
-  border: 1px solid rgba(244, 242, 234, .14);
+  background: rgba(255, 255, 255, .78);
+  border: 1px solid rgba(16, 32, 51, .1);
   color: var(--ink);
 }
 
 .nav-pill:hover,
 .tool-card:hover {
-  border-color: rgba(244, 242, 234, .28);
+  border-color: rgba(29, 78, 216, .24);
 }
 
 .tool-card {
   background:
-    linear-gradient(140deg, rgba(255, 255, 255, .075), transparent 48%),
+    linear-gradient(140deg, rgba(29, 78, 216, .03), transparent 48%),
     var(--paper);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, .34);
+  box-shadow: 0 12px 30px rgba(16, 32, 51, .055);
 }
 
 .tool-card:hover {
   background:
-    linear-gradient(140deg, rgba(255, 255, 255, .12), transparent 48%),
+    linear-gradient(140deg, rgba(29, 78, 216, .055), transparent 48%),
     var(--paper);
   box-shadow: var(--shadow-lift);
 }
 
 .tool-card:hover .icon-tile {
-  background: linear-gradient(135deg, #ffffff, #a6a49b);
+  background: linear-gradient(135deg, var(--moss), var(--indigo));
 }
 
 .tag-badge {
-  border: 1px solid rgba(244, 242, 234, .14);
-  background: rgba(244, 242, 234, .08);
+  border: 1px solid rgba(16, 32, 51, .1);
+  background: rgba(248, 250, 252, .84);
   color: var(--stone);
 }
 
 .local-badge {
-  background: rgba(244, 242, 234, .1);
-  color: var(--ink);
+  background: rgba(15, 118, 110, .1);
+  color: #0f5f59;
 }
 
 .hero-panel {
@@ -228,9 +226,8 @@ button {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(120deg, transparent 0 58%, rgba(255, 255, 255, .06) 58% 59%, transparent 59%),
-    radial-gradient(circle at 18% 18%, rgba(190, 190, 180, .18), transparent 24%),
-    radial-gradient(circle at 86% 18%, rgba(255, 255, 255, .11), transparent 18%);
+    radial-gradient(circle at 18% 18%, rgba(29, 78, 216, .08), transparent 24%),
+    radial-gradient(circle at 86% 18%, rgba(15, 118, 110, .08), transparent 20%);
 }
 
 .spotlight-search {
@@ -239,8 +236,8 @@ button {
 
 .spotlight-search:focus-within {
   transform: translateY(-2px);
-  border-color: rgba(244, 242, 234, .32);
-  box-shadow: 0 28px 80px rgba(0, 0, 0, .5);
+  border-color: rgba(29, 78, 216, .25);
+  box-shadow: 0 28px 70px rgba(29, 78, 216, .12);
 }
 
 .brand-mark {
@@ -261,8 +258,8 @@ button {
   position: absolute;
   inset: 6px;
   border-radius: 999px;
-  background: conic-gradient(from 180deg, var(--moss), var(--ochre), var(--indigo), var(--clay), var(--moss));
-  opacity: .28;
+  background: conic-gradient(from 180deg, var(--indigo), var(--clay), var(--moss), var(--indigo));
+  opacity: .18;
   filter: blur(11px);
   animation: brand-spin 11s linear infinite;
 }
@@ -273,7 +270,7 @@ button {
   width: 100%;
   height: 100%;
   overflow: visible;
-  filter: drop-shadow(0 14px 20px rgba(31, 33, 28, .18));
+  filter: drop-shadow(0 12px 18px rgba(16, 32, 51, .14));
   animation: brand-float 4.8s ease-in-out infinite;
 }
 
@@ -294,8 +291,8 @@ button {
 }
 
 .brand-logo-sheet-back {
-  fill: #e9dfcc;
-  stroke: rgba(95, 98, 88, .38);
+  fill: #e5eef8;
+  stroke: rgba(16, 32, 51, .18);
   stroke-width: 1.6;
 }
 
@@ -306,7 +303,7 @@ button {
 }
 
 .brand-logo-fold {
-  fill: #d8ccb8;
+  fill: #dbeafe;
   stroke: url("#mfk-earth");
   stroke-width: 2.8;
   stroke-linejoin: round;
@@ -335,17 +332,17 @@ button {
 .field-input {
   width: 100%;
   min-width: 0;
-  border: 1px solid rgba(244, 242, 234, .13);
-  border-radius: 18px 14px 20px 15px;
+  border: 1px solid rgba(16, 32, 51, .11);
+  border-radius: 16px;
   background: var(--paper);
   padding: 13px 14px;
   color: var(--ink);
   outline: none;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .75);
 }
 
 .field-input:focus {
-  border-color: rgba(244, 242, 234, .36);
+  border-color: rgba(29, 78, 216, .3);
 }
 
 .primary-button,
@@ -366,37 +363,17 @@ button {
 
 .primary-button {
   border: 1px solid var(--ink);
-  background: linear-gradient(135deg, #f7f5ee, #b9b7ae);
-  color: #080909;
-  box-shadow: 0 16px 34px rgba(0, 0, 0, .34);
+  background: linear-gradient(135deg, #102033, #1d4ed8);
+  color: #fff;
+  box-shadow: 0 16px 34px rgba(29, 78, 216, .2);
 }
 
 .secondary-button,
 .nav-action,
 .side-link {
-  border: 1px solid rgba(244, 242, 234, .13);
-  background: rgba(244, 242, 234, .08);
+  border: 1px solid rgba(16, 32, 51, .1);
+  background: rgba(255, 255, 255, .76);
   color: var(--ink);
-}
-
-.text-neutral-400 {
-  color: #9b9991 !important;
-}
-
-.text-neutral-500 {
-  color: #a9a69d !important;
-}
-
-.text-neutral-600 {
-  color: #c5c2b8 !important;
-}
-
-.text-neutral-700 {
-  color: #dfdcd2 !important;
-}
-
-.placeholder\:text-neutral-400::placeholder {
-  color: #9b9991 !important;
 }
 
 .side-link {

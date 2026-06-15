@@ -4,7 +4,7 @@ MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, si
 
 ## Version
 
-Current app version: `2.0.6`
+Current app version: `2.0.7`
 
 Use the version scripts for future changes:
 
@@ -34,7 +34,7 @@ Only working tools are shown in the dashboard. Planned tools stay out of the pro
 - Category pages for PDF, image, business, signature, text/data, and developer tools.
 - Tool pages include Back, Forward, Dashboard, category navigation, and related tools.
 - Custom professional logo in the React shell and favicon.
-- Wabi-sabi visual system with charcoal surfaces, ethereal grey shadow texture, soft grain, calm contrast, and intentionally imperfect card edges.
+- Modern SaaS utility visual system with a light background, deep navy text, blue/green accents, rounded cards, minimal shadows, and a subtle warm texture.
 
 ## Privacy Model
 
