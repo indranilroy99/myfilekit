@@ -45,6 +45,8 @@ Screenshots will be added after the interface stabilizes.
 - `pdf-lib` via CDN for browser-side PDF merge and split
 - Node.js scripts for local setup checks and a lightweight development server
 
+React, shadcn/ui, Tailwind, and TypeScript are not part of the production app yet. A reference shader component and integration notes are available in `examples/react-shadcn/` and `docs/react-shadcn-setup.md`.
+
 ## Project Structure
 
 ```text
@@ -56,6 +58,10 @@ Screenshots will be added after the interface stabilizes.
 │   │   ├── app.js
 │   │   └── tools-registry.js
 │   └── myfilekit-logo.svg
+├── docs/
+│   └── react-shadcn-setup.md
+├── examples/
+│   └── react-shadcn/
 ├── invoice-generator/
 │   └── index.html
 ├── scripts/
@@ -201,4 +207,3 @@ If PDF tools say the engine is still loading:
 - Add signature drawing and signature-to-PDF workflows.
 - Add quote, receipt, and estimate generators.
 - Evaluate backend support for Office conversion, OCR, PDF repair, redaction, and AI-assisted tools.
-

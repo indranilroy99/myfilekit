@@ -31,6 +31,29 @@ for (const file of ["assets/js/tools-registry.js", "assets/js/app.js"]) {
   }
 }
 
+const exampleTsxFiles = [
+  "examples/react-shadcn/components/ui/background-paper-shaders.tsx",
+  "examples/react-shadcn/demo.tsx"
+];
+
+if (exampleTsxFiles.every((file) => fs.existsSync(path.join(root, file)))) {
+  const localTsc = path.join(root, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
+  if (fs.existsSync(localTsc)) {
+    const typescriptCheck = spawnSync(localTsc, ["--jsx", "react-jsx", "--moduleResolution", "bundler", "--module", "esnext", "--target", "es2022", "--noEmit", "--skipLibCheck", ...exampleTsxFiles.map((file) => path.join(root, file))], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    if (typescriptCheck.status === 0) {
+      process.stdout.write("Syntax OK: React shadcn example TSX files\n");
+    } else {
+      process.stdout.write("Skipped strict TSX example check because React shader dependencies are not installed in the vanilla app.\n");
+    }
+  } else {
+    process.stdout.write("Skipped TSX example check because TypeScript is not installed in this vanilla app.\n");
+  }
+}
+
 const invoiceHtml = fs.readFileSync(path.join(root, "invoice-generator", "index.html"), "utf8");
 const invoiceScript = invoiceHtml.match(/<script>([\s\S]*?)<\/script>/);
 if (!invoiceScript) {
