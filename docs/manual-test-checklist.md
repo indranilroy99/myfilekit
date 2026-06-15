@@ -12,7 +12,7 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 ## Dashboard
 
 - Confirm the professional MyFileKit logo renders in the header and hero.
-- Confirm the version label shows `v2.0.8`.
+- Confirm the header uses user-facing product copy and does not show release/version labels.
 - Confirm the dashboard uses the modern SaaS utility theme: light background, deep navy text, blue/green accents, rounded cards, minimal shadows, and subtle warm texture.
 - Confirm the main dashboard search is centered inside the hero and the product-quality cards appear below the tool library.
 - Confirm Popular Tools appears above the full category library.

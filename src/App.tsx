@@ -54,12 +54,12 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
 };
 
 const featureHighlights = [
-  ["Local-first processing", "Supported tools run in your browser without a server upload path."],
+  ["Local-first processing", "Supported tools run in your browser without unnecessary uploads."],
   ["Search-first workspace", "Find PDF, image, business, signature, and data tools by name or task."],
   ["Essential tools in one place", "Keep common file work close without installing separate utilities."],
   ["Built for everyday files", "Clean controls, clear status messages, and practical export actions."],
-  ["Easy to run locally", "The project runs with standard npm commands on major desktop platforms."],
-  ["No fake tools", "Visible tool cards open working routes, not placeholder pages."],
+  ["Works on your computer", "Use the toolkit in a modern browser on macOS, Windows, and Linux."],
+  ["Working tools only", "Every visible card opens a real tool, so the dashboard stays clear and useful."],
 ];
 
 const popularToolIds = [
@@ -114,7 +114,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             <AnimatedLogo compact />
             <span className="leading-tight">
               <span className="block font-display text-xl font-black">MyFileKit</span>
-              <span className="block text-xs font-bold uppercase text-neutral-500">v{__APP_VERSION__}</span>
+              <span className="block text-xs font-bold uppercase text-neutral-500">Local-first tools</span>
             </span>
           </a>
           <nav className="hidden items-center gap-2 lg:flex" aria-label="Primary navigation">
@@ -199,13 +199,15 @@ function Dashboard() {
             <div className="grid justify-items-center gap-4 sm:flex sm:items-center">
               <AnimatedLogo />
               <div>
-                <p className="app-badge mx-auto w-fit text-xs font-black uppercase sm:mx-0">Local-first toolkit</p>
-                <p className="font-display text-4xl font-black md:text-5xl">MyFileKit</p>
+                <p className="app-badge mx-auto w-fit text-xs font-black uppercase sm:mx-0">Local-first file toolkit</p>
+                <h1 className="font-display text-5xl font-black md:text-7xl">MyFileKit</h1>
               </div>
             </div>
-            <h1 className="font-display max-w-4xl text-5xl font-black leading-tight md:text-7xl">Your local-first file toolkit</h1>
             <p className="max-w-3xl text-xl font-semibold leading-snug text-neutral-700 md:text-2xl">
               PDF, image, business, signature, and data tools — fast, private, and ready when you are.
+            </p>
+            <p className="max-w-2xl text-sm font-bold text-neutral-500">
+              Supported tools process files locally in your browser. No unnecessary uploads.
             </p>
             <div className="spotlight-search surface-card wabi-card-edge flex w-full max-w-3xl items-center gap-3 p-3 text-left">
               <span className="icon-tile grid h-11 w-11 place-items-center rounded-2xl">
@@ -233,7 +235,7 @@ function Dashboard() {
               ))}
             </div>
             <p className="text-sm font-bold text-neutral-500">
-              {query ? `${matches.length} matching tool${matches.length === 1 ? "" : "s"}` : `${tools.length} tools across ${categories.length} categories`} · Files stay on your device for supported tools.
+              {query ? `${matches.length} matching tool${matches.length === 1 ? "" : "s"}` : `${tools.length} tools across ${categories.length} categories`}
             </p>
           </div>
         </div>
@@ -436,7 +438,7 @@ function Toolbar({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <p className="text-xs font-black uppercase text-neutral-500">MyFileKit v{__APP_VERSION__}</p>
+        <p className="text-xs font-black uppercase text-neutral-500">MyFileKit</p>
         <p className="font-display text-2xl font-black">{title}</p>
         <p className="text-sm font-semibold text-neutral-500">{subtitle}</p>
       </div>

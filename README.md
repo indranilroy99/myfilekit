@@ -1,6 +1,6 @@
 # MyFileKit
 
-MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, signature, text, data, and developer utilities. Version 2 moves the product to a React, TypeScript, Tailwind, and Vite foundation while keeping local file processing at the center.
+MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, signature, text, data, and developer utilities. It brings everyday file workflows into one clean dashboard with fast search and local processing wherever possible.
 
 ## Version
 
