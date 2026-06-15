@@ -8,13 +8,17 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const requiredFiles = [
   "index.html",
-  "assets/css/app.css",
-  "assets/myfilekit-logo.svg",
-  "assets/vendor/pdf-lib.min.js",
-  "src/main.js",
+  "vite.config.ts",
+  "tsconfig.json",
+  "src/main.tsx",
+  "src/App.tsx",
+  "src/styles.css",
+  "src/components/AnimatedLogo.tsx",
+  "src/lib/routing.ts",
   "src/router.js",
   "src/registry/tools.registry.js",
-  "src/tools/tool-implementations.js",
+  "assets/myfilekit-logo.svg",
+  "assets/vendor/pdf-lib.min.js",
   "invoice-generator/index.html",
   "README.md",
   "SECURITY.md",
@@ -30,8 +34,7 @@ for (const file of requiredFiles) {
   if (!exists) failed = true;
 }
 
-const jsFiles = walk(path.join(root, "src")).filter((file) => file.endsWith(".js"));
-for (const file of [...jsFiles, path.join(root, "scripts", "setup.js"), path.join(root, "scripts", "serve.js"), path.join(root, "scripts", "security-audit.js")]) {
+for (const file of [...walk(path.join(root, "src")).filter((item) => item.endsWith(".js")), path.join(root, "scripts", "setup.js"), path.join(root, "scripts", "security-audit.js"), path.join(root, "scripts", "bump-version.js")]) {
   const result = spawnSync(process.execPath, ["--check", file], { encoding: "utf8" });
   if (result.status !== 0) {
     failed = true;
@@ -39,6 +42,22 @@ for (const file of [...jsFiles, path.join(root, "scripts", "setup.js"), path.joi
   } else {
     process.stdout.write(`Syntax OK: ${path.relative(root, file)}\n`);
   }
+}
+
+const typecheck = spawnSync(commandPath("tsc"), ["--noEmit"], { cwd: root, encoding: "utf8" });
+if (typecheck.status !== 0) {
+  failed = true;
+  process.stderr.write(typecheck.stderr || typecheck.stdout);
+} else {
+  process.stdout.write("TypeScript OK\n");
+}
+
+const build = spawnSync(commandPath("vite"), ["build"], { cwd: root, encoding: "utf8" });
+if (build.status !== 0) {
+  failed = true;
+  process.stderr.write(build.stderr || build.stdout);
+} else {
+  process.stdout.write("Vite build OK\n");
 }
 
 const invoiceHtml = fs.readFileSync(path.join(root, "invoice-generator", "index.html"), "utf8");
@@ -60,6 +79,10 @@ const dashboardHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
 if (/unpkg|cdn\.|https:\/\/|coming soon|ai-assisted|ai tools/i.test(dashboardHtml)) {
   failed = true;
   process.stderr.write("Dashboard HTML contains remote, coming-soon, or AI wording that should not be visible.\n");
+}
+
+function commandPath(command) {
+  return path.join(root, "node_modules", ".bin", process.platform === "win32" ? `${command}.cmd` : command);
 }
 
 function walk(directory) {

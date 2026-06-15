@@ -1,8 +1,20 @@
 # MyFileKit
 
-MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, signature, text, data, and developer utilities. It combines practical file tools into one clean dashboard with fast search and local file processing wherever possible.
+MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, signature, text, data, and developer utilities. Version 2 moves the product to a React, TypeScript, Tailwind, and Vite foundation while keeping local file processing at the center.
 
-The app is intentionally simple to run and host: vanilla HTML, CSS, and JavaScript with no frontend framework, no build step, no backend, no database, and no account system.
+## Version
+
+Current app version: `2.0.0`
+
+Use the version scripts for future changes:
+
+```bash
+npm run version:patch
+npm run version:minor
+npm run version:major
+```
+
+Use patch versions such as `2.0.1` and `2.0.2` for small fixes. Use a major version such as `3.0.0` for a major product upgrade.
 
 ## Working Tools
 
@@ -13,28 +25,35 @@ The app is intentionally simple to run and host: vanilla HTML, CSS, and JavaScri
 - Text & Data: Text to PDF, Markdown Preview, JSON Formatter, CSV to JSON, JSON to CSV.
 - Developer Utilities: Base64 Encode / Decode, File Hash Generator.
 
-Only working tools are shown on the dashboard. Planned tools should stay out of the product UI until they have a real implementation.
+Only working tools are shown in the dashboard. Planned tools stay out of the product UI until they have real implementations.
+
+## UX
+
+- Dashboard-first product layout.
+- Spotlight-style search.
+- Category pages for PDF, image, business, signature, text/data, and developer tools.
+- Tool pages include Back, Forward, Dashboard, category navigation, and related tools.
+- Animated professional logo in the React shell.
 
 ## Privacy Model
 
 Supported tools run in the browser using local files selected by the user. MyFileKit does not include a server upload path, tracking code, authentication flow, or remote file storage.
 
-Some browser capabilities vary by browser and operating system. Use the local dev server for the most reliable behavior with JavaScript modules and vendored assets.
-
 ## Tech Stack
 
-- HTML
-- CSS
-- JavaScript modules
+- React
+- TypeScript
+- Tailwind CSS
+- Vite
+- lucide-react
 - Local vendored `pdf-lib` for browser-side PDF operations
-- Node.js scripts for setup, checks, tests, and a lightweight static dev server
+- Node.js tests and release checks
 
 ## Project Structure
 
 ```text
 .
 ├── assets/
-│   ├── css/app.css
 │   ├── myfilekit-logo.svg
 │   └── vendor/pdf-lib.min.js
 ├── docs/
@@ -44,22 +63,23 @@ Some browser capabilities vary by browser and operating system. Use the local de
 │   └── index.html
 ├── scripts/
 │   ├── build-check.js
+│   ├── bump-version.js
 │   ├── security-audit.js
-│   ├── serve.js
 │   └── setup.js
 ├── src/
 │   ├── components/
+│   ├── lib/
 │   ├── registry/
 │   ├── services/
-│   ├── tools/
 │   ├── utils/
-│   ├── main.js
-│   └── router.js
+│   ├── App.tsx
+│   ├── main.tsx
+│   └── styles.css
 ├── tests/
 ├── index.html
 ├── package.json
-├── setup.ps1
-└── setup.sh
+├── tsconfig.json
+└── vite.config.ts
 ```
 
 ## Run Locally
@@ -71,17 +91,18 @@ git clone https://github.com/indranilroy99/myfilekit.git
 cd myfilekit
 ```
 
-Node.js 18 or later is recommended.
+Node.js 18 or later is required.
 
 ### macOS
 
 ```bash
 chmod +x setup.sh
 ./setup.sh
+npm install
 npm run dev
 ```
 
-Open `http://localhost:4173`, or the next local URL printed by the dev server if that port is already busy.
+Open the local URL printed by Vite, usually `http://localhost:4173`.
 
 ### Windows
 
@@ -89,38 +110,42 @@ From PowerShell:
 
 ```powershell
 .\setup.ps1
+npm install
 npm run dev
 ```
 
-Open `http://localhost:4173`, or the next local URL printed by the dev server if that port is already busy.
+Open the local URL printed by Vite, usually `http://localhost:4173`.
 
 ### Linux
 
 ```bash
 chmod +x setup.sh
 ./setup.sh
+npm install
 npm run dev
 ```
 
-Open `http://localhost:4173`, or the next local URL printed by the dev server if that port is already busy.
+Open the local URL printed by Vite, usually `http://localhost:4173`.
 
 ## npm Scripts
 
 ```bash
 npm run setup
 npm run dev
+npm run build
 npm run check
 npm run test
 npm run security:audit
 npm run preflight
 ```
 
-- `setup` checks the operating system, Node.js version, npm availability, and important project files.
-- `dev` starts a local static server on port `4173`, falling forward to the next available port when needed.
-- `check` validates required files and JavaScript syntax.
-- `test` runs Node.js unit tests for the registry and core helpers.
-- `security:audit` checks the local security baseline and vendored assets.
-- `preflight` runs the full local verification set.
+- `setup` checks OS, Node.js, npm, installed dependencies, and important files.
+- `dev` starts the Vite development server.
+- `build` creates a production Vite build.
+- `check` validates required files, JavaScript syntax, TypeScript, Vite build, and invoice inline script syntax.
+- `test` runs Node.js tests for registry, routing helpers, CSV/JSON helpers, filename helpers, file validation, and PDF services.
+- `security:audit` validates local security assumptions and runs `npm audit`.
+- `preflight` runs the release gate.
 
 ## Dashboard Search
 
@@ -145,6 +170,6 @@ Try:
 - Keep each visible dashboard card connected to a working route.
 - Do not show unfinished tools as selectable dashboard cards.
 - Keep file processing local whenever practical.
-- Prefer small service modules over repeated logic in tool UI code.
+- Prefer focused service modules for reusable file logic.
 - Keep copy precise and avoid claims that are not implemented.
 - Run `npm run preflight` before pushing.

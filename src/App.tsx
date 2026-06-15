@@ -1,0 +1,723 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  BadgeCheck,
+  ChevronRight,
+  Download,
+  FileArchive,
+  FileText,
+  GalleryHorizontalEnd,
+  Hash,
+  Image,
+  LayoutDashboard,
+  PenLine,
+  ReceiptText,
+  RotateCw,
+  Scissors,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  Upload,
+} from "lucide-react";
+import { AnimatedLogo } from "./components/AnimatedLogo";
+import { categories, tools } from "./registry/tools.registry.js";
+import { categoryRoute, routeForHash } from "./lib/routing";
+import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "./utils/format.js";
+import { safeFilename, withExtension } from "./utils/safe-filename.js";
+import { validateFiles } from "./services/file-validator.js";
+import { downloadBlob, downloadBytes, downloadText } from "./services/download.service.js";
+import { csvToJson, jsonToCsv } from "./services/csv.service.js";
+import { compressImage, cropImage, exportCanvas, imageToCanvas, resizeImage, rotateFlipImage } from "./services/image.service.js";
+import { deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf } from "./services/pdf.service.js";
+
+type Tool = (typeof tools)[number];
+type Status = { tone: "idle" | "success" | "error"; message: string };
+
+const initialStatus: Status = { tone: "idle", message: "Ready." };
+const categoryIcons: Record<string, any> = {
+  "PDF Tools": FileText,
+  "Image Tools": Image,
+  "Business Tools": ReceiptText,
+  "Signature Tools": PenLine,
+  "Text & Data Tools": FileArchive,
+  "Developer Utilities": Hash,
+};
+
+const featureHighlights = [
+  ["Versioned releases", "v2.0.0 starts the React era. Patch, minor, and major bumps are scripted for clean release discipline."],
+  ["Search-first workspace", "The dashboard behaves like a command center, with category-aware search and fast routes."],
+  ["Local processing", "Supported tools run in the browser without a server upload path."],
+  ["Tool navigation", "Tool pages include back, forward, dashboard, and category navigation."],
+];
+
+export default function App() {
+  const [hash, setHash] = useState(window.location.hash || "#dashboard");
+
+  useEffect(() => {
+    const syncHash = () => setHash(window.location.hash || "#dashboard");
+    window.addEventListener("hashchange", syncHash);
+    return () => window.removeEventListener("hashchange", syncHash);
+  }, []);
+
+  const route = routeForHash(hash);
+
+  return (
+    <div className="min-h-screen bg-[var(--app-bg)] text-[var(--ink)]">
+      <Shell>
+        {route.type === "dashboard" && <Dashboard />}
+        {route.type === "category" && <CategoryPage category={route.category} />}
+        {route.type === "tool" && <ToolPage tool={route.tool} />}
+        {route.type === "missing" && <MissingPage />}
+      </Shell>
+    </div>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <header className="sticky top-0 z-30 border-b border-black/10 bg-[rgba(250,249,245,.86)] backdrop-blur-xl">
+        <div className="mx-auto flex w-[min(1240px,calc(100vw-28px))] items-center justify-between gap-4 py-4">
+          <a href="#dashboard" className="flex items-center gap-3 text-[var(--ink)] no-underline">
+            <AnimatedLogo compact />
+            <span className="leading-tight">
+              <span className="block font-display text-xl font-black">MyFileKit</span>
+              <span className="block text-xs font-bold uppercase text-neutral-500">v{__APP_VERSION__}</span>
+            </span>
+          </a>
+          <nav className="hidden items-center gap-2 lg:flex" aria-label="Primary navigation">
+            <NavPill href="#dashboard" icon={LayoutDashboard} label="Dashboard" />
+            {categories.slice(0, 4).map((category) => (
+              <NavPill key={category} href={categoryRoute(category)} icon={categoryIcons[category]} label={category.replace(" Tools", "")} />
+            ))}
+          </nav>
+          <a className="rounded-full bg-neutral-950 px-4 py-2 text-sm font-black text-white shadow-xl shadow-black/10" href="#category-pdf-tools">
+            Browse tools
+          </a>
+        </div>
+      </header>
+      <main id="app-main" className="mx-auto w-[min(1240px,calc(100vw-28px))] pb-16 pt-7">
+        {children}
+      </main>
+    </>
+  );
+}
+
+function NavPill({ href, icon: Icon, label }: { href: string; icon: any; label: string }) {
+  return (
+    <a className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3.5 py-2 text-sm font-extrabold text-[var(--ink)] no-underline shadow-sm transition hover:-translate-y-0.5 hover:border-black/20 hover:bg-white" href={href}>
+      <Icon size={16} />
+      {label}
+    </a>
+  );
+}
+
+function Dashboard() {
+  const [query, setQuery] = useState("");
+  const matches = useMemo(() => filterTools(query), [query]);
+  const grouped = query
+    ? [["Search results", matches] as const]
+    : categories.map((category) => [category, tools.filter((tool: Tool) => tool.category === category)] as const);
+
+  return (
+    <div className="grid gap-8">
+      <section className="hero-panel overflow-hidden rounded-[2rem] border border-black/10 bg-white shadow-2xl shadow-black/[.07]">
+        <div className="relative grid gap-8 px-6 py-9 md:px-10 lg:grid-cols-[1.1fr_.9fr] lg:items-end lg:px-12 lg:py-12">
+          <div className="grid gap-6">
+            <div className="flex items-center gap-4">
+              <AnimatedLogo />
+              <div>
+                <p className="text-xs font-black uppercase text-teal-700">Major v2 workspace</p>
+                <h1 className="font-display text-5xl font-black md:text-7xl">MyFileKit</h1>
+              </div>
+            </div>
+            <p className="max-w-3xl text-xl font-semibold leading-snug text-neutral-700 md:text-2xl">
+              A professional React file toolkit for PDF, image, business, signature, text, data, and developer workflows.
+            </p>
+            <div className="spotlight-search flex items-center gap-3 rounded-3xl border border-black/10 bg-white/90 p-3 shadow-2xl shadow-black/10">
+              <span className="grid h-11 w-11 place-items-center rounded-2xl bg-neutral-950 text-white">
+                <Search size={21} />
+              </span>
+              <input
+                className="min-h-12 w-full bg-transparent text-lg font-semibold outline-none placeholder:text-neutral-400"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search PDF, image, invoice, signature, JSON tools..."
+                type="search"
+              />
+              <kbd className="hidden rounded-xl bg-neutral-100 px-2.5 py-1.5 text-xs font-black text-neutral-500 sm:block">⌘K</kbd>
+            </div>
+            <p className="text-sm font-bold text-neutral-500">
+              {query ? `${matches.length} matching tool${matches.length === 1 ? "" : "s"}` : `${tools.length} tools across ${categories.length} categories`} · local-first wherever possible
+            </p>
+          </div>
+          <div className="grid gap-3 rounded-3xl border border-black/10 bg-[#f3f0e8] p-4">
+            {featureHighlights.map(([title, copy]) => (
+              <div key={title} className="rounded-2xl border border-black/10 bg-white/80 p-4">
+                <p className="font-black">{title}</p>
+                <p className="mt-1 text-sm font-medium leading-6 text-neutral-600">{copy}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-6 rounded-[2rem] border border-black/10 bg-white p-5 shadow-xl shadow-black/[.05] md:p-7">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="font-display text-3xl font-black">Tool Library</h2>
+            <p className="mt-1 font-semibold text-neutral-500">Every visible card opens a working tool page.</p>
+          </div>
+          <span className="inline-flex items-center gap-2 rounded-full bg-teal-50 px-4 py-2 text-sm font-black text-teal-800">
+            <ShieldCheck size={16} />
+            Local-first
+          </span>
+        </div>
+        {matches.length === 0 ? (
+          <EmptyState query={query} />
+        ) : (
+          <div className="grid gap-8">
+            {grouped.filter(([, items]) => items.length).map(([category, items]) => (
+              <ToolSection key={category} title={category} tools={items} />
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ToolSection({ title, tools: sectionTools }: { title: string; tools: Tool[] }) {
+  const Icon = categoryIcons[title] || Sparkles;
+  return (
+    <section className="grid gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="flex items-center gap-2 font-display text-xl font-black">
+          <Icon size={20} />
+          {title}
+        </h3>
+        {categories.includes(title) && (
+          <a className="text-sm font-black text-teal-800 no-underline" href={categoryRoute(title)}>
+            View all <ChevronRight className="inline" size={15} />
+          </a>
+        )}
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {sectionTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} />)}
+      </div>
+    </section>
+  );
+}
+
+function ToolCard({ tool }: { tool: Tool }) {
+  const Icon = iconForTool(tool);
+  return (
+    <a href={tool.route} className="group grid min-h-44 gap-4 rounded-3xl border border-black/10 bg-[#fffdf8] p-5 text-[var(--ink)] no-underline shadow-sm transition hover:-translate-y-1 hover:border-teal-700/30 hover:bg-white hover:shadow-2xl hover:shadow-black/[.08]">
+      <div className="flex items-start justify-between gap-3">
+        <span className="grid h-12 w-12 place-items-center rounded-2xl bg-neutral-950 text-white transition group-hover:rotate-3 group-hover:bg-teal-800">
+          <Icon size={21} />
+        </span>
+        <span className="rounded-full bg-neutral-950 px-3 py-1 text-[11px] font-black uppercase text-white">Available</span>
+      </div>
+      <div>
+        <h4 className="text-lg font-black">{tool.name}</h4>
+        <p className="mt-1 text-sm font-semibold leading-6 text-neutral-600">{tool.description}</p>
+      </div>
+      <div className="mt-auto flex flex-wrap gap-2">
+        {tool.badges.map((badge: string) => (
+          <span key={badge} className="rounded-full border border-black/10 bg-white px-2.5 py-1 text-[11px] font-black uppercase text-neutral-600">{badge}</span>
+        ))}
+      </div>
+    </a>
+  );
+}
+
+function CategoryPage({ category }: { category: string }) {
+  const categoryTools = tools.filter((tool: Tool) => tool.category === category);
+  const Icon = categoryIcons[category] || Sparkles;
+  return (
+    <div className="grid gap-6">
+      <Toolbar title={category} subtitle={`${categoryTools.length} available workflows`} />
+      <section className="rounded-[2rem] border border-black/10 bg-white p-6 shadow-xl shadow-black/[.05]">
+        <div className="mb-6 flex items-center gap-3">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-neutral-950 text-white"><Icon size={24} /></span>
+          <div>
+            <h1 className="font-display text-4xl font-black">{category}</h1>
+            <p className="font-semibold text-neutral-500">Choose any tool below. Nothing here is a placeholder.</p>
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {categoryTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} />)}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ToolPage({ tool }: { tool: Tool }) {
+  const related = tools.filter((item: Tool) => item.category === tool.category && item.id !== tool.id);
+  const Icon = iconForTool(tool);
+  return (
+    <div className="grid gap-6">
+      <Toolbar title={tool.name} subtitle={tool.category} />
+      <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_330px]">
+        <div className="rounded-[2rem] border border-black/10 bg-white p-5 shadow-xl shadow-black/[.05] md:p-7">
+          <div className="mb-6 flex items-start gap-4">
+            <span className="grid h-14 w-14 place-items-center rounded-2xl bg-neutral-950 text-white"><Icon size={24} /></span>
+            <div>
+              <p className="text-xs font-black uppercase text-teal-700">{tool.category}</p>
+              <h1 className="font-display text-4xl font-black">{tool.name}</h1>
+              <p className="mt-2 max-w-2xl font-semibold leading-7 text-neutral-600">{tool.description}</p>
+            </div>
+          </div>
+          <ToolRenderer tool={tool} />
+        </div>
+        <aside className="grid content-start gap-4">
+          <div className="rounded-3xl border border-black/10 bg-[#f3f0e8] p-5">
+            <p className="flex items-center gap-2 font-black"><BadgeCheck size={18} /> Navigation</p>
+            <div className="mt-4 grid gap-2">
+              <a className="side-link" href="#dashboard">Dashboard</a>
+              <a className="side-link" href={categoryRoute(tool.category)}>All {tool.category}</a>
+              <button className="side-link text-left" type="button" onClick={() => history.back()}>Back to previous page</button>
+              <button className="side-link text-left" type="button" onClick={() => history.forward()}>Forward</button>
+            </div>
+          </div>
+          {related.length > 0 && (
+            <div className="rounded-3xl border border-black/10 bg-white p-5">
+              <p className="font-black">More in {tool.category}</p>
+              <div className="mt-3 grid gap-2">
+                {related.map((item: Tool) => <a key={item.id} className="side-link" href={item.route}>{item.name}</a>)}
+              </div>
+            </div>
+          )}
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function Toolbar({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <p className="text-xs font-black uppercase text-neutral-500">MyFileKit v{__APP_VERSION__}</p>
+        <p className="font-display text-2xl font-black">{title}</p>
+        <p className="text-sm font-semibold text-neutral-500">{subtitle}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button className="nav-action" type="button" onClick={() => history.back()}><ArrowLeft size={16} /> Back</button>
+        <button className="nav-action" type="button" onClick={() => history.forward()}>Forward <ArrowRight size={16} /></button>
+        <a className="nav-action" href="#dashboard"><LayoutDashboard size={16} /> Dashboard</a>
+      </div>
+    </div>
+  );
+}
+
+function ToolRenderer({ tool }: { tool: Tool }) {
+  if (tool.id === "invoice-generator-tool") return <InvoiceLauncher />;
+  if (tool.id === "merge-pdf-tool") return <PdfFileTool tool={tool} action="Merge PDFs" multiple run={(files) => mergePdfs(files).then((bytes) => downloadBytes(bytes, "myfilekit-merged.pdf", "application/pdf"))} />;
+  if (tool.id === "split-pdf-tool") return <PageRangeTool tool={tool} action="Extract pages" suffix="extracted" run={extractPdfPages} />;
+  if (tool.id === "delete-pdf-pages-tool") return <PageRangeTool tool={tool} action="Delete pages" suffix="pages-deleted" run={deletePdfPages} />;
+  if (tool.id === "rotate-pdf-tool") return <RotatePdfTool tool={tool} />;
+  if (tool.id === "images-to-pdf-tool") return <PdfFileTool tool={tool} action="Create PDF" multiple accept="image/jpeg,image/png,image/webp" run={(files) => imagesToPdf(files).then((bytes) => downloadBytes(bytes, "myfilekit-images.pdf", "application/pdf"))} />;
+  if (["compress-image-tool", "convert-image-tool"].includes(tool.id)) return <ImageOutputTool tool={tool} mode={tool.id === "compress-image-tool" ? "compress" : "convert"} />;
+  if (tool.id === "resize-image-tool") return <ResizeImageTool tool={tool} />;
+  if (tool.id === "crop-image-tool") return <CropImageTool tool={tool} />;
+  if (tool.id === "rotate-flip-image-tool") return <RotateFlipImageTool tool={tool} />;
+  if (tool.id === "receipt-generator-tool") return <BusinessDocument title="Receipt Generator" name="receipt" labels={["Merchant", "Customer", "Payment method", "Reference"]} />;
+  if (tool.id === "quote-generator-tool") return <BusinessDocument title="Quote / Estimate Generator" name="quote" labels={["Business", "Client", "Valid until", "Terms"]} />;
+  if (tool.id === "draw-signature-tool") return <DrawSignatureTool />;
+  if (tool.id === "type-signature-tool") return <TypeSignatureTool />;
+  if (tool.id === "text-to-pdf-tool") return <TextToPdfTool />;
+  if (tool.id === "markdown-preview-tool") return <MarkdownTool />;
+  if (tool.id === "json-formatter-tool") return <JsonTool />;
+  if (tool.id === "csv-to-json-tool") return <CsvToJsonTool />;
+  if (tool.id === "json-to-csv-tool") return <JsonToCsvTool />;
+  if (tool.id === "base64-tool") return <Base64Tool />;
+  if (tool.id === "file-hash-tool") return <FileHashTool tool={tool} />;
+  return <StatusBox status={{ tone: "error", message: "This tool renderer is missing." }} />;
+}
+
+function PdfFileTool({ tool, action, run, multiple = false, accept = "application/pdf" }: { tool: Tool; action: string; run: (files: File[]) => Promise<void>; multiple?: boolean; accept?: string }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <FileControl accept={accept} multiple={multiple} files={files} setFiles={setFiles} />
+    <PrimaryButton label={action} onClick={() => runSafely(setStatus, async () => {
+      const valid = validateFiles(files, tool.file);
+      await run(valid);
+      return `Processed ${valid.length} file${valid.length === 1 ? "" : "s"}.`;
+    })} />
+  </ToolForm>;
+}
+
+function PageRangeTool({ tool, action, run, suffix }: { tool: Tool; action: string; suffix: string; run: (file: File, pages: number[]) => Promise<Uint8Array> }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [ranges, setRanges] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setRanges(""); setStatus(initialStatus); }}>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Input label="Pages" value={ranges} onChange={setRanges} placeholder="Example: 1-3,5,8" helper="Use comma-separated pages or ranges." />
+    <PrimaryButton label={action} onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const pdf = await loadPdf(file);
+      const pages = parsePageRanges(ranges, pdf.getPageCount());
+      const bytes = await run(file, pages);
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-${suffix}`, "pdf"), "application/pdf");
+      return `Processed ${pages.length} selected page${pages.length === 1 ? "" : "s"}.`;
+    })} />
+  </ToolForm>;
+}
+
+function RotatePdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [ranges, setRanges] = useState("");
+  const [degrees, setDegrees] = useState("90");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setRanges(""); setStatus(initialStatus); }}>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Input label="Pages" value={ranges} onChange={setRanges} placeholder="Leave blank for all pages" />
+    <Select label="Rotation" value={degrees} onChange={setDegrees} options={["90", "180", "270"]} />
+    <PrimaryButton label="Rotate PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const pdf = await loadPdf(file);
+      const pages = ranges.trim() ? parsePageRanges(ranges, pdf.getPageCount()) : pdf.getPageIndices();
+      downloadBytes(await rotatePdfPages(file, pages, Number(degrees)), withExtension(`${safeFilename(file.name)}-rotated`, "pdf"), "application/pdf");
+      return `Rotated ${pages.length} page${pages.length === 1 ? "" : "s"}.`;
+    })} />
+  </ToolForm>;
+}
+
+function ImageOutputTool({ tool, mode }: { tool: Tool; mode: "compress" | "convert" }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [format, setFormat] = useState("image/jpeg");
+  const [quality, setQuality] = useState("0.82");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
+    <Select label="Output format" value={format} onChange={setFormat} options={["image/jpeg", "image/png", "image/webp"]} labels={["JPEG", "PNG", "WebP"]} />
+    {mode === "compress" && <Range label="Quality" value={quality} onChange={setQuality} />}
+    <PrimaryButton label={mode === "compress" ? "Compress image" : "Convert image"} onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const blob = mode === "compress"
+        ? await compressImage(file, format, Number(quality))
+        : await exportCanvas(await imageToCanvas(file), format, 0.92);
+      downloadBlob(blob, withExtension(`${safeFilename(file.name)}-${mode}`, imageExt(format)));
+      return `Original: ${formatBytes(file.size)}\nOutput: ${formatBytes(blob.size)}`;
+    })} />
+  </ToolForm>;
+}
+
+function ResizeImageTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [width, setWidth] = useState("1200");
+  const [height, setHeight] = useState("800");
+  const [format, setFormat] = useState("image/jpeg");
+  const [preserve, setPreserve] = useState(true);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
+    <div className="grid gap-3 sm:grid-cols-2"><Input label="Width" value={width} onChange={setWidth} type="number" /><Input label="Height" value={height} onChange={setHeight} type="number" /></div>
+    <Checkbox label="Preserve aspect ratio" checked={preserve} onChange={setPreserve} />
+    <Select label="Output format" value={format} onChange={setFormat} options={["image/jpeg", "image/png", "image/webp"]} labels={["JPEG", "PNG", "WebP"]} />
+    <PrimaryButton label="Resize image" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const canvas = await resizeImage(file, Number(width), Number(height), preserve);
+      const blob = await exportCanvas(canvas, format, 0.88);
+      downloadBlob(blob, withExtension(`${safeFilename(file.name)}-resized`, imageExt(format)));
+      return `Output: ${canvas.width}×${canvas.height}, ${formatBytes(blob.size)}`;
+    })} />
+  </ToolForm>;
+}
+
+function CropImageTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [values, setValues] = useState({ x: "0", y: "0", width: "500", height: "500" });
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
+    <div className="grid gap-3 sm:grid-cols-4">{(["x", "y", "width", "height"] as const).map((key) => <Input key={key} label={key.toUpperCase()} value={values[key]} onChange={(value) => setValues({ ...values, [key]: value })} type="number" />)}</div>
+    <PrimaryButton label="Crop image" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const canvas = await cropImage(file, values.x, values.y, values.width, values.height);
+      const blob = await exportCanvas(canvas, "image/png");
+      downloadBlob(blob, withExtension(`${safeFilename(file.name)}-cropped`, "png"));
+      return `Cropped to ${canvas.width}×${canvas.height}.`;
+    })} />
+  </ToolForm>;
+}
+
+function RotateFlipImageTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [rotation, setRotation] = useState("90");
+  const [flipX, setFlipX] = useState(false);
+  const [flipY, setFlipY] = useState(false);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
+    <Select label="Rotation" value={rotation} onChange={setRotation} options={["90", "180", "270"]} />
+    <div className="grid gap-2 sm:grid-cols-2"><Checkbox label="Flip horizontal" checked={flipX} onChange={setFlipX} /><Checkbox label="Flip vertical" checked={flipY} onChange={setFlipY} /></div>
+    <PrimaryButton label="Export image" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const canvas = await rotateFlipImage(file, rotation, flipX, flipY);
+      const blob = await exportCanvas(canvas, "image/png");
+      downloadBlob(blob, withExtension(`${safeFilename(file.name)}-rotated`, "png"));
+      return `Output: ${canvas.width}×${canvas.height}.`;
+    })} />
+  </ToolForm>;
+}
+
+function BusinessDocument({ title, name, labels }: { title: string; name: string; labels: string[] }) {
+  const [fields, setFields] = useState(Object.fromEntries(labels.map((label) => [label, ""])));
+  const [items, setItems] = useState("Item, quantity, price\nConsulting, 1, 5000");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFields(Object.fromEntries(labels.map((label) => [label, ""]))); setItems(""); setStatus(initialStatus); }}>
+    <div className="grid gap-3 sm:grid-cols-2">{labels.map((label) => <Input key={label} label={label} value={fields[label]} onChange={(value) => setFields({ ...fields, [label]: value })} />)}</div>
+    <Textarea label="Items" value={items} onChange={setItems} />
+    <PrimaryButton label={`Export ${name}`} onClick={() => runSafely(setStatus, async () => {
+      downloadText(printableDocument(title, fields, items), name, "html", "text/html;charset=utf-8");
+      return `${title} exported as HTML. Open it and print to PDF if needed.`;
+    })} />
+  </ToolForm>;
+}
+
+function DrawSignatureTool() {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [color, setColor] = useState("#111111");
+  const [size, setSize] = useState("4");
+  const [status, setStatus] = useState(initialStatus);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    let drawing = false;
+    const draw = (event: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+      if (!drawing) {
+        drawing = true;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+      } else {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Number(size);
+        ctx.lineCap = "round";
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+    };
+    const stop = () => { drawing = false; };
+    canvas.addEventListener("pointerdown", draw);
+    canvas.addEventListener("pointermove", draw);
+    window.addEventListener("pointerup", stop);
+    return () => { canvas.removeEventListener("pointerdown", draw); canvas.removeEventListener("pointermove", draw); window.removeEventListener("pointerup", stop); };
+  }, [color, size]);
+
+  return <ToolForm status={status} onReset={() => { canvasRef.current?.getContext("2d")?.clearRect(0, 0, 900, 260); setStatus(initialStatus); }}>
+    <canvas ref={canvasRef} className="h-auto min-h-44 w-full rounded-3xl border border-dashed border-neutral-400 bg-white" width={900} height={260} />
+    <div className="grid gap-3 sm:grid-cols-2"><Input label="Color" value={color} onChange={setColor} type="color" /><Input label="Thickness" value={size} onChange={setSize} type="number" /></div>
+    <PrimaryButton label="Download PNG" onClick={() => canvasRef.current?.toBlob((blob) => { if (blob) downloadBlob(blob, "signature.png"); setStatus({ tone: "success", message: "Signature downloaded." }); })} />
+  </ToolForm>;
+}
+
+function TypeSignatureTool() {
+  const [name, setName] = useState("");
+  const [style, setStyle] = useState("cursive");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setName(""); setStatus(initialStatus); }}>
+    <Input label="Name" value={name} onChange={setName} placeholder="Type your name" />
+    <Select label="Style" value={style} onChange={setStyle} options={["cursive", "serif", "monospace"]} labels={["Cursive", "Serif", "Monospace"]} />
+    <PrimaryButton label="Download PNG" onClick={() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 900; canvas.height = 260;
+      const ctx = canvas.getContext("2d")!;
+      ctx.font = `72px ${style}`;
+      ctx.fillText(name || "Signature", 40, 145);
+      canvas.toBlob((blob) => { if (blob) downloadBlob(blob, "typed-signature.png"); setStatus({ tone: "success", message: "Signature downloaded." }); });
+    }} />
+  </ToolForm>;
+}
+
+function TextToPdfTool() {
+  const [text, setText] = useState("Paste text here...");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setText(""); setStatus(initialStatus); }}>
+    <Textarea label="Text" value={text} onChange={setText} rows={14} />
+    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => { downloadBytes(await textToPdf(text), "myfilekit-text.pdf", "application/pdf"); return "PDF downloaded."; })} />
+  </ToolForm>;
+}
+
+function MarkdownTool() {
+  const [markdown, setMarkdown] = useState("# Heading\n\n- Item");
+  const html = simpleMarkdownToHtml(markdown);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setMarkdown(""); setStatus(initialStatus); }}>
+    <Textarea label="Markdown" value={markdown} onChange={setMarkdown} rows={10} />
+    <div className="rounded-3xl border border-black/10 bg-white p-4" dangerouslySetInnerHTML={{ __html: html }} />
+    <PrimaryButton label="Download HTML" onClick={() => { downloadText(html, "markdown-preview", "html", "text/html;charset=utf-8"); setStatus({ tone: "success", message: "HTML downloaded." }); }} />
+  </ToolForm>;
+}
+
+function JsonTool() {
+  const [input, setInput] = useState('{"hello":"world"}');
+  const [output, setOutput] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  const transform = (spaces: number) => runSafely(setStatus, async () => { const next = JSON.stringify(JSON.parse(input), null, spaces); setOutput(next); return spaces ? "JSON formatted." : "JSON minified."; });
+  return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
+    <Textarea label="JSON input" value={input} onChange={setInput} rows={10} />
+    <Textarea label="Result" value={output} onChange={setOutput} rows={10} />
+    <div className="flex flex-wrap gap-2"><PrimaryButton label="Format" onClick={() => transform(2)} /><SecondaryButton label="Minify" onClick={() => transform(0)} /><SecondaryButton label="Download JSON" onClick={() => downloadText(output || input, "formatted", "json", "application/json;charset=utf-8")} /></div>
+  </ToolForm>;
+}
+
+function CsvToJsonTool() {
+  const [input, setInput] = useState("name,email\nIndranil,hello@example.com");
+  const [output, setOutput] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
+    <Textarea label="CSV input" value={input} onChange={setInput} rows={9} />
+    <Textarea label="JSON output" value={output} onChange={setOutput} rows={10} />
+    <PrimaryButton label="Convert" onClick={() => runSafely(setStatus, async () => { setOutput(JSON.stringify(csvToJson(input), null, 2)); return "CSV converted."; })} />
+  </ToolForm>;
+}
+
+function JsonToCsvTool() {
+  const [input, setInput] = useState('[{"name":"Indranil","email":"hello@example.com"}]');
+  const [output, setOutput] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
+    <Textarea label="JSON input" value={input} onChange={setInput} rows={9} />
+    <Textarea label="CSV output" value={output} onChange={setOutput} rows={10} />
+    <div className="flex flex-wrap gap-2"><PrimaryButton label="Convert" onClick={() => runSafely(setStatus, async () => { setOutput(jsonToCsv(input)); return "JSON converted."; })} /><SecondaryButton label="Download CSV" onClick={() => downloadText(output, "converted", "csv", "text/csv;charset=utf-8")} /></div>
+  </ToolForm>;
+}
+
+function Base64Tool() {
+  const [input, setInput] = useState("Hello MyFileKit");
+  const [output, setOutput] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
+    <Textarea label="Input" value={input} onChange={setInput} rows={7} />
+    <Textarea label="Output" value={output} onChange={setOutput} rows={7} />
+    <div className="flex flex-wrap gap-2"><PrimaryButton label="Encode" onClick={() => { setOutput(btoa(unescape(encodeURIComponent(input)))); setStatus({ tone: "success", message: "Encoded." }); }} /><SecondaryButton label="Decode" onClick={() => runSafely(setStatus, async () => { setOutput(decodeURIComponent(escape(atob(input)))); return "Decoded."; })} /></div>
+  </ToolForm>;
+}
+
+function FileHashTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [output, setOutput] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setOutput(""); setStatus(initialStatus); }}>
+    <FileControl accept="*/*" files={files} setFiles={setFiles} />
+    <Textarea label="SHA-256" value={output} onChange={setOutput} rows={3} />
+    <PrimaryButton label="Generate SHA-256" onClick={() => runSafely(setStatus, async () => { const [file] = validateFiles(files, tool.file); const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer()); setOutput([...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("")); return `Hashed ${file.name}.`; })} />
+  </ToolForm>;
+}
+
+function InvoiceLauncher() {
+  return <div className="grid gap-4 rounded-3xl border border-black/10 bg-[#fffdf8] p-5">
+    <p className="font-semibold leading-7 text-neutral-700">The invoice generator opens the full editor with templates, line items, tax, discount, TDS, payment details, logo controls, signatures, and print/PDF export.</p>
+    <a className="primary-button w-fit" href="/invoice-generator/index.html">Open Invoice Generator</a>
+  </div>;
+}
+
+function ToolForm({ children, status, onReset }: { children: React.ReactNode; status: Status; onReset: () => void }) {
+  return <div className="grid gap-4">
+    {children}
+    <div className="flex flex-wrap gap-2"><SecondaryButton label="Reset" onClick={onReset} /></div>
+    <StatusBox status={status} />
+  </div>;
+}
+
+function StatusBox({ status }: { status: Status }) {
+  return <p className={`min-h-12 whitespace-pre-line rounded-2xl border px-4 py-3 text-sm font-bold ${status.tone === "error" ? "border-red-200 bg-red-50 text-red-800" : status.tone === "success" ? "border-teal-200 bg-teal-50 text-teal-900" : "border-black/10 bg-neutral-50 text-neutral-600"}`}>{status.message}</p>;
+}
+
+function FileControl({ accept, multiple = false, files, setFiles }: { accept: string; multiple?: boolean; files: File[]; setFiles: (files: File[]) => void }) {
+  return <label className="grid cursor-pointer gap-3 rounded-3xl border border-dashed border-neutral-300 bg-[#fffdf8] p-5 transition hover:border-teal-700">
+    <span className="flex items-center gap-3 font-black"><Upload size={20} /> Choose file{multiple ? "s" : ""}</span>
+    <input className="sr-only" type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} />
+    <span className="text-sm font-semibold text-neutral-500">{files.length ? files.map((file) => file.name).join(", ") : "No file selected"}</span>
+  </label>;
+}
+
+function Input({ label, value, onChange, placeholder = "", helper = "", type = "text" }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; helper?: string; type?: string }) {
+  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}</span><input className="field-input" type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />{helper && <span className="text-xs font-semibold text-neutral-500">{helper}</span>}</label>;
+}
+
+function Textarea({ label, value, onChange, rows = 8 }: { label: string; value: string; onChange: (value: string) => void; rows?: number }) {
+  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}</span><textarea className="field-input resize-y leading-6" rows={rows} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+}
+
+function Select({ label, value, onChange, options, labels = options }: { label: string; value: string; onChange: (value: string) => void; options: string[]; labels?: string[] }) {
+  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}</span><select className="field-input" value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option, index) => <option key={option} value={option}>{labels[index]}</option>)}</select></label>;
+}
+
+function Range({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}: {value}</span><input type="range" min="0.25" max="0.95" step="0.05" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+}
+
+function Checkbox({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
+  return <label className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 font-bold"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />{label}</label>;
+}
+
+function PrimaryButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return <button className="primary-button" type="button" onClick={onClick}><Download size={17} />{label}</button>;
+}
+
+function SecondaryButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return <button className="secondary-button" type="button" onClick={onClick}>{label}</button>;
+}
+
+function EmptyState({ query }: { query: string }) {
+  return <div className="rounded-3xl border border-dashed border-neutral-300 bg-[#fffdf8] p-10 text-center"><p className="font-display text-2xl font-black">No matching tools</p><p className="mt-2 font-semibold text-neutral-500">Try a shorter search than “{query}”.</p></div>;
+}
+
+function MissingPage() {
+  return <div className="rounded-[2rem] border border-black/10 bg-white p-10 text-center"><h1 className="font-display text-4xl font-black">Page not found</h1><a className="primary-button mx-auto mt-5 w-fit" href="#dashboard">Return to dashboard</a></div>;
+}
+
+function filterTools(query: string) {
+  const parts = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return tools;
+  return tools.filter((tool: Tool) => parts.every((part) => [tool.name, tool.category, tool.description, ...(tool.keywords || []), ...(tool.badges || [])].join(" ").toLowerCase().includes(part)));
+}
+
+function iconForTool(tool: Tool) {
+  if (tool.category === "PDF Tools") return FileText;
+  if (tool.category === "Image Tools") return Image;
+  if (tool.category === "Business Tools") return ReceiptText;
+  if (tool.category === "Signature Tools") return PenLine;
+  if (tool.id.includes("rotate")) return RotateCw;
+  if (tool.id.includes("crop") || tool.id.includes("split")) return Scissors;
+  if (tool.id.includes("hash")) return Hash;
+  return Sparkles;
+}
+
+async function runSafely(setStatus: (status: Status) => void, task: () => Promise<string>) {
+  try {
+    setStatus({ tone: "idle", message: "Processing..." });
+    setStatus({ tone: "success", message: await task() });
+  } catch (error: any) {
+    setStatus({ tone: "error", message: error?.message || "Something went wrong." });
+  }
+}
+
+function imageExt(type: string) {
+  return type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
+}
+
+function printableDocument(title: string, details: Record<string, string>, itemText: string) {
+  const rows = String(itemText || "").split(/\r?\n/).filter(Boolean).map((row) => row.split(",").map((cell) => cell.trim()));
+  const detailsHtml = Object.entries(details).map(([key, value]) => `<p><strong>${escapeHtml(key)}:</strong> ${escapeHtml(value)}</p>`).join("");
+  const rowsHtml = rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:system-ui;margin:40px;color:#111}table{width:100%;border-collapse:collapse}td{border-bottom:1px solid #ddd;padding:10px}</style></head><body><h1>${escapeHtml(title)}</h1>${detailsHtml}<table>${rowsHtml}</table></body></html>`;
+}
+
+function escapeHtml(value: string) {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}

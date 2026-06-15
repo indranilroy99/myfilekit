@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -19,10 +20,12 @@ for (const asset of requiredLocalAssets) {
   if (!exists) failed = true;
 }
 
-if (dependencyCount === 0) {
-  process.stdout.write("npm audit skipped: this project has no npm dependencies.\n");
+const audit = spawnSync("npm", ["audit", "--audit-level=moderate"], { cwd: root, encoding: "utf8" });
+if (audit.status === 0) {
+  process.stdout.write("npm audit OK\n");
 } else {
-  process.stdout.write("Run npm audit before release because dependencies are present.\n");
+  failed = true;
+  process.stderr.write(audit.stdout || audit.stderr);
 }
 
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");

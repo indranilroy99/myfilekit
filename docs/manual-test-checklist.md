@@ -3,20 +3,30 @@
 Run the app with:
 
 ```bash
+npm install
 npm run dev
 ```
 
-Open `http://localhost:4173`, or the next local URL printed by the dev server if that port is already busy.
+Open the local URL printed by Vite, usually `http://localhost:4173`.
 
 ## Dashboard
 
+- Confirm the animated logo renders in the header and hero.
+- Confirm the version label shows `v2.0.0`.
 - Search `merge pdf` and confirm Merge PDF is shown.
 - Search `compress image` and confirm Compress Image is shown.
 - Search `invoice` and confirm Invoice Generator is shown.
 - Search `signature` and confirm signature tools are shown.
 - Search a nonsense query and confirm the empty state appears.
 - Click every visible card and confirm it opens a real tool route.
-- Use the header Dashboard link to return home.
+
+## Navigation
+
+- Click Dashboard and confirm it returns home.
+- Click PDF in the top navigation and confirm all PDF tools are listed.
+- Click Image in the top navigation and confirm all image tools are listed.
+- Open a tool and confirm Back, Forward, Dashboard, and category links are visible.
+- Use browser back and forward across two tool pages.
 
 ## PDF Tools
 
