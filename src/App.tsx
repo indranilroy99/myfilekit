@@ -529,31 +529,49 @@ function DrawSignatureTool() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     let drawing = false;
-    const draw = (event: PointerEvent) => {
+    const pointFromEvent = (event: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
-      const x = (event.clientX - rect.left) * (canvas.width / rect.width);
-      const y = (event.clientY - rect.top) * (canvas.height / rect.height);
-      if (!drawing) {
-        drawing = true;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-      } else {
-        ctx.strokeStyle = color;
-        ctx.lineWidth = Number(size);
-        ctx.lineCap = "round";
-        ctx.lineTo(x, y);
-        ctx.stroke();
-      }
+      return {
+        x: (event.clientX - rect.left) * (canvas.width / rect.width),
+        y: (event.clientY - rect.top) * (canvas.height / rect.height),
+      };
+    };
+    const start = (event: PointerEvent) => {
+      event.preventDefault();
+      drawing = true;
+      canvas.setPointerCapture?.(event.pointerId);
+      const { x, y } = pointFromEvent(event);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+    };
+    const draw = (event: PointerEvent) => {
+      if (!drawing) return;
+      event.preventDefault();
+      const { x, y } = pointFromEvent(event);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Number(size);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.lineTo(x, y);
+      ctx.stroke();
     };
     const stop = () => { drawing = false; };
-    canvas.addEventListener("pointerdown", draw);
+    canvas.addEventListener("pointerdown", start);
     canvas.addEventListener("pointermove", draw);
+    canvas.addEventListener("pointercancel", stop);
+    canvas.addEventListener("pointerleave", stop);
     window.addEventListener("pointerup", stop);
-    return () => { canvas.removeEventListener("pointerdown", draw); canvas.removeEventListener("pointermove", draw); window.removeEventListener("pointerup", stop); };
+    return () => {
+      canvas.removeEventListener("pointerdown", start);
+      canvas.removeEventListener("pointermove", draw);
+      canvas.removeEventListener("pointercancel", stop);
+      canvas.removeEventListener("pointerleave", stop);
+      window.removeEventListener("pointerup", stop);
+    };
   }, [color, size]);
 
   return <ToolForm status={status} onReset={() => { canvasRef.current?.getContext("2d")?.clearRect(0, 0, 900, 260); setStatus(initialStatus); }}>
-    <canvas ref={canvasRef} className="surface-card h-auto min-h-44 w-full rounded-3xl border-dashed border-neutral-400" width={900} height={260} />
+    <canvas ref={canvasRef} className="surface-card h-auto min-h-44 w-full touch-none rounded-3xl border-dashed border-neutral-400" width={900} height={260} />
     <div className="grid gap-3 sm:grid-cols-2"><Input label="Color" value={color} onChange={setColor} type="color" /><Input label="Thickness" value={size} onChange={setSize} type="number" /></div>
     <PrimaryButton label="Download PNG" onClick={() => canvasRef.current?.toBlob((blob) => { if (blob) downloadBlob(blob, "signature.png"); setStatus({ tone: "success", message: "Signature downloaded." }); })} />
   </ToolForm>;
