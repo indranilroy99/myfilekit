@@ -12,15 +12,20 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 ## Dashboard
 
 - Confirm the professional MyFileKit logo renders in the header and hero.
-- Confirm the version label shows `v2.0.7`.
+- Confirm the version label shows `v2.0.8`.
 - Confirm the dashboard uses the modern SaaS utility theme: light background, deep navy text, blue/green accents, rounded cards, minimal shadows, and subtle warm texture.
 - Confirm the main dashboard search is centered inside the hero and the product-quality cards appear below the tool library.
+- Confirm Popular Tools appears above the full category library.
+- Open one tool, return to the dashboard, and confirm Recently Used appears.
 - Search `merge pdf` and confirm Merge PDF is shown.
 - Search `compress image` and confirm Compress Image is shown.
 - Search `invoice` and confirm Invoice Generator is shown.
 - Search `signature` and confirm signature tools are shown.
+- Click a quick search chip and confirm it filters the dashboard.
+- Press `Cmd+K` on macOS or `Ctrl+K` on Windows/Linux and confirm the dashboard search receives focus.
+- Press `Escape` inside the dashboard search and confirm the query clears.
 - On desktop, open the header search dock, search `json`, press Enter, and confirm the dashboard filters to JSON tools.
-- Search a nonsense query and confirm the empty state appears.
+- Search a nonsense query and confirm the empty state appears with suggested searches.
 - Click every visible card and confirm it opens a real tool route.
 
 ## Navigation

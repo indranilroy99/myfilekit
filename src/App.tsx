@@ -44,12 +44,35 @@ const categoryIcons: Record<string, any> = {
   "Developer Utilities": Hash,
 };
 
+const categoryDetails: Record<string, { description: string; accent: string }> = {
+  "PDF Tools": { description: "Merge, split, rotate, and create PDFs in your browser.", accent: "PDF" },
+  "Image Tools": { description: "Compress, resize, convert, crop, and rotate everyday images.", accent: "Image" },
+  "Business Tools": { description: "Create clean invoices, receipts, quotes, and estimates.", accent: "Business" },
+  "Signature Tools": { description: "Draw or type signatures and export them as PNG files.", accent: "Signature" },
+  "Text & Data Tools": { description: "Format JSON, convert CSV, preview Markdown, and create PDFs from text.", accent: "Data" },
+  "Developer Utilities": { description: "Handle hashes, Base64, and small file checks without leaving the page.", accent: "Utility" },
+};
+
 const featureHighlights = [
-  ["Versioned releases", "v2 starts the React era. Patch, minor, and major bumps are scripted for clean release discipline."],
-  ["Search-first workspace", "The dashboard behaves like a command center, with category-aware search and fast routes."],
-  ["Local processing", "Supported tools run in the browser without a server upload path."],
-  ["Tool navigation", "Tool pages include back, forward, dashboard, and category navigation."],
+  ["Local-first processing", "Supported tools run in your browser without a server upload path."],
+  ["Search-first workspace", "Find PDF, image, business, signature, and data tools by name or task."],
+  ["Essential tools in one place", "Keep common file work close without installing separate utilities."],
+  ["Built for everyday files", "Clean controls, clear status messages, and practical export actions."],
+  ["Easy to run locally", "The project runs with standard npm commands on major desktop platforms."],
+  ["No fake tools", "Visible tool cards open working routes, not placeholder pages."],
 ];
+
+const popularToolIds = [
+  "merge-pdf-tool",
+  "compress-image-tool",
+  "resize-image-tool",
+  "invoice-generator-tool",
+  "json-formatter-tool",
+  "file-hash-tool",
+];
+
+const quickSearches = ["Merge PDF", "Compress Image", "Invoice", "Signature", "JSON", "File Hash"];
+const recentToolsStorageKey = "myfilekit:recentTools";
 
 export default function App() {
   const [hash, setHash] = useState(window.location.hash || "#dashboard");
@@ -127,8 +150,11 @@ function NavPill({ href, icon: Icon, label }: { href: string; icon: any; label: 
 }
 
 function Dashboard() {
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState(() => sessionStorage.getItem("myfilekit:lastSearch") || "");
+  const [recentTools, setRecentTools] = useState<Tool[]>(() => loadRecentTools());
   const matches = useMemo(() => filterTools(query), [query]);
+  const popularTools = useMemo(() => popularToolIds.map(findToolById).filter(Boolean) as Tool[], []);
   const grouped = query
     ? [["Search results", matches] as const]
     : categories.map((category) => [category, tools.filter((tool: Tool) => tool.category === category)] as const);
@@ -146,6 +172,25 @@ function Dashboard() {
     return () => window.removeEventListener("myfilekit:search", handleGlobalSearch);
   }, []);
 
+  useEffect(() => {
+    const handleRecentTools = () => setRecentTools(loadRecentTools());
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        window.location.hash = "#dashboard";
+        requestAnimationFrame(() => searchRef.current?.focus());
+      }
+    };
+    window.addEventListener("myfilekit:recent-tools", handleRecentTools);
+    window.addEventListener("storage", handleRecentTools);
+    window.addEventListener("keydown", handleShortcut);
+    return () => {
+      window.removeEventListener("myfilekit:recent-tools", handleRecentTools);
+      window.removeEventListener("storage", handleRecentTools);
+      window.removeEventListener("keydown", handleShortcut);
+    };
+  }, []);
+
   return (
     <div className="grid gap-8">
       <section className="hero-panel surface-panel wabi-edge overflow-hidden">
@@ -154,38 +199,69 @@ function Dashboard() {
             <div className="grid justify-items-center gap-4 sm:flex sm:items-center">
               <AnimatedLogo />
               <div>
-                <p className="moss-text text-xs font-black uppercase">Major v2 workspace</p>
-                <h1 className="font-display text-5xl font-black md:text-7xl">MyFileKit</h1>
+                <p className="app-badge mx-auto w-fit text-xs font-black uppercase sm:mx-0">Local-first toolkit</p>
+                <p className="font-display text-4xl font-black md:text-5xl">MyFileKit</p>
               </div>
             </div>
+            <h1 className="font-display max-w-4xl text-5xl font-black leading-tight md:text-7xl">Your local-first file toolkit</h1>
             <p className="max-w-3xl text-xl font-semibold leading-snug text-neutral-700 md:text-2xl">
-              A professional React file toolkit for PDF, image, business, signature, text, data, and developer workflows.
+              PDF, image, business, signature, and data tools — fast, private, and ready when you are.
             </p>
             <div className="spotlight-search surface-card wabi-card-edge flex w-full max-w-3xl items-center gap-3 p-3 text-left">
               <span className="icon-tile grid h-11 w-11 place-items-center rounded-2xl">
                 <Search size={21} />
               </span>
               <input
+                ref={searchRef}
+                aria-label="Search MyFileKit tools"
                 className="min-h-12 w-full bg-transparent text-lg font-semibold outline-none placeholder:text-neutral-400"
                 value={query}
                 onChange={(event) => updateQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") updateQuery("");
+                }}
                 placeholder="Search PDF, image, invoice, signature, JSON tools..."
                 type="search"
               />
-              <kbd className="hidden rounded-xl bg-[var(--paper-soft)] px-2.5 py-1.5 text-xs font-black text-[var(--stone)] sm:block">⌘K</kbd>
+              <kbd className="hidden rounded-xl bg-[var(--paper-soft)] px-2.5 py-1.5 text-xs font-black text-[var(--stone)] sm:block">⌘/Ctrl K</kbd>
+            </div>
+            <div className="flex max-w-3xl flex-wrap justify-center gap-2">
+              {quickSearches.map((term) => (
+                <button key={term} className="quick-chip" type="button" onClick={() => { updateQuery(term); searchRef.current?.focus(); }}>
+                  {term}
+                </button>
+              ))}
             </div>
             <p className="text-sm font-bold text-neutral-500">
-              {query ? `${matches.length} matching tool${matches.length === 1 ? "" : "s"}` : `${tools.length} tools across ${categories.length} categories`} · local-first wherever possible
+              {query ? `${matches.length} matching tool${matches.length === 1 ? "" : "s"}` : `${tools.length} tools across ${categories.length} categories`} · Files stay on your device for supported tools.
             </p>
           </div>
         </div>
       </section>
 
+      {!query && recentTools.length > 0 && (
+        <section className="surface-panel wabi-edge grid gap-5 p-5 md:p-7">
+          <SectionHeader title="Recently Used" subtitle="Quickly jump back into your last tools." />
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {recentTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
+          </div>
+        </section>
+      )}
+
+      {!query && (
+        <section className="surface-panel wabi-edge grid gap-5 p-5 md:p-7">
+          <SectionHeader title="Popular Tools" subtitle="The tools people usually reach for first." />
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {popularTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
+          </div>
+        </section>
+      )}
+
       <section className="surface-panel wabi-edge grid gap-6 p-5 md:p-7">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h2 className="font-display text-3xl font-black">Tool Library</h2>
-            <p className="mt-1 font-semibold text-neutral-500">Every visible card opens a working tool page.</p>
+            <h2 className="font-display text-3xl font-black">{query ? "Search Results" : "Tool Library"}</h2>
+            <p className="mt-1 font-semibold text-neutral-500">{query ? "Filtered by name, task, category, badge, and keyword." : "Every visible card opens a working tool page."}</p>
           </div>
           <span className="local-badge inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-black">
             <ShieldCheck size={16} />
@@ -197,7 +273,7 @@ function Dashboard() {
         ) : (
           <div className="grid gap-8">
             {grouped.filter(([, items]) => items.length).map(([category, items]) => (
-              <ToolSection key={category} title={category} tools={items} />
+              <ToolSection key={category} title={category} tools={items} searchMode={Boolean(query)} />
             ))}
           </div>
         )}
@@ -221,16 +297,29 @@ function Dashboard() {
   );
 }
 
-function ToolSection({ title, tools: sectionTools }: { title: string; tools: Tool[] }) {
-  const Icon = categoryIcons[title] || Sparkles;
+function SectionHeader({ title, subtitle }: { title: string; subtitle: string }) {
   return (
-    <section className="grid gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="flex items-center gap-2 font-display text-xl font-black">
-          <Icon size={20} />
-          {title}
-        </h3>
-        {categories.includes(title) && (
+    <div>
+      <h2 className="font-display text-3xl font-black">{title}</h2>
+      <p className="mt-1 font-semibold text-neutral-500">{subtitle}</p>
+    </div>
+  );
+}
+
+function ToolSection({ title, tools: sectionTools, searchMode = false }: { title: string; tools: Tool[]; searchMode?: boolean }) {
+  const Icon = categoryIcons[title] || Sparkles;
+  const details = categoryDetails[title];
+  return (
+    <section className="grid gap-4">
+      <div className="category-heading flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="category-icon"><Icon size={19} /></span>
+          <div>
+            <h3 className="font-display text-xl font-black">{title}</h3>
+            {details && <p className="mt-1 text-sm font-semibold text-neutral-500">{details.description}</p>}
+          </div>
+        </div>
+        {!searchMode && categories.includes(title) && (
           <a className="moss-text text-sm font-black no-underline" href={categoryRoute(title)}>
             View all <ChevronRight className="inline" size={15} />
           </a>
@@ -243,24 +332,24 @@ function ToolSection({ title, tools: sectionTools }: { title: string; tools: Too
   );
 }
 
-function ToolCard({ tool }: { tool: Tool }) {
+function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) {
   const Icon = iconForTool(tool);
   return (
-    <a href={tool.route} className="tool-card group grid min-h-44 gap-4 rounded-3xl p-5 text-[var(--ink)] no-underline transition hover:-translate-y-1">
+    <a href={tool.route} className={`tool-card group grid gap-4 rounded-3xl p-5 text-[var(--ink)] no-underline transition hover:-translate-y-1 focus-visible:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
       <div className="flex items-start justify-between gap-3">
         <span className="icon-tile grid h-12 w-12 place-items-center rounded-2xl transition group-hover:rotate-3">
           <Icon size={21} />
         </span>
-        <span className="available-badge rounded-full px-3 py-1 text-[11px] font-black uppercase">Available</span>
+        <span className="tool-arrow" aria-hidden="true">Open <ChevronRight size={15} /></span>
       </div>
       <div>
         <h4 className="text-lg font-black">{tool.name}</h4>
         <p className="mt-1 text-sm font-semibold leading-6 text-neutral-600">{tool.description}</p>
       </div>
       <div className="mt-auto flex flex-wrap gap-2">
-        {tool.badges.map((badge: string) => (
-          <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>
-        ))}
+        <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{categoryDetails[tool.category]?.accent || tool.category}</span>
+        {tool.localProcessing && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">Local</span>}
+        {fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
       </div>
     </a>
   );
@@ -269,15 +358,17 @@ function ToolCard({ tool }: { tool: Tool }) {
 function CategoryPage({ category }: { category: string }) {
   const categoryTools = tools.filter((tool: Tool) => tool.category === category);
   const Icon = categoryIcons[category] || Sparkles;
+  const details = categoryDetails[category];
   return (
     <div className="grid gap-6">
       <Toolbar title={category} subtitle={`${categoryTools.length} available workflows`} />
       <section className="surface-panel wabi-edge p-6">
-        <div className="mb-6 flex items-center gap-3">
+        <div className="mb-6 flex items-start gap-3">
           <span className="icon-tile grid h-14 w-14 place-items-center rounded-2xl"><Icon size={24} /></span>
           <div>
+            {details && <p className="moss-text text-xs font-black uppercase">{details.accent}</p>}
             <h1 className="font-display text-4xl font-black">{category}</h1>
-            <p className="font-semibold text-neutral-500">Choose any tool below. Nothing here is a placeholder.</p>
+            <p className="mt-1 max-w-2xl font-semibold text-neutral-500">{details?.description || "Choose any working tool below."}</p>
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -291,6 +382,10 @@ function CategoryPage({ category }: { category: string }) {
 function ToolPage({ tool }: { tool: Tool }) {
   const related = tools.filter((item: Tool) => item.category === tool.category && item.id !== tool.id);
   const Icon = iconForTool(tool);
+  useEffect(() => {
+    saveRecentTool(tool.id);
+  }, [tool.id]);
+
   return (
     <div className="grid gap-6">
       <Toolbar title={tool.name} subtitle={tool.category} />
@@ -299,21 +394,28 @@ function ToolPage({ tool }: { tool: Tool }) {
           <div className="mb-6 flex items-start gap-4">
             <span className="icon-tile grid h-14 w-14 place-items-center rounded-2xl"><Icon size={24} /></span>
             <div>
-              <p className="moss-text text-xs font-black uppercase">{tool.category}</p>
+              <p className="moss-text text-xs font-black uppercase">Dashboard / {tool.category}</p>
               <h1 className="font-display text-4xl font-black">{tool.name}</h1>
               <p className="mt-2 max-w-2xl font-semibold leading-7 text-neutral-600">{tool.description}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="local-badge rounded-full px-3 py-1 text-xs font-black uppercase">Local processing</span>
+                {fileTypeLabel(tool) && <span className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{fileTypeLabel(tool)}</span>}
+                <span className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{tool.category}</span>
+              </div>
+              <p className="mt-3 text-sm font-semibold text-neutral-500">For supported tools, selected files stay in your browser session.</p>
             </div>
           </div>
-          <ToolRenderer tool={tool} />
+          <div className="tool-action-panel">
+            <ToolRenderer tool={tool} />
+          </div>
         </div>
         <aside className="grid content-start gap-4">
           <div className="surface-muted wabi-card-edge p-5">
             <p className="flex items-center gap-2 font-black"><BadgeCheck size={18} /> Navigation</p>
             <div className="mt-4 grid gap-2">
-              <a className="side-link" href="#dashboard">Dashboard</a>
+              <a className="side-link" href="#dashboard"><LayoutDashboard size={16} /> Dashboard</a>
               <a className="side-link" href={categoryRoute(tool.category)}>All {tool.category}</a>
               <button className="side-link text-left" type="button" onClick={() => history.back()}>Back to previous page</button>
-              <button className="side-link text-left" type="button" onClick={() => history.forward()}>Forward</button>
             </div>
           </div>
           {related.length > 0 && (
@@ -685,13 +787,13 @@ function ToolForm({ children, status, onReset }: { children: React.ReactNode; st
 }
 
 function StatusBox({ status }: { status: Status }) {
-  return <p className={`min-h-12 whitespace-pre-line rounded-2xl border px-4 py-3 text-sm font-bold ${status.tone === "error" ? "border-red-200 bg-red-50 text-red-800" : status.tone === "success" ? "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f]" : "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]"}`}>{status.message}</p>;
+  return <p role="status" aria-live="polite" className={`min-h-12 whitespace-pre-line rounded-2xl border px-4 py-3 text-sm font-bold ${status.tone === "error" ? "border-red-200 bg-red-50 text-red-800" : status.tone === "success" ? "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f]" : "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]"}`}>{status.message}</p>;
 }
 
 function FileControl({ accept, multiple = false, files, setFiles }: { accept: string; multiple?: boolean; files: File[]; setFiles: (files: File[]) => void }) {
   return <label className="surface-card grid cursor-pointer gap-3 rounded-3xl border-dashed border-neutral-300 p-5 transition hover:border-[var(--moss)]">
     <span className="flex items-center gap-3 font-black"><Upload size={20} /> Choose file{multiple ? "s" : ""}</span>
-    <input className="sr-only" type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} />
+    <input aria-label={`Choose ${multiple ? "files" : "file"}`} className="sr-only" type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} />
     <span className="text-sm font-semibold text-neutral-500">{files.length ? files.map((file) => file.name).join(", ") : "No file selected"}</span>
   </label>;
 }
@@ -725,7 +827,24 @@ function SecondaryButton({ label, onClick }: { label: string; onClick: () => voi
 }
 
 function EmptyState({ query }: { query: string }) {
-  return <div className="surface-card rounded-3xl border-dashed border-neutral-300 p-10 text-center"><p className="font-display text-2xl font-black">No matching tools</p><p className="mt-2 font-semibold text-neutral-500">Try a shorter search than “{query}”.</p></div>;
+  const runSuggestion = (term: string) => {
+    sessionStorage.setItem("myfilekit:lastSearch", term);
+    window.dispatchEvent(new CustomEvent("myfilekit:search", { detail: term }));
+  };
+
+  return (
+    <div className="surface-card rounded-3xl border-dashed border-neutral-300 p-10 text-center">
+      <p className="font-display text-2xl font-black">No tools found for “{query}”</p>
+      <p className="mx-auto mt-2 max-w-xl font-semibold text-neutral-500">Try a shorter task name or one of the common searches below.</p>
+      <div className="mt-5 flex flex-wrap justify-center gap-2">
+        {quickSearches.map((term) => (
+          <button key={term} className="quick-chip" type="button" onClick={() => runSuggestion(term)}>
+            {term}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function MissingPage() {
@@ -736,6 +855,38 @@ function filterTools(query: string) {
   const parts = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return tools;
   return tools.filter((tool: Tool) => parts.every((part) => [tool.name, tool.category, tool.description, ...(tool.keywords || []), ...(tool.badges || [])].join(" ").toLowerCase().includes(part)));
+}
+
+function findToolById(id: string) {
+  return tools.find((tool: Tool) => tool.id === id);
+}
+
+function loadRecentToolIds() {
+  try {
+    const ids = JSON.parse(localStorage.getItem(recentToolsStorageKey) || "[]");
+    return Array.isArray(ids) ? ids.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadRecentTools() {
+  return loadRecentToolIds().map(findToolById).filter(Boolean).slice(0, 6) as Tool[];
+}
+
+function saveRecentTool(id: string) {
+  const nextIds = [id, ...loadRecentToolIds().filter((item) => item !== id)].slice(0, 6);
+  localStorage.setItem(recentToolsStorageKey, JSON.stringify(nextIds));
+  window.dispatchEvent(new Event("myfilekit:recent-tools"));
+}
+
+function fileTypeLabel(tool: Tool) {
+  const file = tool.file as { extensions?: string[]; types?: string[] };
+  const extensions = file.extensions || [];
+  if (extensions.length) return extensions.slice(0, 3).join("/").toUpperCase();
+  if (file.types?.includes("application/pdf")) return "PDF";
+  if (file.types?.some((type) => type.startsWith("image/"))) return "Image";
+  return "";
 }
 
 function iconForTool(tool: Tool) {
