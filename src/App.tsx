@@ -104,7 +104,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const runHeaderSearch = (value: string) => {
     const nextQuery = value.trim();
     if (!nextQuery) return;
-    sessionStorage.setItem("myfilekit:lastSearch", nextQuery);
+    writeSessionValue("myfilekit:lastSearch", nextQuery);
     window.dispatchEvent(new CustomEvent("myfilekit:search", { detail: nextQuery }));
     window.location.hash = "#dashboard";
   };
@@ -112,7 +112,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <header className="site-header sticky top-0 z-30 backdrop-blur-xl">
-        <div className="mx-auto flex w-[min(1240px,calc(100vw-28px))] items-center justify-between gap-4 py-4">
+        <div className="mx-auto flex w-[min(1760px,calc(100vw-clamp(28px,5vw,96px)))] items-center justify-between gap-4 py-4">
           <a href="#dashboard" className="flex items-center gap-3 text-[var(--ink)] no-underline">
             <AnimatedLogo compact />
             <span className="leading-tight">
@@ -136,7 +136,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-      <main id="app-main" className="mx-auto w-[min(1240px,calc(100vw-28px))] pb-16 pt-7">
+      <main id="app-main" className="mx-auto w-[min(1760px,calc(100vw-clamp(28px,5vw,96px)))] pb-16 pt-7">
         {children}
       </main>
     </>
@@ -154,7 +154,7 @@ function NavPill({ href, icon: Icon, label }: { href: string; icon: any; label: 
 
 function Dashboard() {
   const searchRef = useRef<HTMLInputElement | null>(null);
-  const [query, setQuery] = useState(() => sessionStorage.getItem("myfilekit:lastSearch") || "");
+  const [query, setQuery] = useState(() => readSessionValue("myfilekit:lastSearch"));
   const [recentTools, setRecentTools] = useState<Tool[]>(() => loadRecentTools());
   const matches = useMemo(() => filterTools(query), [query]);
   const popularTools = useMemo(() => popularToolIds.map(findToolById).filter(Boolean) as Tool[], []);
@@ -163,7 +163,7 @@ function Dashboard() {
     : categories.map((category) => [category, tools.filter((tool: Tool) => tool.category === category)] as const);
   const updateQuery = (value: string) => {
     setQuery(value);
-    sessionStorage.setItem("myfilekit:lastSearch", value);
+    writeSessionValue("myfilekit:lastSearch", value);
   };
 
   useEffect(() => {
@@ -248,7 +248,7 @@ function Dashboard() {
       {!query && recentTools.length > 0 && (
         <section className="surface-panel wabi-edge grid gap-5 p-5 md:p-7">
           <SectionHeader title="Recently Used" subtitle="Quickly jump back into your last tools." />
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="tool-grid">
             {recentTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
           </div>
         </section>
@@ -257,7 +257,7 @@ function Dashboard() {
       {!query && (
         <section className="surface-panel wabi-edge grid gap-5 p-5 md:p-7">
           <SectionHeader title="Popular Tools" subtitle="The tools people usually reach for first." />
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="tool-grid">
             {popularTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
           </div>
         </section>
@@ -331,7 +331,7 @@ function ToolSection({ title, tools: sectionTools, searchMode = false }: { title
           </a>
         )}
       </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="tool-grid">
         {sectionTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} />)}
       </div>
     </section>
@@ -379,7 +379,7 @@ function CategoryPage({ category }: { category: string }) {
             <p className="mt-1 max-w-2xl font-semibold text-neutral-500">{details?.description || "Choose any working tool below."}</p>
           </div>
         </div>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="tool-grid">
           {categoryTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} />)}
         </div>
       </section>
@@ -819,9 +819,45 @@ function MarkdownTool() {
   const [status, setStatus] = useState(initialStatus);
   return <ToolForm status={status} onReset={() => { setMarkdown(""); setStatus(initialStatus); }}>
     <Textarea label="Markdown" value={markdown} onChange={setMarkdown} rows={10} />
-    <div className="surface-card wabi-card-edge p-4" dangerouslySetInnerHTML={{ __html: html }} />
+    <div className="surface-card wabi-card-edge grid gap-3 p-4">{renderMarkdownPreview(markdown)}</div>
     <PrimaryButton label="Download HTML" onClick={() => { downloadText(html, "markdown-preview", "html", "text/html;charset=utf-8"); setStatus({ tone: "success", message: "HTML downloaded." }); }} />
   </ToolForm>;
+}
+
+function renderMarkdownPreview(markdown: string) {
+  const lines = markdown.split(/\r?\n/);
+  const nodes: React.ReactNode[] = [];
+  let listItems: string[] = [];
+
+  const flushList = () => {
+    if (!listItems.length) return;
+    const items = listItems;
+    listItems = [];
+    nodes.push(<ul key={`list-${nodes.length}`} className="list-disc pl-5 text-sm font-semibold leading-7 text-neutral-700">{items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul>);
+  };
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList();
+      return;
+    }
+    if (trimmed.startsWith("- ")) {
+      listItems.push(trimmed.slice(2));
+      return;
+    }
+    flushList();
+    if (trimmed.startsWith("# ")) {
+      nodes.push(<h1 key={index} className="font-display text-2xl font-black">{trimmed.slice(2)}</h1>);
+    } else if (trimmed.startsWith("## ")) {
+      nodes.push(<h2 key={index} className="font-display text-xl font-black">{trimmed.slice(3)}</h2>);
+    } else {
+      nodes.push(<p key={index} className="text-sm font-semibold leading-7 text-neutral-700">{trimmed}</p>);
+    }
+  });
+  flushList();
+
+  return nodes.length ? nodes : <p className="text-sm font-semibold text-neutral-500">Markdown preview will appear here.</p>;
 }
 
 function JsonTool() {
@@ -986,6 +1022,22 @@ function findToolById(id: string) {
   return tools.find((tool: Tool) => tool.id === id);
 }
 
+function readSessionValue(key: string) {
+  try {
+    return sessionStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeSessionValue(key: string, value: string) {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Storage may be unavailable in private or locked-down browser contexts.
+  }
+}
+
 function loadRecentToolIds() {
   try {
     const ids = JSON.parse(localStorage.getItem(recentToolsStorageKey) || "[]");
@@ -1001,8 +1053,12 @@ function loadRecentTools() {
 
 function saveRecentTool(id: string) {
   const nextIds = [id, ...loadRecentToolIds().filter((item) => item !== id)].slice(0, 6);
-  localStorage.setItem(recentToolsStorageKey, JSON.stringify(nextIds));
-  window.dispatchEvent(new Event("myfilekit:recent-tools"));
+  try {
+    localStorage.setItem(recentToolsStorageKey, JSON.stringify(nextIds));
+    window.dispatchEvent(new Event("myfilekit:recent-tools"));
+  } catch {
+    // Recent tools are optional and should never block the app.
+  }
 }
 
 function fileTypeLabel(tool: Tool) {

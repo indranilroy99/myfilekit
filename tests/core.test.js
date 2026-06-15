@@ -72,6 +72,11 @@ test("markdown preview escapes user HTML", () => {
   assert.match(html, /&lt;script&gt;/);
 });
 
+test("React shell does not use dangerous user-controlled HTML injection", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(appSource, /dangerouslySetInnerHTML|\\.innerHTML\\s*=/);
+});
+
 test("file validation checks count, type, extension, and size", () => {
   const file = new File(["hello"], "sample.pdf", { type: "application/pdf" });
   assert.equal(validateFiles([file], { maxFiles: 1, types: ["application/pdf"], extensions: ["pdf"] })[0].name, "sample.pdf");
