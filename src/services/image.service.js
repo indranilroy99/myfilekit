@@ -13,6 +13,18 @@ export async function exportCanvas(canvas, type = "image/png", quality = 0.85) {
   return blob;
 }
 
+export async function imageDimensions(file) {
+  const bitmap = await createImageBitmap(file);
+  const dimensions = { width: bitmap.width, height: bitmap.height };
+  bitmap.close?.();
+  return dimensions;
+}
+
+export async function cleanImageMetadata(file, type = file.type || "image/png", quality = 0.92) {
+  const canvas = await imageToCanvas(file);
+  return exportCanvas(canvas, type, quality);
+}
+
 export async function compressImage(file, type, quality) {
   const canvas = await imageToCanvas(file);
   return exportCanvas(canvas, type, quality);
@@ -66,4 +78,3 @@ export async function rotateFlipImage(file, rotation, flipX, flipY) {
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
 }
-

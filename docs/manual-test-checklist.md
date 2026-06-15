@@ -13,7 +13,7 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 
 - Confirm the professional MyFileKit logo renders in the header and hero.
 - Confirm the header uses user-facing product copy and does not show release/version labels.
-- Confirm the dashboard uses the monochrome utility theme: light background, neutral borders, square controls, no decorative shadows, and a focused command-center feel.
+- Confirm the dashboard uses the premium utility theme: light cinematic background, glass surfaces, softer depth, refined typography, and fewer hard divider lines.
 - Confirm the dashboard hero includes a subtle monochrome WebGL hills background behind the product copy.
 - Confirm the main dashboard search is centered inside the hero and the product-quality cards appear below the tool library.
 - Confirm Popular Tools appears above the full category library.
@@ -52,6 +52,16 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Convert one image to another supported format.
 - Crop an image with numeric controls.
 - Rotate and flip an image.
+
+## Privacy Tools
+
+- Search `metadata`, `exif`, and `privacy`; confirm Metadata Cleaner appears.
+- Open Metadata Cleaner and confirm the local-processing privacy note is visible.
+- Upload a JPG with metadata and confirm file name, type, size, dimensions, and last modified date appear.
+- Click Clean metadata and confirm before/after file size appears.
+- Download the cleaned image and confirm the filename ends with `-cleaned`.
+- Upload an unsupported file such as PDF or TXT and confirm it is rejected clearly.
+- Check Metadata Cleaner on mobile and confirm upload, file info, result, and action buttons do not overlap.
 
 ## Business And Signature Tools
 
