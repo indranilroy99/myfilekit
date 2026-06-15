@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { AnimatedLogo } from "./components/AnimatedLogo";
 import { ExpandingSearchDock } from "@/components/ui/expanding-search-dock-shadcnui";
+import { GLSLHills } from "@/components/ui/glsl-hills";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "./utils/format.js";
@@ -194,6 +195,7 @@ function Dashboard() {
   return (
     <div className="grid gap-8">
       <section className="hero-panel surface-panel wabi-edge overflow-hidden">
+        <GLSLHills className="hero-hills" cameraZ={138} planeSize={192} speed={0.18} />
         <div className="relative z-10 mx-auto grid max-w-5xl justify-items-center gap-6 px-6 py-12 text-center md:px-10 lg:px-12 lg:py-16">
           <div className="grid justify-items-center gap-6">
             <div className="grid justify-items-center gap-4 sm:flex sm:items-center">

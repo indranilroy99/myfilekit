@@ -382,6 +382,7 @@ button {
 
 .hero-panel {
   position: relative;
+  min-height: 560px;
 }
 
 .hero-panel::before {
@@ -393,6 +394,21 @@ button {
     linear-gradient(135deg, rgba(10, 10, 10, .035), transparent 45%),
     linear-gradient(90deg, rgba(10, 10, 10, .025) 1px, transparent 1px);
   background-size: auto, 28px 28px;
+}
+
+.hero-hills {
+  position: absolute !important;
+  inset: auto 0 0 0;
+  height: min(420px, 62%) !important;
+  width: 100% !important;
+  opacity: .52;
+  pointer-events: none;
+  z-index: 0;
+  mask-image: linear-gradient(to top, #000 12%, transparent 92%);
+}
+
+.hero-hills canvas {
+  mix-blend-mode: multiply;
 }
 
 .spotlight-search {

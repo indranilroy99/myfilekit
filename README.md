@@ -49,6 +49,7 @@ Supported tools run in the browser using local files selected by the user. MyFil
 - Vite
 - lucide-react
 - framer-motion
+- Three.js
 - Local vendored `pdf-lib` for browser-side PDF operations
 - Node.js tests and release checks
 

@@ -14,6 +14,7 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Confirm the professional MyFileKit logo renders in the header and hero.
 - Confirm the header uses user-facing product copy and does not show release/version labels.
 - Confirm the dashboard uses the monochrome utility theme: light background, neutral borders, square controls, no decorative shadows, and a focused command-center feel.
+- Confirm the dashboard hero includes a subtle monochrome WebGL hills background behind the product copy.
 - Confirm the main dashboard search is centered inside the hero and the product-quality cards appear below the tool library.
 - Confirm Popular Tools appears above the full category library.
 - Open one tool, return to the dashboard, and confirm Recently Used appears.
