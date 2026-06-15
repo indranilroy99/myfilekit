@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const { execFileSync } = require("node:child_process");
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve(__dirname, "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const minimumNodeMajor = 18;
 
 function log(message = "") {
@@ -31,49 +32,34 @@ function nodeMajor(version) {
   return Number(String(version).replace(/^v/, "").split(".")[0]);
 }
 
-function main() {
-  const nodeVersion = process.version;
-  const npmVersion = commandVersion("npm");
-  const packageJson = path.join(root, "package.json");
-  const indexHtml = path.join(root, "index.html");
-  const invoiceHtml = path.join(root, "invoice-generator", "index.html");
+const checks = [
+  ["dashboard", "index.html"],
+  ["styles", "assets/css/app.css"],
+  ["local PDF engine", "assets/vendor/pdf-lib.min.js"],
+  ["tool registry", "src/registry/tools.registry.js"],
+  ["invoice generator", "invoice-generator/index.html"]
+];
 
-  log("MyFileKit setup");
-  log("================");
-  log(`Detected OS: ${osLabel()} (${os.platform()} ${os.arch()})`);
-  log(`Detected Node.js: ${nodeVersion}`);
+log("MyFileKit setup");
+log("================");
+log(`Detected OS: ${osLabel()} (${os.platform()} ${os.arch()})`);
+log(`Detected Node.js: ${process.version}`);
 
-  if (nodeMajor(nodeVersion) < minimumNodeMajor) {
-    log("");
-    log(`Node.js ${minimumNodeMajor}+ is recommended for the local dev server.`);
-    log("Install the current LTS version from https://nodejs.org/ and run this setup again.");
-    process.exitCode = 1;
-    return;
-  }
-
-  log(`Detected npm: ${npmVersion || "not found"}`);
-  if (!npmVersion) {
-    log("npm was not found. Reinstall Node.js from https://nodejs.org/ if you want to use npm scripts.");
-  }
-
+if (nodeMajor(process.version) < minimumNodeMajor) {
   log("");
-  log("Project checks:");
-  log(`- package.json: ${fs.existsSync(packageJson) ? "found" : "missing"}`);
-  log(`- dashboard: ${fs.existsSync(indexHtml) ? "found" : "missing"}`);
-  log(`- invoice generator: ${fs.existsSync(invoiceHtml) ? "found" : "missing"}`);
-  log("- dependencies: none to install");
-  log("- static mode: supported by opening index.html directly");
-
-  log("");
-  log("Next commands:");
-  log("- npm run dev");
-  log("- open http://localhost:4173");
-  log("");
-  log("Alternatives:");
-  log("- VS Code Live Server");
-  log("- python3 -m http.server 4173");
-  log("- open index.html directly for most tools");
+  log(`Node.js ${minimumNodeMajor}+ is recommended for the local dev server and checks.`);
+  process.exit(1);
 }
 
-main();
-
+log(`Detected npm: ${commandVersion("npm") || "not found"}`);
+log("");
+log("Project checks:");
+for (const [label, file] of checks) {
+  log(`- ${label}: ${fs.existsSync(path.join(root, file)) ? "found" : "missing"}`);
+}
+log("- dependencies: none to install");
+log("- app type: static browser app");
+log("");
+log("Next commands:");
+log("- npm run dev");
+log("- open http://localhost:4173");

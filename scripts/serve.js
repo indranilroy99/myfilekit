@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-const fs = require("node:fs");
-const http = require("node:http");
-const path = require("node:path");
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve(__dirname, "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.PORT || 4173);
 
 const mimeTypes = {
@@ -22,6 +23,8 @@ const mimeTypes = {
 function send(response, status, body, type = "text/plain; charset=utf-8") {
   response.writeHead(status, {
     "Content-Type": type,
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'",
+    "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff"
   });
   response.end(body);
@@ -54,4 +57,3 @@ server.listen(port, () => {
   process.stdout.write(`MyFileKit dev server running at http://localhost:${port}\n`);
   process.stdout.write("Press Ctrl+C to stop.\n");
 });
-
