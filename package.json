@@ -1,6 +1,6 @@
 {
   "name": "myfilekit",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "type": "module",
   "private": true,
   "description": "Privacy-first browser-based toolkit for PDF, image, business, signature, text, data, and developer utilities.",
@@ -23,6 +23,7 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.3.1",
     "@vitejs/plugin-react": "^6.0.2",
+    "framer-motion": "^12.40.0",
     "lucide-react": "^1.18.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -31,6 +32,7 @@
     "vite": "^8.0.16"
   },
   "devDependencies": {
+    "@types/node": "^25.9.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3"
   }

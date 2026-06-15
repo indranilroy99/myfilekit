@@ -12,11 +12,12 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 ## Dashboard
 
 - Confirm the animated logo renders in the header and hero.
-- Confirm the version label shows `v2.0.0`.
+- Confirm the version label shows `v2.0.1`.
 - Search `merge pdf` and confirm Merge PDF is shown.
 - Search `compress image` and confirm Compress Image is shown.
 - Search `invoice` and confirm Invoice Generator is shown.
 - Search `signature` and confirm signature tools are shown.
+- On desktop, open the header search dock, search `json`, press Enter, and confirm the dashboard filters to JSON tools.
 - Search a nonsense query and confirm the empty state appears.
 - Click every visible card and confirm it opens a real tool route.
 

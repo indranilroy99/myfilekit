@@ -7,7 +7,6 @@ import {
   Download,
   FileArchive,
   FileText,
-  GalleryHorizontalEnd,
   Hash,
   Image,
   LayoutDashboard,
@@ -21,6 +20,7 @@ import {
   Upload,
 } from "lucide-react";
 import { AnimatedLogo } from "./components/AnimatedLogo";
+import { ExpandingSearchDock } from "@/components/ui/expanding-search-dock-shadcnui";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "./utils/format.js";
@@ -45,7 +45,7 @@ const categoryIcons: Record<string, any> = {
 };
 
 const featureHighlights = [
-  ["Versioned releases", "v2.0.0 starts the React era. Patch, minor, and major bumps are scripted for clean release discipline."],
+  ["Versioned releases", "v2 starts the React era. Patch, minor, and major bumps are scripted for clean release discipline."],
   ["Search-first workspace", "The dashboard behaves like a command center, with category-aware search and fast routes."],
   ["Local processing", "Supported tools run in the browser without a server upload path."],
   ["Tool navigation", "Tool pages include back, forward, dashboard, and category navigation."],
@@ -75,6 +75,14 @@ export default function App() {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
+  const runHeaderSearch = (value: string) => {
+    const nextQuery = value.trim();
+    if (!nextQuery) return;
+    sessionStorage.setItem("myfilekit:lastSearch", nextQuery);
+    window.dispatchEvent(new CustomEvent("myfilekit:search", { detail: nextQuery }));
+    window.location.hash = "#dashboard";
+  };
+
   return (
     <>
       <header className="sticky top-0 z-30 border-b border-black/10 bg-[rgba(250,249,245,.86)] backdrop-blur-xl">
@@ -92,9 +100,14 @@ function Shell({ children }: { children: React.ReactNode }) {
               <NavPill key={category} href={categoryRoute(category)} icon={categoryIcons[category]} label={category.replace(" Tools", "")} />
             ))}
           </nav>
-          <a className="rounded-full bg-neutral-950 px-4 py-2 text-sm font-black text-white shadow-xl shadow-black/10" href="#category-pdf-tools">
-            Browse tools
-          </a>
+          <div className="flex items-center gap-2">
+            <div className="hidden md:block">
+              <ExpandingSearchDock onSearch={runHeaderSearch} placeholder="Search tools..." />
+            </div>
+            <a className="rounded-full bg-neutral-950 px-4 py-2 text-sm font-black text-white shadow-xl shadow-black/10" href="#category-pdf-tools">
+              Browse tools
+            </a>
+          </div>
         </div>
       </header>
       <main id="app-main" className="mx-auto w-[min(1240px,calc(100vw-28px))] pb-16 pt-7">
@@ -114,11 +127,24 @@ function NavPill({ href, icon: Icon, label }: { href: string; icon: any; label: 
 }
 
 function Dashboard() {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => sessionStorage.getItem("myfilekit:lastSearch") || "");
   const matches = useMemo(() => filterTools(query), [query]);
   const grouped = query
     ? [["Search results", matches] as const]
     : categories.map((category) => [category, tools.filter((tool: Tool) => tool.category === category)] as const);
+  const updateQuery = (value: string) => {
+    setQuery(value);
+    sessionStorage.setItem("myfilekit:lastSearch", value);
+  };
+
+  useEffect(() => {
+    const handleGlobalSearch = (event: Event) => {
+      const value = String((event as CustomEvent<string>).detail || "");
+      updateQuery(value);
+    };
+    window.addEventListener("myfilekit:search", handleGlobalSearch);
+    return () => window.removeEventListener("myfilekit:search", handleGlobalSearch);
+  }, []);
 
   return (
     <div className="grid gap-8">
@@ -142,7 +168,7 @@ function Dashboard() {
               <input
                 className="min-h-12 w-full bg-transparent text-lg font-semibold outline-none placeholder:text-neutral-400"
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => updateQuery(event.target.value)}
                 placeholder="Search PDF, image, invoice, signature, JSON tools..."
                 type="search"
               />

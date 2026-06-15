@@ -4,7 +4,7 @@ MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, si
 
 ## Version
 
-Current app version: `2.0.0`
+Current app version: `2.0.1`
 
 Use the version scripts for future changes:
 
@@ -46,6 +46,7 @@ Supported tools run in the browser using local files selected by the user. MyFil
 - Tailwind CSS
 - Vite
 - lucide-react
+- framer-motion
 - Local vendored `pdf-lib` for browser-side PDF operations
 - Node.js tests and release checks
 
@@ -68,6 +69,7 @@ Supported tools run in the browser using local files selected by the user. MyFil
 │   └── setup.js
 ├── src/
 │   ├── components/
+│   │   └── ui/
 │   ├── lib/
 │   ├── registry/
 │   ├── services/
@@ -150,6 +152,8 @@ npm run preflight
 ## Dashboard Search
 
 The dashboard search filters tools by name, category, description, badge, and keyword.
+
+The header also includes a compact expanding search dock on desktop. Submitting a query from that dock returns to the dashboard and applies the same tool filter.
 
 Try:
 

@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+@theme inline {
+  --color-background: var(--app-bg);
+  --color-foreground: var(--ink);
+  --color-card: var(--paper);
+  --color-border: var(--line);
+  --color-muted: #f3f0e8;
+  --color-muted-foreground: #6b665c;
+}
+
 :root {
   --app-bg: #f6f4ee;
   --ink: #111111;
