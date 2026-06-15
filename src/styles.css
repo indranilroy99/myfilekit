@@ -10,10 +10,10 @@
 }
 
 :root {
-  --app-bg: #d8d9cf;
+  --app-bg: #d2d4ca;
   --ink: #1f211c;
-  --paper: #f7f1e4;
-  --paper-soft: #ece3d2;
+  --paper: #f8f0df;
+  --paper-soft: #e7dec9;
   --stone: #5f6258;
   --line: rgba(31, 33, 28, .15);
   --moss: #465341;
@@ -41,10 +41,10 @@ body {
   min-height: 100vh;
   background:
     radial-gradient(circle at 18% 2%, rgba(70, 83, 65, .22), transparent 34%),
-    radial-gradient(circle at 92% 14%, rgba(140, 84, 52, .18), transparent 32%),
+    radial-gradient(circle at 92% 14%, rgba(140, 84, 52, .14), transparent 32%),
     radial-gradient(circle at 55% 100%, rgba(36, 49, 79, .12), transparent 42%),
-    linear-gradient(rgba(31, 33, 28, .035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(31, 33, 28, .028) 1px, transparent 1px),
+    linear-gradient(rgba(31, 33, 28, .025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 33, 28, .022) 1px, transparent 1px),
     var(--app-bg);
   background-size: auto, auto, auto, 34px 34px, 34px 34px, auto;
 }
@@ -55,7 +55,7 @@ body::before {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  opacity: .34;
+  opacity: .24;
   background-image:
     radial-gradient(circle at 12% 22%, rgba(31, 33, 28, .12) 0 1px, transparent 1px),
     radial-gradient(circle at 68% 74%, rgba(31, 33, 28, .08) 0 1px, transparent 1px),
@@ -119,14 +119,14 @@ button {
 
 .surface-panel {
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, .42), transparent 38%),
+    linear-gradient(135deg, rgba(255, 255, 255, .54), transparent 42%),
     var(--paper);
   box-shadow: var(--shadow-soft);
 }
 
 .surface-card {
   background:
-    linear-gradient(160deg, rgba(255, 255, 255, .38), transparent 54%),
+    linear-gradient(160deg, rgba(255, 255, 255, .48), transparent 56%),
     var(--paper);
   box-shadow: 0 10px 34px rgba(31, 33, 28, .08);
 }
@@ -228,8 +228,9 @@ button {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(120deg, transparent 0 55%, rgba(70, 83, 65, .12) 55% 56%, transparent 56%),
-    radial-gradient(circle at 86% 18%, rgba(140, 84, 52, .12), transparent 18%);
+    linear-gradient(120deg, transparent 0 58%, rgba(70, 83, 65, .08) 58% 59%, transparent 59%),
+    radial-gradient(circle at 18% 18%, rgba(70, 83, 65, .13), transparent 24%),
+    radial-gradient(circle at 86% 18%, rgba(140, 84, 52, .1), transparent 18%);
 }
 
 .spotlight-search {

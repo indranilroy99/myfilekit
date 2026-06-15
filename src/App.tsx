@@ -158,9 +158,9 @@ function Dashboard() {
           sizing="fill"
           style={{ position: "absolute", inset: 0 }}
         />
-        <div className="relative z-10 grid gap-8 px-6 py-9 md:px-10 lg:grid-cols-[1.1fr_.9fr] lg:items-end lg:px-12 lg:py-12">
-          <div className="grid gap-6">
-            <div className="flex items-center gap-4">
+        <div className="relative z-10 mx-auto grid max-w-5xl justify-items-center gap-6 px-6 py-12 text-center md:px-10 lg:px-12 lg:py-16">
+          <div className="grid justify-items-center gap-6">
+            <div className="grid justify-items-center gap-4 sm:flex sm:items-center">
               <AnimatedLogo />
               <div>
                 <p className="moss-text text-xs font-black uppercase">Major v2 workspace</p>
@@ -170,7 +170,7 @@ function Dashboard() {
             <p className="max-w-3xl text-xl font-semibold leading-snug text-neutral-700 md:text-2xl">
               A professional React file toolkit for PDF, image, business, signature, text, data, and developer workflows.
             </p>
-            <div className="spotlight-search surface-card wabi-card-edge flex items-center gap-3 p-3">
+            <div className="spotlight-search surface-card wabi-card-edge flex w-full max-w-3xl items-center gap-3 p-3 text-left">
               <span className="icon-tile grid h-11 w-11 place-items-center rounded-2xl">
                 <Search size={21} />
               </span>
@@ -186,14 +186,6 @@ function Dashboard() {
             <p className="text-sm font-bold text-neutral-500">
               {query ? `${matches.length} matching tool${matches.length === 1 ? "" : "s"}` : `${tools.length} tools across ${categories.length} categories`} · local-first wherever possible
             </p>
-          </div>
-          <div className="surface-muted wabi-card-edge grid gap-3 p-4">
-            {featureHighlights.map(([title, copy]) => (
-              <div key={title} className="surface-card wabi-card-edge p-4">
-                <p className="font-black">{title}</p>
-                <p className="mt-1 text-sm font-medium leading-6 text-neutral-600">{copy}</p>
-              </div>
-            ))}
           </div>
         </div>
       </section>
@@ -218,6 +210,21 @@ function Dashboard() {
             ))}
           </div>
         )}
+      </section>
+
+      <section className="surface-panel wabi-edge grid gap-5 p-5 md:p-7">
+        <div>
+          <h2 className="font-display text-3xl font-black">Why MyFileKit</h2>
+          <p className="mt-1 font-semibold text-neutral-500">Quiet, practical details that keep the toolkit reliable.</p>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {featureHighlights.map(([title, copy]) => (
+            <div key={title} className="surface-card wabi-card-edge p-4">
+              <p className="font-black">{title}</p>
+              <p className="mt-1 text-sm font-medium leading-6 text-neutral-600">{copy}</p>
+            </div>
+          ))}
+        </div>
       </section>
     </div>
   );
