@@ -88,11 +88,11 @@ function whySection() {
     ["Search-first dashboard", "Find the right tool using names, categories, keywords, and use cases."],
     ["Cross-platform", "Run locally on macOS, Windows, and Linux with clear setup scripts."],
     ["Built to grow", "Add tools through one registry without duplicating dashboard code."],
-    ["No fake tools", "Unfinished ideas stay in the roadmap, not in the visible dashboard."]
+    ["Ready-to-use tools", "Every dashboard card opens a focused workflow with controls and output actions."]
   ];
   return el("section", { className: "highlights", id: "why-myfilekit", "aria-labelledby": "why-title" }, [
     el("div", { className: "section-heading" }, [
-      el("div", {}, [el("h2", { id: "why-title", text: "Why MyFileKit" }), el("p", { text: "A practical local-first toolkit that values reliability over placeholder features." })])
+      el("div", {}, [el("h2", { id: "why-title", text: "Why MyFileKit" }), el("p", { text: "A practical local-first toolkit built for reliable browser-side workflows." })])
     ]),
     el("div", { className: "feature-grid" }, features.map(([title, description]) => el("article", { className: "feature-card" }, [
       el("span", { className: "feature-icon", "aria-hidden": "true", text: title.split(" ").map((word) => word[0]).join("").slice(0, 4).toUpperCase() }),
@@ -104,4 +104,3 @@ function whySection() {
 function searchableText(tool) {
   return [tool.name, tool.category, tool.description, ...(tool.keywords || []), ...(tool.badges || [])].join(" ").toLowerCase();
 }
-

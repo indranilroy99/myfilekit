@@ -1,11 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { tools, categories } from "../src/registry/tools.registry.js";
 import { csvToJson, jsonToCsv } from "../src/services/csv.service.js";
+import { deletePdfPages, extractPdfPages, mergePdfs, rotatePdfPages, textToPdf } from "../src/services/pdf.service.js";
 import { validateFiles } from "../src/services/file-validator.js";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "../src/utils/format.js";
 import { safeFilename, withExtension } from "../src/utils/safe-filename.js";
 import { routeForHash } from "../src/router.js";
+
+const pdfLibCode = fs.readFileSync(new URL("../assets/vendor/pdf-lib.min.js", import.meta.url), "utf8");
+const loadPdfLib = new Function(`${pdfLibCode}; return PDFLib;`);
+globalThis.window = { PDFLib: loadPdfLib() };
 
 test("registry only exposes available working tools", () => {
   assert.ok(tools.length >= 20);
@@ -56,4 +62,23 @@ test("file validation checks count, type, extension, and size", () => {
   assert.throws(() => validateFiles([], { maxFiles: 1 }), /Choose a file/);
   assert.throws(() => validateFiles([file, file], { maxFiles: 1 }), /no more than 1/);
   assert.throws(() => validateFiles([file], { maxFiles: 1, types: ["image/png"], extensions: ["png"] }), /not a supported/);
+});
+
+test("PDF services create valid local outputs", async () => {
+  const first = new File([await textToPdf("First page")], "first.pdf", { type: "application/pdf" });
+  const second = new File([await textToPdf("Second page")], "second.pdf", { type: "application/pdf" });
+
+  const mergedBytes = await mergePdfs([first, second]);
+  const merged = await window.PDFLib.PDFDocument.load(mergedBytes);
+  assert.equal(merged.getPageCount(), 2);
+
+  const mergedFile = new File([mergedBytes], "merged.pdf", { type: "application/pdf" });
+  const extracted = await window.PDFLib.PDFDocument.load(await extractPdfPages(mergedFile, [1]));
+  assert.equal(extracted.getPageCount(), 1);
+
+  const deleted = await window.PDFLib.PDFDocument.load(await deletePdfPages(mergedFile, [0]));
+  assert.equal(deleted.getPageCount(), 1);
+
+  const rotated = await window.PDFLib.PDFDocument.load(await rotatePdfPages(mergedFile, [0], 90));
+  assert.equal(rotated.getPage(0).getRotation().angle, 90);
 });

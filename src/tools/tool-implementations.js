@@ -30,7 +30,7 @@ export function renderTool(tool) {
   if (tool.id === "json-to-csv-tool") return jsonToCsvTool();
   if (tool.id === "base64-tool") return base64Tool();
   if (tool.id === "file-hash-tool") return fileHashTool(tool);
-  return el("p", { text: "Tool not implemented." });
+  throw new Error(`Missing renderer for ${tool.id}`);
 }
 
 function pdfTool(tool, actionText, process, multiple) {

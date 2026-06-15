@@ -6,7 +6,7 @@ Run the app with:
 npm run dev
 ```
 
-Open `http://localhost:4173`.
+Open `http://localhost:4173`, or the next local URL printed by the dev server if that port is already busy.
 
 ## Dashboard
 

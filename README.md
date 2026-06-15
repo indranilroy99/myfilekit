@@ -13,7 +13,7 @@ The app is intentionally simple to run and host: vanilla HTML, CSS, and JavaScri
 - Text & Data: Text to PDF, Markdown Preview, JSON Formatter, CSV to JSON, JSON to CSV.
 - Developer Utilities: Base64 Encode / Decode, File Hash Generator.
 
-Only working tools are shown on the dashboard. Planned tools should stay in project notes until they have a real implementation.
+Only working tools are shown on the dashboard. Planned tools should stay out of the product UI until they have a real implementation.
 
 ## Privacy Model
 
@@ -80,7 +80,7 @@ chmod +x setup.sh
 npm run dev
 ```
 
-Open `http://localhost:4173`.
+Open `http://localhost:4173`, or the next local URL printed by the dev server if that port is already busy.
 
 ### Windows
 
@@ -91,7 +91,7 @@ From PowerShell:
 npm run dev
 ```
 
-Open `http://localhost:4173`.
+Open `http://localhost:4173`, or the next local URL printed by the dev server if that port is already busy.
 
 ### Linux
 
@@ -101,7 +101,7 @@ chmod +x setup.sh
 npm run dev
 ```
 
-Open `http://localhost:4173`.
+Open `http://localhost:4173`, or the next local URL printed by the dev server if that port is already busy.
 
 ## npm Scripts
 
@@ -115,7 +115,7 @@ npm run preflight
 ```
 
 - `setup` checks the operating system, Node.js version, npm availability, and important project files.
-- `dev` starts a local static server on port `4173`.
+- `dev` starts a local static server on port `4173`, falling forward to the next available port when needed.
 - `check` validates required files and JavaScript syntax.
 - `test` runs Node.js unit tests for the registry and core helpers.
 - `security:audit` checks the local security baseline and vendored assets.
