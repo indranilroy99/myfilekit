@@ -19,6 +19,7 @@ export const tools = [
   tool("json-formatter-tool", "JSON Formatter", "Text & Data Tools", "Validate, format, and minify JSON.", ["json format", "json validate", "json minify"], ["Data", "Local"]),
   tool("csv-to-json-tool", "CSV to JSON", "Text & Data Tools", "Convert CSV text or files to JSON.", ["csv json", "convert csv"], ["Data", "Local"]),
   tool("json-to-csv-tool", "JSON to CSV", "Text & Data Tools", "Convert a JSON array of objects to CSV.", ["json csv", "convert json"], ["Data", "Local"]),
+  tool("metadata-cleaner", "Metadata Cleaner", "Privacy Tools", "Remove embedded metadata from supported image files locally in your browser.", ["metadata", "exif", "privacy", "clean", "remove metadata", "image metadata", "photo metadata"], ["Privacy", "Image", "Local processing"], { maxFiles: 1, types: ["image/jpeg", "image/png", "image/webp"], extensions: ["jpg", "jpeg", "png", "webp"], route: "#metadata-cleaner-tool" }),
   tool("base64-tool", "Base64 Encode / Decode", "Developer Utilities", "Encode text or decode Base64.", ["base64", "encode", "decode"], ["Developer", "Local"]),
   tool("file-hash-tool", "File Hash Generator", "Developer Utilities", "Generate a SHA-256 hash for a local file.", ["hash", "sha256", "checksum"], ["Developer", "Local"], { maxFiles: 1 })
 ];
@@ -29,6 +30,7 @@ export const categories = [
   "Business Tools",
   "Signature Tools",
   "Text & Data Tools",
+  "Privacy Tools",
   "Developer Utilities"
 ];
 
@@ -39,9 +41,10 @@ function tool(id, name, category, description, keywords, badges, file = {}) {
     category,
     description,
     keywords,
-    route: `#${id}`,
+    route: file.route || `#${id}`,
     status: "available",
     badges,
+    acceptedTypes: file.types || [],
     file: {
       maxSize: 30 * 1024 * 1024,
       ...file
@@ -49,4 +52,3 @@ function tool(id, name, category, description, keywords, badges, file = {}) {
     localProcessing: true
   };
 }
-

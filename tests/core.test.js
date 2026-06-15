@@ -26,8 +26,24 @@ test("registered tool routes resolve", () => {
     assert.equal(route.type, "tool");
     assert.equal(route.tool.id, tool.id);
   }
+  const metadataRoute = routeForHash("#metadata-cleaner-tool");
+  assert.equal(metadataRoute.type, "tool");
+  assert.equal(metadataRoute.tool.id, "metadata-cleaner");
   assert.equal(routeForHash("#dashboard").type, "dashboard");
   assert.equal(routeForHash("#missing-tool").type, "missing");
+});
+
+test("metadata cleaner is available and discoverable", () => {
+  const metadataTool = tools.find((tool) => tool.id === "metadata-cleaner");
+  assert.ok(metadataTool);
+  assert.equal(metadataTool.status, "available");
+  assert.equal(metadataTool.route, "#metadata-cleaner-tool");
+  assert.equal(metadataTool.category, "Privacy Tools");
+  assert.ok(categories.includes("Privacy Tools"));
+  const searchableText = [metadataTool.name, metadataTool.description, metadataTool.category, ...metadataTool.keywords, ...metadataTool.badges].join(" ").toLowerCase();
+  for (const query of ["metadata", "exif", "privacy"]) {
+    assert.match(searchableText, new RegExp(query));
+  }
 });
 
 test("page range parsing converts user-facing pages to zero-based indexes", () => {
@@ -62,6 +78,21 @@ test("file validation checks count, type, extension, and size", () => {
   assert.throws(() => validateFiles([], { maxFiles: 1 }), /Choose a file/);
   assert.throws(() => validateFiles([file, file], { maxFiles: 1 }), /no more than 1/);
   assert.throws(() => validateFiles([file], { maxFiles: 1, types: ["image/png"], extensions: ["png"] }), /not a supported/);
+});
+
+test("metadata cleaner validates supported image types and safe output names", () => {
+  const metadataTool = tools.find((tool) => tool.id === "metadata-cleaner");
+  const jpg = new File(["jpg"], "photo.jpg", { type: "image/jpeg" });
+  const png = new File(["png"], "screen.png", { type: "image/png" });
+  const webp = new File(["webp"], "image.webp", { type: "image/webp" });
+  const pdf = new File(["pdf"], "document.pdf", { type: "application/pdf" });
+  const options = metadataTool.file;
+
+  assert.equal(validateFiles([jpg], options)[0].name, "photo.jpg");
+  assert.equal(validateFiles([png], options)[0].name, "screen.png");
+  assert.equal(validateFiles([webp], options)[0].name, "image.webp");
+  assert.throws(() => validateFiles([pdf], options), /not a supported file type/);
+  assert.equal(withExtension(`${safeFilename("../private photo?.jpg")}-cleaned`, "jpg"), "private-photo-cleaned.jpg");
 });
 
 test("PDF services create valid local outputs", async () => {

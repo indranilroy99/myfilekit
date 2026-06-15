@@ -15,6 +15,6 @@ export function routeForHash(hash) {
     const category = [...new Set(tools.map((tool) => tool.category))].find((item) => categorySlug(item) === id.replace("category-", ""));
     return category ? { type: "category", category } : { type: "missing", hash };
   }
-  const tool = tools.find((item) => item.id === id);
+  const tool = tools.find((item) => item.id === id || item.route === `#${id}`);
   return tool ? { type: "tool", tool } : { type: "missing", hash };
 }

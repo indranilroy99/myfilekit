@@ -4,28 +4,27 @@ export function AnimatedLogo({ compact = false }: { compact?: boolean }) {
       <span className="brand-mark-aura" />
       <svg className="brand-logo-svg" viewBox="0 0 96 96" focusable="false">
         <defs>
-          <linearGradient id="mfk-paper" x1="19" y1="8" x2="77" y2="88" gradientUnits="userSpaceOnUse">
+          <linearGradient id="mfk-tile" x1="15" y1="9" x2="83" y2="88" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#111827" />
+            <stop offset="1" stopColor="#344054" />
+          </linearGradient>
+          <linearGradient id="mfk-sheet" x1="25" y1="19" x2="73" y2="78" gradientUnits="userSpaceOnUse">
             <stop stopColor="#ffffff" />
-            <stop offset="1" stopColor="#f5f5f5" />
+            <stop offset="1" stopColor="#eef2f7" />
           </linearGradient>
-          <linearGradient id="mfk-ink" x1="28" y1="20" x2="76" y2="82" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#0a0a0a" />
-            <stop offset="1" stopColor="#737373" />
-          </linearGradient>
-          <linearGradient id="mfk-earth" x1="23" y1="17" x2="71" y2="85" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#0a0a0a" />
-            <stop offset=".58" stopColor="#737373" />
-            <stop offset="1" stopColor="#a1a1a1" />
+          <linearGradient id="mfk-line" x1="31" y1="31" x2="67" y2="66" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#101828" />
+            <stop offset="1" stopColor="#475467" />
           </linearGradient>
         </defs>
-        <path className="brand-logo-ring" d="M48 7c21.8 0 39.5 17.7 39.5 39.5 0 18.6-12.9 34.2-30.2 38.4" />
-        <path className="brand-logo-ring brand-logo-ring-gap" d="M34.6 83.7C19.4 78.2 8.5 63.6 8.5 46.5c0-11.8 5.2-22.4 13.4-29.6" />
-        <path className="brand-logo-sheet brand-logo-sheet-back" d="M24 18.5h34.5L76 36v39.5H24z" />
-        <path className="brand-logo-sheet brand-logo-sheet-front" d="M18.5 13h38.8L78.5 34.2V81h-60z" />
-        <path className="brand-logo-fold" d="M57.3 13v21.2h21.2z" />
-        <path className="brand-logo-mark" d="M33 64V35l15 18 15-18v29" />
-        <path className="brand-logo-line" d="M34 72h30" />
-        <circle className="brand-logo-dot" cx="69" cy="68" r="3.5" />
+        <rect x="11" y="11" width="74" height="74" rx="22" fill="url(#mfk-tile)" />
+        <rect x="18" y="18" width="60" height="60" rx="18" fill="none" stroke="rgba(255,255,255,.18)" strokeWidth="2" />
+        <path d="M31 23h25.5L69 35.5V72H31z" fill="url(#mfk-sheet)" />
+        <path d="M56.5 23v12.5H69" fill="#d9e1ec" />
+        <path d="M31 23h25.5L69 35.5V72H31z" fill="none" stroke="rgba(16,24,40,.22)" strokeWidth="2.5" strokeLinejoin="round" />
+        <path d="M39 58V39l9.2 11.4L57.5 39v19" fill="none" stroke="url(#mfk-line)" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M39 65h20" stroke="url(#mfk-line)" strokeWidth="4.5" strokeLinecap="round" />
+        <circle cx="65.5" cy="63.5" r="3.5" fill="#101828" />
       </svg>
     </span>
   );

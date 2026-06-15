@@ -29,7 +29,7 @@ import { safeFilename, withExtension } from "./utils/safe-filename.js";
 import { validateFiles } from "./services/file-validator.js";
 import { downloadBlob, downloadBytes, downloadText } from "./services/download.service.js";
 import { csvToJson, jsonToCsv } from "./services/csv.service.js";
-import { compressImage, cropImage, exportCanvas, imageToCanvas, resizeImage, rotateFlipImage } from "./services/image.service.js";
+import { cleanImageMetadata, compressImage, cropImage, exportCanvas, imageDimensions, imageToCanvas, resizeImage, rotateFlipImage } from "./services/image.service.js";
 import { deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf } from "./services/pdf.service.js";
 
 type Tool = (typeof tools)[number];
@@ -42,6 +42,7 @@ const categoryIcons: Record<string, any> = {
   "Business Tools": ReceiptText,
   "Signature Tools": PenLine,
   "Text & Data Tools": FileArchive,
+  "Privacy Tools": ShieldCheck,
   "Developer Utilities": Hash,
 };
 
@@ -51,6 +52,7 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
   "Business Tools": { description: "Create clean invoices, receipts, quotes, and estimates.", accent: "Business" },
   "Signature Tools": { description: "Draw or type signatures and export them as PNG files.", accent: "Signature" },
   "Text & Data Tools": { description: "Format JSON, convert CSV, preview Markdown, and create PDFs from text.", accent: "Data" },
+  "Privacy Tools": { description: "Clean supported image metadata locally in your browser.", accent: "Privacy" },
   "Developer Utilities": { description: "Handle hashes, Base64, and small file checks without leaving the page.", accent: "Utility" },
 };
 
@@ -338,6 +340,7 @@ function ToolSection({ title, tools: sectionTools, searchMode = false }: { title
 
 function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) {
   const Icon = iconForTool(tool);
+  const visibleBadges = (tool.badges || []).filter((badge: string) => !["Local", "Local processing", categoryDetails[tool.category]?.accent].includes(badge)).slice(0, 2);
   return (
     <a href={tool.route} className={`tool-card group grid gap-4 rounded-3xl p-5 text-[var(--ink)] no-underline transition hover:-translate-y-1 focus-visible:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
       <div className="flex items-start justify-between gap-3">
@@ -352,7 +355,8 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
       </div>
       <div className="mt-auto flex flex-wrap gap-2">
         <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{categoryDetails[tool.category]?.accent || tool.category}</span>
-        {tool.localProcessing && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">Local</span>}
+        {visibleBadges.map((badge: string) => <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>)}
+        {tool.localProcessing && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">Local processing</span>}
         {fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
       </div>
     </a>
@@ -473,6 +477,7 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "json-formatter-tool") return <JsonTool />;
   if (tool.id === "csv-to-json-tool") return <CsvToJsonTool />;
   if (tool.id === "json-to-csv-tool") return <JsonToCsvTool />;
+  if (tool.id === "metadata-cleaner") return <MetadataCleanerTool tool={tool} />;
   if (tool.id === "base64-tool") return <Base64Tool />;
   if (tool.id === "file-hash-tool") return <FileHashTool tool={tool} />;
   return <StatusBox status={{ tone: "error", message: "This tool renderer is missing." }} />;
@@ -605,6 +610,106 @@ function RotateFlipImageTool({ tool }: { tool: Tool }) {
       return `Output: ${canvas.width}×${canvas.height}.`;
     })} />
   </ToolForm>;
+}
+
+type MetadataImageInfo = {
+  name: string;
+  type: string;
+  size: number;
+  width: number;
+  height: number;
+  lastModified: number;
+};
+
+function MetadataCleanerTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [info, setInfo] = useState<MetadataImageInfo | null>(null);
+  const [cleaned, setCleaned] = useState<{ blob: Blob; filename: string } | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => {
+    setFiles([]);
+    setInfo(null);
+    setCleaned(null);
+    setStatus(initialStatus);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setCleaned(null);
+    setInfo(null);
+    if (!files.length) return undefined;
+
+    runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const dimensions = await imageDimensions(file);
+      if (cancelled) return "Ready.";
+      setInfo({
+        name: file.name,
+        type: file.type || "Unknown image type",
+        size: file.size,
+        width: dimensions.width,
+        height: dimensions.height,
+        lastModified: file.lastModified,
+      });
+      return "Image validated locally. Ready to clean metadata.";
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [files, tool.file]);
+
+  const clean = () => runSafely(setStatus, async () => {
+    const [file] = validateFiles(files, tool.file);
+    const outputType = file.type || "image/png";
+    const blob = await cleanImageMetadata(file, outputType);
+    const filename = withExtension(`${safeFilename(file.name)}-cleaned`, imageExt(outputType));
+    setCleaned({ blob, filename });
+    return "The cleaned image is re-encoded locally in your browser. Most embedded metadata is removed, but browser-based cleaning may not preserve every original encoding detail.";
+  });
+
+  return (
+    <ToolForm status={status} onReset={reset}>
+      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+        Supports JPG/JPEG, PNG, and WebP images only. EXIF usually applies to photos, while PNG and WebP may contain other embedded metadata.
+      </div>
+      <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="surface-card wabi-card-edge p-4">
+          <p className="font-black">Detected file info</p>
+          {info ? (
+            <dl className="mt-3 grid gap-2 text-sm font-semibold text-neutral-600">
+              <InfoRow label="File name" value={info.name} />
+              <InfoRow label="File type" value={info.type} />
+              <InfoRow label="File size" value={formatBytes(info.size)} />
+              <InfoRow label="Dimensions" value={`${info.width}×${info.height}px`} />
+              <InfoRow label="Last modified" value={info.lastModified ? new Date(info.lastModified).toLocaleString() : "Not available"} />
+            </dl>
+          ) : (
+            <p className="mt-3 text-sm font-semibold text-neutral-500">Choose a supported image to inspect basic browser file info.</p>
+          )}
+        </div>
+        <div className="surface-card wabi-card-edge p-4">
+          <p className="font-black">Result</p>
+          {cleaned && info ? (
+            <div className="mt-3 grid gap-3 text-sm font-semibold text-neutral-600">
+              <InfoRow label="Before" value={formatBytes(info.size)} />
+              <InfoRow label="After" value={formatBytes(cleaned.blob.size)} />
+              <InfoRow label="Output" value={cleaned.filename} />
+              <SecondaryButton label="Download cleaned image" onClick={() => downloadBlob(cleaned.blob, cleaned.filename)} />
+            </div>
+          ) : (
+            <p className="mt-3 text-sm font-semibold text-neutral-500">Cleaned image details will appear here after processing.</p>
+          )}
+        </div>
+      </div>
+      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+        Privacy note: the selected image is processed locally in this browser session. MyFileKit does not upload it, store it, track it, or log metadata contents.
+      </div>
+      <PrimaryButton label="Clean metadata" onClick={clean} />
+    </ToolForm>
+  );
 }
 
 function BusinessDocument({ title, name, labels }: { title: string; name: string; labels: string[] }) {
@@ -795,11 +900,27 @@ function StatusBox({ status }: { status: Status }) {
 }
 
 function FileControl({ accept, multiple = false, files, setFiles }: { accept: string; multiple?: boolean; files: File[]; setFiles: (files: File[]) => void }) {
-  return <label className="surface-card grid cursor-pointer gap-3 rounded-3xl border-dashed border-neutral-300 p-5 transition hover:border-[var(--moss)]">
-    <span className="flex items-center gap-3 font-black"><Upload size={20} /> Choose file{multiple ? "s" : ""}</span>
+  return <label
+    className="surface-card grid cursor-pointer gap-3 rounded-3xl border-dashed border-neutral-300 p-5 transition hover:border-[var(--moss)]"
+    onDragOver={(event) => event.preventDefault()}
+    onDrop={(event) => {
+      event.preventDefault();
+      setFiles(Array.from(event.dataTransfer.files || []));
+    }}
+  >
+    <span className="flex items-center gap-3 font-black"><Upload size={20} /> Choose or drop file{multiple ? "s" : ""}</span>
     <input aria-label={`Choose ${multiple ? "files" : "file"}`} className="sr-only" type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} />
     <span className="text-sm font-semibold text-neutral-500">{files.length ? files.map((file) => file.name).join(", ") : "No file selected"}</span>
   </label>;
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-1 border-b border-[var(--border)] pb-2 last:border-b-0 last:pb-0 sm:grid-cols-[140px_1fr]">
+      <dt className="text-neutral-500">{label}</dt>
+      <dd className="break-words text-[var(--foreground)]">{value}</dd>
+    </div>
+  );
 }
 
 function Input({ label, value, onChange, placeholder = "", helper = "", type = "text" }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; helper?: string; type?: string }) {
@@ -898,6 +1019,7 @@ function iconForTool(tool: Tool) {
   if (tool.category === "Image Tools") return Image;
   if (tool.category === "Business Tools") return ReceiptText;
   if (tool.category === "Signature Tools") return PenLine;
+  if (tool.category === "Privacy Tools") return ShieldCheck;
   if (tool.id.includes("rotate")) return RotateCw;
   if (tool.id.includes("crop") || tool.id.includes("split")) return Scissors;
   if (tool.id.includes("hash")) return Hash;

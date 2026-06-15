@@ -46,27 +46,27 @@
 }
 
 :root {
-  --card: #ffffff;
-  --ring: #a1a1a1;
-  --input: #e5e5e5;
-  --muted: #f5f5f5;
-  --accent: #f5f5f5;
-  --border: #e5e5e5;
-  --radius: 0rem;
-  --chart-1: #737373;
-  --chart-2: #737373;
-  --chart-3: #737373;
-  --chart-4: #737373;
-  --chart-5: #737373;
-  --popover: #ffffff;
-  --primary: #737373;
-  --sidebar: #fafafa;
+  --card: rgba(255, 255, 255, .78);
+  --ring: #8b95a7;
+  --input: rgba(17, 24, 39, .12);
+  --muted: rgba(248, 250, 252, .72);
+  --accent: rgba(241, 245, 249, .82);
+  --border: rgba(15, 23, 42, .08);
+  --radius: 1.15rem;
+  --chart-1: #0f172a;
+  --chart-2: #334155;
+  --chart-3: #64748b;
+  --chart-4: #94a3b8;
+  --chart-5: #cbd5e1;
+  --popover: rgba(255, 255, 255, .92);
+  --primary: #0f172a;
+  --sidebar: rgba(248, 250, 252, .86);
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  --font-sans: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  --secondary: #f5f5f5;
-  --background: #ffffff;
-  --font-serif: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  --foreground: #0a0a0a;
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --secondary: rgba(241, 245, 249, .82);
+  --background: #f7f8fb;
+  --font-serif: Georgia, Cambria, "Times New Roman", Times, serif;
+  --foreground: #101828;
   --destructive: #e7000b;
   --shadow-blur: 0px;
   --shadow-color: hsl(0 0% 0%);
@@ -75,13 +75,13 @@
   --shadow-opacity: 0;
   --sidebar-accent: #f5f5f5;
   --sidebar-border: #e5e5e5;
-  --card-foreground: #0a0a0a;
+  --card-foreground: #101828;
   --shadow-offset-x: 0px;
   --shadow-offset-y: 1px;
   --sidebar-primary: #171717;
-  --muted-foreground: #717171;
-  --accent-foreground: #171717;
-  --popover-foreground: #0a0a0a;
+  --muted-foreground: #667085;
+  --accent-foreground: #101828;
+  --popover-foreground: #101828;
   --primary-foreground: #fafafa;
   --sidebar-foreground: #0a0a0a;
   --secondary-foreground: #171717;
@@ -98,8 +98,8 @@
   --indigo: #171717;
   --clay: var(--primary);
   --ochre: var(--ring);
-  --shadow-soft: none;
-  --shadow-lift: none;
+  --shadow-soft: 0 24px 70px rgba(15, 23, 42, .08);
+  --shadow-lift: 0 30px 90px rgba(15, 23, 42, .14);
   font-family: var(--font-sans);
   color: var(--ink);
   background: var(--app-bg);
@@ -153,10 +153,11 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    linear-gradient(rgba(10, 10, 10, .035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(10, 10, 10, .025) 1px, transparent 1px),
+    radial-gradient(circle at 16% 8%, rgba(148, 163, 184, .22), transparent 30%),
+    radial-gradient(circle at 86% 2%, rgba(15, 23, 42, .08), transparent 26%),
+    linear-gradient(180deg, #ffffff 0%, #f7f8fb 42%, #f2f4f8 100%),
     var(--app-bg);
-  background-size: 36px 36px, 36px 36px, auto;
+  background-size: auto;
 }
 
 body::before {
@@ -165,12 +166,12 @@ body::before {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  opacity: .08;
+  opacity: .16;
   background-image:
-    radial-gradient(circle at 12% 22%, rgba(10, 10, 10, .28) 0 1px, transparent 1px),
-    radial-gradient(circle at 68% 74%, rgba(10, 10, 10, .16) 0 1px, transparent 1px);
-  background-size: 22px 24px, 34px 32px;
-  mix-blend-mode: multiply;
+    linear-gradient(120deg, transparent 0 46%, rgba(15, 23, 42, .04) 46% 47%, transparent 47%),
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, .82), transparent 44%);
+  background-size: auto;
+  mix-blend-mode: normal;
 }
 
 button,
@@ -208,42 +209,44 @@ button {
 
 .font-display {
   font-family: var(--font-sans);
+  letter-spacing: -.035em;
 }
 
 .site-header {
-  border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, .94);
-  box-shadow: none;
+  border-bottom: 1px solid rgba(255, 255, 255, .72);
+  background: rgba(255, 255, 255, .72);
+  box-shadow: 0 14px 42px rgba(15, 23, 42, .06);
 }
 
 .surface-panel,
 .surface-card,
 .surface-muted {
   position: relative;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(255, 255, 255, .72);
   color: var(--ink);
+  backdrop-filter: blur(18px);
 }
 
 .surface-panel {
-  background: var(--paper);
+  background: linear-gradient(145deg, rgba(255, 255, 255, .82), rgba(248, 250, 252, .66));
   box-shadow: var(--shadow-soft);
 }
 
 .surface-card {
-  background: var(--paper);
-  box-shadow: none;
+  background: rgba(255, 255, 255, .68);
+  box-shadow: 0 16px 48px rgba(15, 23, 42, .055);
 }
 
 .surface-muted {
-  background: var(--paper-soft);
+  background: rgba(248, 250, 252, .7);
 }
 
 .wabi-edge {
-  border-radius: var(--radius);
+  border-radius: 2rem;
 }
 
 .wabi-card-edge {
-  border-radius: var(--radius);
+  border-radius: 1.4rem;
 }
 
 .wabi-noise {
@@ -271,18 +274,19 @@ button {
 .ink-button,
 .icon-tile,
 .available-badge {
-  background: var(--foreground);
+  background: linear-gradient(135deg, #101828, #1d2939);
   color: var(--background);
 }
 
 .ink-button {
-  box-shadow: none;
+  box-shadow: 0 18px 44px rgba(16, 24, 40, .18);
 }
 
 .nav-pill {
-  background: var(--card);
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, .62);
+  border: 1px solid rgba(255, 255, 255, .8);
   color: var(--ink);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, .05);
 }
 
 .nav-pill:hover,
@@ -291,12 +295,16 @@ button {
 }
 
 .tool-card {
-  background: var(--paper);
-  box-shadow: none;
+  border-color: rgba(255, 255, 255, .76);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, .78), rgba(248, 250, 252, .58));
+  box-shadow: 0 18px 60px rgba(15, 23, 42, .07);
+  backdrop-filter: blur(18px);
 }
 
 .tool-card:hover {
-  background: var(--muted);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, .92), rgba(248, 250, 252, .74));
   box-shadow: var(--shadow-lift);
 }
 
@@ -305,13 +313,13 @@ button {
 }
 
 .tag-badge {
-  border: 1px solid var(--border);
-  background: var(--muted);
+  border: 1px solid rgba(15, 23, 42, .06);
+  background: rgba(255, 255, 255, .62);
   color: var(--stone);
 }
 
 .local-badge {
-  background: var(--muted);
+  background: rgba(255, 255, 255, .68);
   color: var(--foreground);
 }
 
@@ -319,23 +327,24 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--muted);
+  border: 1px solid rgba(255, 255, 255, .78);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .68);
   color: var(--foreground);
+  box-shadow: 0 12px 34px rgba(15, 23, 42, .06);
   padding: 7px 11px;
 }
 
 .quick-chip {
   min-height: 36px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card);
+  border: 1px solid rgba(255, 255, 255, .76);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .7);
   color: var(--ink);
   padding: 8px 12px;
   font-size: 13px;
   font-weight: 900;
-  box-shadow: none;
+  box-shadow: 0 12px 36px rgba(15, 23, 42, .06);
   transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
 }
 
@@ -343,11 +352,11 @@ button {
 .quick-chip:focus-visible {
   transform: translateY(-1px);
   border-color: var(--ring);
-  box-shadow: none;
+  box-shadow: 0 18px 46px rgba(15, 23, 42, .09);
 }
 
 .category-heading {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0;
   padding-bottom: 12px;
 }
 
@@ -357,16 +366,17 @@ button {
   width: 38px;
   height: 38px;
   flex: 0 0 auto;
-  border-radius: var(--radius);
-  background: var(--muted);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, .68);
   color: var(--foreground);
+  box-shadow: 0 12px 34px rgba(15, 23, 42, .06);
 }
 
 .tool-arrow {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  border-radius: var(--radius);
+  border-radius: 999px;
   color: var(--stone);
   font-size: 12px;
   font-weight: 900;
@@ -383,6 +393,7 @@ button {
 .hero-panel {
   position: relative;
   min-height: 560px;
+  border-color: rgba(255, 255, 255, .8);
 }
 
 .hero-panel::before {
@@ -391,9 +402,9 @@ button {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(135deg, rgba(10, 10, 10, .035), transparent 45%),
-    linear-gradient(90deg, rgba(10, 10, 10, .025) 1px, transparent 1px);
-  background-size: auto, 28px 28px;
+    radial-gradient(circle at 50% 5%, rgba(255, 255, 255, .85), transparent 42%),
+    linear-gradient(135deg, rgba(15, 23, 42, .055), transparent 50%);
+  background-size: auto;
 }
 
 .hero-hills {
@@ -401,7 +412,7 @@ button {
   inset: auto 0 0 0;
   height: min(420px, 62%) !important;
   width: 100% !important;
-  opacity: .52;
+  opacity: .28;
   pointer-events: none;
   z-index: 0;
   mask-image: linear-gradient(to top, #000 12%, transparent 92%);
@@ -413,12 +424,15 @@ button {
 
 .spotlight-search {
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  border-color: rgba(255, 255, 255, .86);
+  background: rgba(255, 255, 255, .78);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .1);
 }
 
 .spotlight-search:focus-within {
   transform: translateY(-2px);
   border-color: var(--ring);
-  box-shadow: none;
+  box-shadow: 0 30px 90px rgba(15, 23, 42, .14);
 }
 
 .brand-mark {
@@ -437,12 +451,12 @@ button {
 
 .brand-mark-aura {
   position: absolute;
-  inset: 6px;
-  border-radius: var(--radius);
-  background: var(--muted);
-  opacity: 1;
-  filter: none;
-  animation: brand-spin 11s linear infinite;
+  inset: 7px;
+  border-radius: 1.2rem;
+  background: linear-gradient(135deg, #101828, #475467);
+  opacity: .1;
+  filter: blur(8px);
+  animation: none;
 }
 
 .brand-logo-svg {
@@ -451,8 +465,8 @@ button {
   width: 100%;
   height: 100%;
   overflow: visible;
-  filter: none;
-  animation: brand-float 4.8s ease-in-out infinite;
+  filter: drop-shadow(0 16px 28px rgba(15, 23, 42, .16));
+  animation: brand-float 5.6s ease-in-out infinite;
 }
 
 .brand-logo-ring,
@@ -513,13 +527,13 @@ button {
 .field-input {
   width: 100%;
   min-width: 0;
-  border: 1px solid var(--input);
-  border-radius: var(--radius);
-  background: var(--paper);
+  border: 1px solid rgba(15, 23, 42, .08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, .72);
   padding: 13px 14px;
   color: var(--ink);
   outline: none;
-  box-shadow: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 10px 28px rgba(15, 23, 42, .04);
 }
 
 .field-input:focus {
@@ -535,7 +549,7 @@ button {
   justify-content: center;
   gap: 8px;
   min-height: 42px;
-  border-radius: var(--radius);
+  border-radius: 999px;
   padding: 10px 15px;
   font-size: 14px;
   font-weight: 900;
@@ -543,18 +557,19 @@ button {
 }
 
 .primary-button {
-  border: 1px solid var(--ink);
-  background: var(--foreground);
+  border: 1px solid rgba(16, 24, 40, .9);
+  background: linear-gradient(135deg, #101828, #344054);
   color: #fff;
-  box-shadow: none;
+  box-shadow: 0 18px 44px rgba(16, 24, 40, .18);
 }
 
 .secondary-button,
 .nav-action,
 .side-link {
-  border: 1px solid var(--border);
-  background: var(--card);
+  border: 1px solid rgba(255, 255, 255, .78);
+  background: rgba(255, 255, 255, .64);
   color: var(--ink);
+  box-shadow: 0 12px 34px rgba(15, 23, 42, .055);
 }
 
 .side-link {
@@ -570,8 +585,8 @@ button {
 }
 
 .tool-action-panel {
-  border-top: 1px solid var(--border);
-  padding-top: 20px;
+  border-top: 0;
+  padding-top: 10px;
 }
 
 :where(.rounded-full, .rounded-3xl, .rounded-2xl, .rounded-xl) {
