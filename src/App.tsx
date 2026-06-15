@@ -20,6 +20,7 @@ import {
   Upload,
 } from "lucide-react";
 import { AnimatedLogo } from "./components/AnimatedLogo";
+import { EtherealShadow } from "@/components/ui/etheral-shadow";
 import { ExpandingSearchDock } from "@/components/ui/expanding-search-dock-shadcnui";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
@@ -85,7 +86,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <header className="sticky top-0 z-30 border-b border-black/10 bg-[rgba(250,249,245,.86)] backdrop-blur-xl">
+      <header className="site-header sticky top-0 z-30 backdrop-blur-xl">
         <div className="mx-auto flex w-[min(1240px,calc(100vw-28px))] items-center justify-between gap-4 py-4">
           <a href="#dashboard" className="flex items-center gap-3 text-[var(--ink)] no-underline">
             <AnimatedLogo compact />
@@ -104,7 +105,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             <div className="hidden md:block">
               <ExpandingSearchDock onSearch={runHeaderSearch} placeholder="Search tools..." />
             </div>
-            <a className="rounded-full bg-neutral-950 px-4 py-2 text-sm font-black text-white shadow-xl shadow-black/10" href="#category-pdf-tools">
+            <a className="ink-button rounded-full px-4 py-2 text-sm font-black no-underline" href="#category-pdf-tools">
               Browse tools
             </a>
           </div>
@@ -119,7 +120,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function NavPill({ href, icon: Icon, label }: { href: string; icon: any; label: string }) {
   return (
-    <a className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3.5 py-2 text-sm font-extrabold text-[var(--ink)] no-underline shadow-sm transition hover:-translate-y-0.5 hover:border-black/20 hover:bg-white" href={href}>
+    <a className="nav-pill inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-sm font-extrabold no-underline shadow-sm transition hover:-translate-y-0.5" href={href}>
       <Icon size={16} />
       {label}
     </a>
@@ -148,21 +149,29 @@ function Dashboard() {
 
   return (
     <div className="grid gap-8">
-      <section className="hero-panel overflow-hidden rounded-[2rem] border border-black/10 bg-white shadow-2xl shadow-black/[.07]">
-        <div className="relative grid gap-8 px-6 py-9 md:px-10 lg:grid-cols-[1.1fr_.9fr] lg:items-end lg:px-12 lg:py-12">
+      <section className="hero-panel surface-panel wabi-edge overflow-hidden">
+        <EtherealShadow
+          className="wabi-shadow"
+          color="rgba(70, 83, 65, .34)"
+          animation={{ scale: 72, speed: 42 }}
+          noise={{ opacity: .34, scale: 1.18 }}
+          sizing="fill"
+          style={{ position: "absolute", inset: 0 }}
+        />
+        <div className="relative z-10 grid gap-8 px-6 py-9 md:px-10 lg:grid-cols-[1.1fr_.9fr] lg:items-end lg:px-12 lg:py-12">
           <div className="grid gap-6">
             <div className="flex items-center gap-4">
               <AnimatedLogo />
               <div>
-                <p className="text-xs font-black uppercase text-teal-700">Major v2 workspace</p>
+                <p className="moss-text text-xs font-black uppercase">Major v2 workspace</p>
                 <h1 className="font-display text-5xl font-black md:text-7xl">MyFileKit</h1>
               </div>
             </div>
             <p className="max-w-3xl text-xl font-semibold leading-snug text-neutral-700 md:text-2xl">
               A professional React file toolkit for PDF, image, business, signature, text, data, and developer workflows.
             </p>
-            <div className="spotlight-search flex items-center gap-3 rounded-3xl border border-black/10 bg-white/90 p-3 shadow-2xl shadow-black/10">
-              <span className="grid h-11 w-11 place-items-center rounded-2xl bg-neutral-950 text-white">
+            <div className="spotlight-search surface-card wabi-card-edge flex items-center gap-3 p-3">
+              <span className="icon-tile grid h-11 w-11 place-items-center rounded-2xl">
                 <Search size={21} />
               </span>
               <input
@@ -172,15 +181,15 @@ function Dashboard() {
                 placeholder="Search PDF, image, invoice, signature, JSON tools..."
                 type="search"
               />
-              <kbd className="hidden rounded-xl bg-neutral-100 px-2.5 py-1.5 text-xs font-black text-neutral-500 sm:block">⌘K</kbd>
+              <kbd className="hidden rounded-xl bg-[var(--paper-soft)] px-2.5 py-1.5 text-xs font-black text-[var(--stone)] sm:block">⌘K</kbd>
             </div>
             <p className="text-sm font-bold text-neutral-500">
               {query ? `${matches.length} matching tool${matches.length === 1 ? "" : "s"}` : `${tools.length} tools across ${categories.length} categories`} · local-first wherever possible
             </p>
           </div>
-          <div className="grid gap-3 rounded-3xl border border-black/10 bg-[#f3f0e8] p-4">
+          <div className="surface-muted wabi-card-edge grid gap-3 p-4">
             {featureHighlights.map(([title, copy]) => (
-              <div key={title} className="rounded-2xl border border-black/10 bg-white/80 p-4">
+              <div key={title} className="surface-card wabi-card-edge p-4">
                 <p className="font-black">{title}</p>
                 <p className="mt-1 text-sm font-medium leading-6 text-neutral-600">{copy}</p>
               </div>
@@ -189,13 +198,13 @@ function Dashboard() {
         </div>
       </section>
 
-      <section className="grid gap-6 rounded-[2rem] border border-black/10 bg-white p-5 shadow-xl shadow-black/[.05] md:p-7">
+      <section className="surface-panel wabi-edge grid gap-6 p-5 md:p-7">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h2 className="font-display text-3xl font-black">Tool Library</h2>
             <p className="mt-1 font-semibold text-neutral-500">Every visible card opens a working tool page.</p>
           </div>
-          <span className="inline-flex items-center gap-2 rounded-full bg-teal-50 px-4 py-2 text-sm font-black text-teal-800">
+          <span className="local-badge inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-black">
             <ShieldCheck size={16} />
             Local-first
           </span>
@@ -224,7 +233,7 @@ function ToolSection({ title, tools: sectionTools }: { title: string; tools: Too
           {title}
         </h3>
         {categories.includes(title) && (
-          <a className="text-sm font-black text-teal-800 no-underline" href={categoryRoute(title)}>
+          <a className="moss-text text-sm font-black no-underline" href={categoryRoute(title)}>
             View all <ChevronRight className="inline" size={15} />
           </a>
         )}
@@ -239,12 +248,12 @@ function ToolSection({ title, tools: sectionTools }: { title: string; tools: Too
 function ToolCard({ tool }: { tool: Tool }) {
   const Icon = iconForTool(tool);
   return (
-    <a href={tool.route} className="group grid min-h-44 gap-4 rounded-3xl border border-black/10 bg-[#fffdf8] p-5 text-[var(--ink)] no-underline shadow-sm transition hover:-translate-y-1 hover:border-teal-700/30 hover:bg-white hover:shadow-2xl hover:shadow-black/[.08]">
+    <a href={tool.route} className="tool-card group grid min-h-44 gap-4 rounded-3xl p-5 text-[var(--ink)] no-underline transition hover:-translate-y-1">
       <div className="flex items-start justify-between gap-3">
-        <span className="grid h-12 w-12 place-items-center rounded-2xl bg-neutral-950 text-white transition group-hover:rotate-3 group-hover:bg-teal-800">
+        <span className="icon-tile grid h-12 w-12 place-items-center rounded-2xl transition group-hover:rotate-3">
           <Icon size={21} />
         </span>
-        <span className="rounded-full bg-neutral-950 px-3 py-1 text-[11px] font-black uppercase text-white">Available</span>
+        <span className="available-badge rounded-full px-3 py-1 text-[11px] font-black uppercase">Available</span>
       </div>
       <div>
         <h4 className="text-lg font-black">{tool.name}</h4>
@@ -252,7 +261,7 @@ function ToolCard({ tool }: { tool: Tool }) {
       </div>
       <div className="mt-auto flex flex-wrap gap-2">
         {tool.badges.map((badge: string) => (
-          <span key={badge} className="rounded-full border border-black/10 bg-white px-2.5 py-1 text-[11px] font-black uppercase text-neutral-600">{badge}</span>
+          <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>
         ))}
       </div>
     </a>
@@ -265,9 +274,9 @@ function CategoryPage({ category }: { category: string }) {
   return (
     <div className="grid gap-6">
       <Toolbar title={category} subtitle={`${categoryTools.length} available workflows`} />
-      <section className="rounded-[2rem] border border-black/10 bg-white p-6 shadow-xl shadow-black/[.05]">
+      <section className="surface-panel wabi-edge p-6">
         <div className="mb-6 flex items-center gap-3">
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-neutral-950 text-white"><Icon size={24} /></span>
+          <span className="icon-tile grid h-14 w-14 place-items-center rounded-2xl"><Icon size={24} /></span>
           <div>
             <h1 className="font-display text-4xl font-black">{category}</h1>
             <p className="font-semibold text-neutral-500">Choose any tool below. Nothing here is a placeholder.</p>
@@ -288,11 +297,11 @@ function ToolPage({ tool }: { tool: Tool }) {
     <div className="grid gap-6">
       <Toolbar title={tool.name} subtitle={tool.category} />
       <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_330px]">
-        <div className="rounded-[2rem] border border-black/10 bg-white p-5 shadow-xl shadow-black/[.05] md:p-7">
+        <div className="surface-panel wabi-edge p-5 md:p-7">
           <div className="mb-6 flex items-start gap-4">
-            <span className="grid h-14 w-14 place-items-center rounded-2xl bg-neutral-950 text-white"><Icon size={24} /></span>
+            <span className="icon-tile grid h-14 w-14 place-items-center rounded-2xl"><Icon size={24} /></span>
             <div>
-              <p className="text-xs font-black uppercase text-teal-700">{tool.category}</p>
+              <p className="moss-text text-xs font-black uppercase">{tool.category}</p>
               <h1 className="font-display text-4xl font-black">{tool.name}</h1>
               <p className="mt-2 max-w-2xl font-semibold leading-7 text-neutral-600">{tool.description}</p>
             </div>
@@ -300,7 +309,7 @@ function ToolPage({ tool }: { tool: Tool }) {
           <ToolRenderer tool={tool} />
         </div>
         <aside className="grid content-start gap-4">
-          <div className="rounded-3xl border border-black/10 bg-[#f3f0e8] p-5">
+          <div className="surface-muted wabi-card-edge p-5">
             <p className="flex items-center gap-2 font-black"><BadgeCheck size={18} /> Navigation</p>
             <div className="mt-4 grid gap-2">
               <a className="side-link" href="#dashboard">Dashboard</a>
@@ -310,7 +319,7 @@ function ToolPage({ tool }: { tool: Tool }) {
             </div>
           </div>
           {related.length > 0 && (
-            <div className="rounded-3xl border border-black/10 bg-white p-5">
+            <div className="surface-card wabi-card-edge p-5">
               <p className="font-black">More in {tool.category}</p>
               <div className="mt-3 grid gap-2">
                 {related.map((item: Tool) => <a key={item.id} className="side-link" href={item.route}>{item.name}</a>)}
@@ -544,7 +553,7 @@ function DrawSignatureTool() {
   }, [color, size]);
 
   return <ToolForm status={status} onReset={() => { canvasRef.current?.getContext("2d")?.clearRect(0, 0, 900, 260); setStatus(initialStatus); }}>
-    <canvas ref={canvasRef} className="h-auto min-h-44 w-full rounded-3xl border border-dashed border-neutral-400 bg-white" width={900} height={260} />
+    <canvas ref={canvasRef} className="surface-card h-auto min-h-44 w-full rounded-3xl border-dashed border-neutral-400" width={900} height={260} />
     <div className="grid gap-3 sm:grid-cols-2"><Input label="Color" value={color} onChange={setColor} type="color" /><Input label="Thickness" value={size} onChange={setSize} type="number" /></div>
     <PrimaryButton label="Download PNG" onClick={() => canvasRef.current?.toBlob((blob) => { if (blob) downloadBlob(blob, "signature.png"); setStatus({ tone: "success", message: "Signature downloaded." }); })} />
   </ToolForm>;
@@ -583,7 +592,7 @@ function MarkdownTool() {
   const [status, setStatus] = useState(initialStatus);
   return <ToolForm status={status} onReset={() => { setMarkdown(""); setStatus(initialStatus); }}>
     <Textarea label="Markdown" value={markdown} onChange={setMarkdown} rows={10} />
-    <div className="rounded-3xl border border-black/10 bg-white p-4" dangerouslySetInnerHTML={{ __html: html }} />
+    <div className="surface-card wabi-card-edge p-4" dangerouslySetInnerHTML={{ __html: html }} />
     <PrimaryButton label="Download HTML" onClick={() => { downloadText(html, "markdown-preview", "html", "text/html;charset=utf-8"); setStatus({ tone: "success", message: "HTML downloaded." }); }} />
   </ToolForm>;
 }
@@ -645,7 +654,7 @@ function FileHashTool({ tool }: { tool: Tool }) {
 }
 
 function InvoiceLauncher() {
-  return <div className="grid gap-4 rounded-3xl border border-black/10 bg-[#fffdf8] p-5">
+  return <div className="surface-card wabi-card-edge grid gap-4 p-5">
     <p className="font-semibold leading-7 text-neutral-700">The invoice generator opens the full editor with templates, line items, tax, discount, TDS, payment details, logo controls, signatures, and print/PDF export.</p>
     <a className="primary-button w-fit" href="/invoice-generator/index.html">Open Invoice Generator</a>
   </div>;
@@ -660,11 +669,11 @@ function ToolForm({ children, status, onReset }: { children: React.ReactNode; st
 }
 
 function StatusBox({ status }: { status: Status }) {
-  return <p className={`min-h-12 whitespace-pre-line rounded-2xl border px-4 py-3 text-sm font-bold ${status.tone === "error" ? "border-red-200 bg-red-50 text-red-800" : status.tone === "success" ? "border-teal-200 bg-teal-50 text-teal-900" : "border-black/10 bg-neutral-50 text-neutral-600"}`}>{status.message}</p>;
+  return <p className={`min-h-12 whitespace-pre-line rounded-2xl border px-4 py-3 text-sm font-bold ${status.tone === "error" ? "border-red-200 bg-red-50 text-red-800" : status.tone === "success" ? "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f]" : "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]"}`}>{status.message}</p>;
 }
 
 function FileControl({ accept, multiple = false, files, setFiles }: { accept: string; multiple?: boolean; files: File[]; setFiles: (files: File[]) => void }) {
-  return <label className="grid cursor-pointer gap-3 rounded-3xl border border-dashed border-neutral-300 bg-[#fffdf8] p-5 transition hover:border-teal-700">
+  return <label className="surface-card grid cursor-pointer gap-3 rounded-3xl border-dashed border-neutral-300 p-5 transition hover:border-[var(--moss)]">
     <span className="flex items-center gap-3 font-black"><Upload size={20} /> Choose file{multiple ? "s" : ""}</span>
     <input className="sr-only" type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} />
     <span className="text-sm font-semibold text-neutral-500">{files.length ? files.map((file) => file.name).join(", ") : "No file selected"}</span>
@@ -688,7 +697,7 @@ function Range({ label, value, onChange }: { label: string; value: string; onCha
 }
 
 function Checkbox({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return <label className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 font-bold"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />{label}</label>;
+  return <label className="surface-card flex items-center gap-3 rounded-2xl px-4 py-3 font-bold"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />{label}</label>;
 }
 
 function PrimaryButton({ label, onClick }: { label: string; onClick: () => void }) {
@@ -700,11 +709,11 @@ function SecondaryButton({ label, onClick }: { label: string; onClick: () => voi
 }
 
 function EmptyState({ query }: { query: string }) {
-  return <div className="rounded-3xl border border-dashed border-neutral-300 bg-[#fffdf8] p-10 text-center"><p className="font-display text-2xl font-black">No matching tools</p><p className="mt-2 font-semibold text-neutral-500">Try a shorter search than “{query}”.</p></div>;
+  return <div className="surface-card rounded-3xl border-dashed border-neutral-300 p-10 text-center"><p className="font-display text-2xl font-black">No matching tools</p><p className="mt-2 font-semibold text-neutral-500">Try a shorter search than “{query}”.</p></div>;
 }
 
 function MissingPage() {
-  return <div className="rounded-[2rem] border border-black/10 bg-white p-10 text-center"><h1 className="font-display text-4xl font-black">Page not found</h1><a className="primary-button mx-auto mt-5 w-fit" href="#dashboard">Return to dashboard</a></div>;
+  return <div className="surface-panel wabi-edge p-10 text-center"><h1 className="font-display text-4xl font-black">Page not found</h1><a className="primary-button mx-auto mt-5 w-fit" href="#dashboard">Return to dashboard</a></div>;
 }
 
 function filterTools(query: string) {
