@@ -258,45 +258,77 @@ button {
 
 .brand-mark-aura {
   position: absolute;
-  inset: 0;
-  border-radius: 24px;
+  inset: 6px;
+  border-radius: 999px;
   background: conic-gradient(from 180deg, var(--moss), var(--ochre), var(--indigo), var(--clay), var(--moss));
-  opacity: .22;
-  filter: blur(10px);
-  animation: brand-spin 8s linear infinite;
+  opacity: .28;
+  filter: blur(11px);
+  animation: brand-spin 11s linear infinite;
 }
 
-.brand-mark-page {
-  position: absolute;
-  border: 1px solid rgba(31, 33, 28, .16);
-  border-radius: 16px 12px 18px 13px;
-  background: var(--paper);
-  box-shadow: 0 18px 40px rgba(31, 33, 28, .14);
+.brand-logo-svg {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 14px 20px rgba(31, 33, 28, .18));
+  animation: brand-float 4.8s ease-in-out infinite;
 }
 
-.brand-mark-page-back {
-  inset: 14px 19px 12px 13px;
-  transform: rotate(-8deg);
+.brand-logo-ring,
+.brand-logo-ring-gap {
+  fill: none;
+  stroke: url("#mfk-earth");
+  stroke-width: 4.4;
+  stroke-linecap: round;
 }
 
-.brand-mark-page-front {
-  inset: 10px 14px 14px 18px;
-  display: grid;
-  place-items: center;
-  color: var(--moss);
-  animation: brand-float 3.6s ease-in-out infinite;
+.brand-logo-ring-gap {
+  opacity: .76;
 }
 
-.brand-mark-compact .brand-mark-page {
-  border-radius: 12px;
+.brand-logo-sheet {
+  stroke-linejoin: round;
 }
 
-.brand-mark-compact .brand-mark-page-back {
-  inset: 10px 13px 8px 9px;
+.brand-logo-sheet-back {
+  fill: #e9dfcc;
+  stroke: rgba(95, 98, 88, .38);
+  stroke-width: 1.6;
 }
 
-.brand-mark-compact .brand-mark-page-front {
-  inset: 7px 9px 9px 12px;
+.brand-logo-sheet-front {
+  fill: url("#mfk-paper");
+  stroke: url("#mfk-earth");
+  stroke-width: 2.8;
+}
+
+.brand-logo-fold {
+  fill: #d8ccb8;
+  stroke: url("#mfk-earth");
+  stroke-width: 2.8;
+  stroke-linejoin: round;
+}
+
+.brand-logo-mark,
+.brand-logo-line {
+  fill: none;
+  stroke: url("#mfk-ink");
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.brand-logo-mark {
+  stroke-width: 7;
+}
+
+.brand-logo-line {
+  stroke-width: 5;
+}
+
+.brand-logo-dot {
+  fill: var(--clay);
 }
 
 .field-input {

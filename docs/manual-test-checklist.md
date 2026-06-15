@@ -11,8 +11,8 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 
 ## Dashboard
 
-- Confirm the animated logo renders in the header and hero.
-- Confirm the version label shows `v2.0.2`.
+- Confirm the professional MyFileKit logo renders in the header and hero.
+- Confirm the version label shows `v2.0.4`.
 - Confirm the dashboard uses the wabi-sabi visual theme: mineral paper background, subtle grain, moss/clay/indigo accents, and softly imperfect card edges.
 - Search `merge pdf` and confirm Merge PDF is shown.
 - Search `compress image` and confirm Compress Image is shown.
