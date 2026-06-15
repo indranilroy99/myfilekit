@@ -1,0 +1,3440 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' 'unsafe-inline' file:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: file:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), magnetometer=(), gyroscope=()">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <title>Invoice Studio - MyFileKit</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,600;6..72,700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink: #15120e;
+      --muted: #6b665e;
+      --soft: #f7f4ee;
+      --paper: #fffdf8;
+      --line: #ddd4c5;
+      --accent: #0f5b55;
+      --accent-2: #b48a3b;
+      --danger: #a83d32;
+      --shadow: 0 24px 70px rgba(32, 26, 17, .16);
+      --radius: 8px;
+      --invoice-font-scale: 1;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: Manrope, ui-sans-serif, system-ui, sans-serif;
+      background:
+        linear-gradient(120deg, rgba(15, 91, 85, .11), transparent 34%),
+        linear-gradient(240deg, rgba(180, 138, 59, .13), transparent 36%),
+        #eee8dd;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);
+      gap: 24px;
+      width: 100%;
+      max-width: 100vw;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .control-panel {
+      align-self: start;
+      position: sticky;
+      top: 24px;
+      width: 100%;
+      min-width: 0;
+      max-height: calc(100vh - 48px);
+      overflow: auto;
+      border: 1px solid rgba(221, 212, 197, .85);
+      border-radius: var(--radius);
+      background: rgba(255, 253, 248, .82);
+      box-shadow: 0 18px 44px rgba(40, 31, 20, .1);
+      backdrop-filter: blur(16px);
+    }
+
+    .panel-head {
+      padding: 22px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255, 253, 248, .96), rgba(255, 253, 248, .66));
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      color: #fffdf8;
+      font-family: Newsreader, serif;
+      font-size: 24px;
+      font-weight: 700;
+      background: var(--accent);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.35), 0 10px 20px rgba(15, 91, 85, .22);
+    }
+
+    h1 {
+      margin: 0;
+      font-family: Newsreader, Georgia, serif;
+      font-size: 34px;
+      line-height: .95;
+      letter-spacing: 0;
+    }
+
+    .panel-head p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
+      min-height: 42px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      font-weight: 800;
+      font-size: 13px;
+      transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+    }
+
+    .btn:active {
+      transform: translateY(1px);
+    }
+
+    .btn-primary {
+      color: #fffdf8;
+      background: var(--accent);
+      box-shadow: 0 12px 24px rgba(15, 91, 85, .22);
+    }
+
+    .btn-primary:hover {
+      box-shadow: 0 16px 30px rgba(15, 91, 85, .27);
+    }
+
+    .btn-ghost {
+      color: var(--ink);
+      background: #efe8da;
+      box-shadow: inset 0 0 0 1px rgba(92, 76, 54, .13);
+    }
+
+    .btn-danger {
+      color: var(--danger);
+      background: transparent;
+      box-shadow: inset 0 0 0 1px rgba(168, 61, 50, .25);
+    }
+
+    .section {
+      padding: 18px 22px 22px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section:last-child {
+      border-bottom: 0;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .field.full {
+      grid-column: 1 / -1;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      min-width: 0;
+      border: 1px solid #d8cfbf;
+      border-radius: var(--radius);
+      color: var(--ink);
+      background: rgba(255, 253, 248, .85);
+      outline: none;
+      padding: 11px 12px;
+      transition: border-color .16s ease, box-shadow .16s ease;
+    }
+
+    textarea {
+      min-height: 74px;
+      resize: vertical;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(15, 91, 85, .14);
+    }
+
+    .line-editor {
+      display: grid;
+      gap: 10px;
+    }
+
+    .item-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 76px 96px 36px;
+      gap: 8px;
+      align-items: end;
+      padding: 12px;
+      border: 1px solid #ddd4c5;
+      border-radius: var(--radius);
+      background: rgba(255, 253, 248, .62);
+    }
+
+    .detail-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 36px;
+      gap: 8px;
+      align-items: end;
+      padding: 12px;
+      border: 1px solid #ddd4c5;
+      border-radius: var(--radius);
+      background: rgba(255, 253, 248, .62);
+    }
+
+    .icon-btn {
+      display: grid;
+      place-items: center;
+      height: 40px;
+      width: 36px;
+      border-radius: var(--radius);
+      color: var(--danger);
+      background: #f6ebe8;
+      font-weight: 900;
+    }
+
+    .mini {
+      min-height: 36px;
+      padding: 8px 12px;
+      font-size: 12px;
+    }
+
+    .theme-swatches {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+    }
+
+    .swatch {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 3px solid var(--paper);
+      box-shadow: 0 0 0 1px rgba(21, 18, 14, .22), 0 8px 16px rgba(21, 18, 14, .1);
+    }
+
+    .swatch.is-active {
+      box-shadow: 0 0 0 2px var(--ink), 0 8px 16px rgba(21, 18, 14, .1);
+    }
+
+    .template-tools {
+      display: grid;
+      gap: 12px;
+    }
+
+    .template-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 28px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      color: var(--accent);
+      background: rgba(15, 91, 85, .1);
+      font-size: 11px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .template-preview-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      max-height: 350px;
+      overflow: auto;
+      padding: 2px;
+    }
+
+    .template-card {
+      display: grid;
+      gap: 7px;
+      min-width: 0;
+      padding: 8px;
+      min-height: 76px;
+      border-radius: var(--radius);
+      color: var(--ink);
+      background: rgba(255, 253, 248, .75);
+      box-shadow: inset 0 0 0 1px #d8cfbf;
+      text-align: left;
+    }
+
+    .template-card.is-active {
+      box-shadow: inset 0 0 0 2px var(--accent), 0 10px 20px rgba(15, 91, 85, .12);
+    }
+
+    .template-mini {
+      display: grid;
+      gap: 4px;
+      height: 38px;
+      padding: 5px;
+      border-radius: 5px;
+      background: var(--paper);
+      overflow: hidden;
+    }
+
+    .template-line {
+      height: 5px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .template-line.short {
+      width: 58%;
+      background: var(--accent-2);
+    }
+
+    .template-line.thin {
+      height: 3px;
+      width: 84%;
+      background: #d8cfbf;
+    }
+
+    .template-card span {
+      font-size: 10px;
+      font-weight: 900;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .template-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .toggle-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 8px 10px;
+      border: 1px solid #d8cfbf;
+      border-radius: var(--radius);
+      background: rgba(255, 253, 248, .68);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .toggle-row input {
+      width: 16px;
+      height: 16px;
+      min-width: 16px;
+      accent-color: var(--accent);
+    }
+
+    .is-control-hidden {
+      display: none !important;
+    }
+
+    .preset-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .preset-btn {
+      min-height: 36px;
+      padding: 8px 10px;
+      border-radius: var(--radius);
+      color: var(--ink);
+      background: rgba(255, 253, 248, .7);
+      box-shadow: inset 0 0 0 1px #d8cfbf;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .workspace {
+      display: grid;
+      align-content: start;
+      gap: 18px;
+      min-width: 0;
+    }
+
+    .top-strip {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      padding: 12px 4px 0;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .status-dot {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--accent);
+    }
+
+    .status-dot::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 5px rgba(15, 91, 85, .12);
+    }
+
+    .paper-wrap {
+      display: grid;
+      justify-items: center;
+      min-width: 0;
+      padding-bottom: 28px;
+    }
+
+    .invoice {
+      width: min(100%, 920px);
+      max-width: 100%;
+      min-width: 0;
+      min-height: 1180px;
+      padding: 52px;
+      border-radius: var(--radius);
+      color: #1f1a14;
+      background:
+        linear-gradient(90deg, var(--accent) 0 10px, transparent 10px),
+        var(--paper);
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+      transition: background .2s ease, color .2s ease;
+      font-size: calc(14px * var(--invoice-font-scale));
+    }
+
+    .invoice [data-optional].is-hidden {
+      display: none !important;
+    }
+
+    .invoice.is-mono {
+      --accent: #111111;
+      --accent-2: #666666;
+      --paper: #ffffff;
+      color: #111111;
+      background: #ffffff;
+      box-shadow: 0 22px 70px rgba(0, 0, 0, .14);
+    }
+
+    .invoice.is-mono::after,
+    .invoice.is-mono .invoice-logo {
+      border-color: #111111;
+    }
+
+    .invoice.paper-white {
+      --paper: #ffffff;
+    }
+
+    .invoice.paper-cream {
+      --paper: #fffdf8;
+    }
+
+    .invoice.density-airy {
+      padding: 62px;
+    }
+
+    .invoice.density-compact {
+      padding: 40px;
+      min-height: 1040px;
+    }
+
+    .invoice.density-compact .invoice-head {
+      margin-bottom: 34px;
+    }
+
+    .invoice.density-compact .billing,
+    .invoice.density-compact .meta-grid {
+      margin-bottom: 26px;
+    }
+
+    .invoice.density-compact td {
+      padding-top: 11px;
+      padding-bottom: 11px;
+    }
+
+    .invoice.density-bold .invoice-title span,
+    .invoice.density-bold .company-name {
+      font-weight: 700;
+    }
+
+    .invoice.type-serif {
+      font-family: Newsreader, Georgia, serif;
+    }
+
+    .invoice.type-serif .company-meta,
+    .invoice.type-serif .client-meta,
+    .invoice.type-serif .notes,
+    .invoice.type-serif .terms,
+    .invoice.type-serif td,
+    .invoice.type-serif .total-row {
+      font-family: Manrope, ui-sans-serif, system-ui, sans-serif;
+    }
+
+    .invoice.type-technical,
+    .invoice.type-technical .company-name,
+    .invoice.type-technical .invoice-title span {
+      font-family: "Courier New", ui-monospace, monospace;
+    }
+
+    .invoice.type-technical .company-name,
+    .invoice.type-technical .invoice-title span {
+      font-weight: 700;
+    }
+
+    .invoice.layout-classic {
+      background:
+        linear-gradient(90deg, var(--accent) 0 10px, transparent 10px),
+        var(--paper);
+    }
+
+    .invoice.layout-editorial {
+      background:
+        linear-gradient(180deg, var(--accent) 0 110px, transparent 110px),
+        var(--paper);
+    }
+
+    .invoice.layout-editorial .invoice-head {
+      color: #fffdf8;
+    }
+
+    .invoice.layout-editorial .company-meta,
+    .invoice.layout-editorial .invoice-title strong {
+      color: rgba(255, 253, 248, .78);
+    }
+
+    .invoice.layout-editorial .invoice-logo {
+      color: var(--accent);
+      background: #fffdf8;
+    }
+
+    .invoice.layout-modern {
+      background:
+        linear-gradient(135deg, rgba(15, 91, 85, .13), transparent 38%),
+        var(--paper);
+    }
+
+    .invoice.layout-modern .invoice-head {
+      grid-template-columns: 1fr;
+    }
+
+    .invoice.layout-modern .invoice-title {
+      text-align: left;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .invoice.layout-letterhead {
+      background:
+        linear-gradient(180deg, transparent 0 44px, var(--accent) 44px 50px, transparent 50px),
+        var(--paper);
+    }
+
+    .invoice.layout-letterhead .invoice-head {
+      padding-top: 20px;
+      border-bottom: 1px solid #dfd5c4;
+      padding-bottom: 28px;
+    }
+
+    .invoice.layout-sidebar {
+      display: grid;
+      grid-template-columns: 250px minmax(0, 1fr);
+      gap: 34px;
+      background: var(--paper);
+    }
+
+    .invoice.layout-sidebar::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 292px;
+      background: color-mix(in srgb, var(--accent) 9%, transparent);
+      pointer-events: none;
+    }
+
+    .invoice.layout-sidebar .invoice-head,
+    .invoice.layout-sidebar .billing {
+      grid-column: 1;
+      display: block;
+      margin-bottom: 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .invoice.layout-sidebar .invoice-title {
+      text-align: left;
+      margin-top: 28px;
+    }
+
+    .invoice.layout-sidebar .meta-grid,
+    .invoice.layout-sidebar table,
+    .invoice.layout-sidebar .bottom-grid {
+      grid-column: 2;
+    }
+
+    .invoice.layout-sidebar .billing {
+      grid-template-columns: 1fr;
+    }
+
+    .invoice.layout-sidebar .billing-block {
+      margin-bottom: 22px;
+    }
+
+    .invoice.layout-compact {
+      background:
+        linear-gradient(180deg, var(--accent) 0 8px, transparent 8px),
+        var(--paper);
+    }
+
+    .invoice.layout-compact .invoice-head,
+    .invoice.layout-compact .billing,
+    .invoice.layout-compact .bottom-grid {
+      gap: 22px;
+    }
+
+    .invoice.layout-minimal {
+      background: var(--paper);
+      border-top: 6px solid var(--accent);
+    }
+
+    .invoice.layout-minimal::after {
+      display: none;
+    }
+
+    .invoice.layout-minimal .invoice-logo {
+      border-radius: 6px;
+    }
+
+    .invoice.layout-luxe {
+      background:
+        linear-gradient(180deg, transparent 0 28px, rgba(180, 138, 59, .16) 28px 30px, transparent 30px),
+        var(--paper);
+    }
+
+    .invoice.layout-luxe .company-name,
+    .invoice.layout-luxe .invoice-title span {
+      font-family: Newsreader, Georgia, serif;
+    }
+
+    .invoice.layout-luxe .meta-grid,
+    .invoice.layout-luxe .totals {
+      border-color: color-mix(in srgb, var(--accent-2) 55%, #dfd5c4);
+    }
+
+    .invoice.layout-stripe {
+      background:
+        linear-gradient(90deg, var(--accent) 0 32%, transparent 32%),
+        var(--paper);
+    }
+
+    .invoice.layout-stripe .invoice-head {
+      grid-template-columns: 1fr;
+    }
+
+    .invoice.layout-stripe .invoice-title {
+      text-align: left;
+      color: #fffdf8;
+      margin-bottom: 30px;
+    }
+
+    .invoice.layout-stripe .invoice-brand {
+      color: #fffdf8;
+    }
+
+    .invoice.layout-stripe .company-meta,
+    .invoice.layout-stripe .invoice-title strong {
+      color: rgba(255, 253, 248, .76);
+    }
+
+    .invoice.layout-stripe .invoice-logo {
+      color: var(--accent);
+      background: #fffdf8;
+    }
+
+    .invoice.layout-border {
+      background:
+        linear-gradient(var(--paper), var(--paper)) padding-box,
+        linear-gradient(135deg, var(--accent), var(--accent-2)) border-box;
+      border: 10px solid transparent;
+    }
+
+    .invoice.layout-border::after {
+      display: none;
+    }
+
+    .invoice.layout-stamp::after {
+      content: attr(data-stamp);
+      display: grid;
+      place-items: center;
+      width: 132px;
+      height: 132px;
+      color: var(--accent);
+      font-family: Manrope, sans-serif;
+      font-size: 20px;
+      font-weight: 900;
+      text-transform: uppercase;
+      transform: rotate(-11deg);
+      border: 3px double color-mix(in srgb, var(--accent) 55%, transparent);
+      opacity: .45;
+    }
+
+    .invoice.layout-receipt {
+      max-width: 760px;
+      background:
+        linear-gradient(90deg, transparent 0 12px, var(--paper) 12px calc(100% - 12px), transparent calc(100% - 12px)),
+        repeating-linear-gradient(180deg, #d8cfbf 0 1px, transparent 1px 14px),
+        var(--paper);
+    }
+
+    .invoice.layout-receipt .invoice-head,
+    .invoice.layout-receipt .billing,
+    .invoice.layout-receipt .bottom-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .invoice.layout-blocks {
+      background:
+        linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 42%),
+        linear-gradient(315deg, color-mix(in srgb, var(--accent-2) 12%, transparent), transparent 38%),
+        var(--paper);
+    }
+
+    .invoice.layout-blocks .meta-cell,
+    .invoice.layout-blocks .detail-pill,
+    .invoice.layout-blocks .billing-block {
+      background: rgba(255, 255, 255, .34);
+      padding: 16px;
+      border: 1px solid #dfd5c4;
+      border-radius: 8px;
+    }
+
+    .invoice.layout-blocks .meta-grid {
+      border: 0;
+      gap: 10px;
+    }
+
+    .invoice.layout-blocks .meta-cell {
+      border-right: 0;
+    }
+
+    .invoice.table-open th {
+      background: transparent;
+      color: var(--accent);
+      border-bottom: 2px solid var(--accent);
+    }
+
+    .invoice.table-boxed td {
+      border: 1px solid #e5dccf;
+    }
+
+    .invoice.table-boxed tr {
+      border: 0;
+    }
+
+    .invoice.corner-square,
+    .invoice.corner-square .totals,
+    .invoice.corner-square th,
+    .invoice.corner-square .invoice-logo {
+      border-radius: 0;
+    }
+
+    .invoice.corner-soft,
+    .invoice.corner-soft .totals,
+    .invoice.corner-soft .invoice-logo {
+      border-radius: 16px;
+    }
+
+    .watermark {
+      position: absolute;
+      inset: auto 40px 92px auto;
+      max-width: 360px;
+      color: color-mix(in srgb, var(--accent) 13%, transparent);
+      font-family: Newsreader, Georgia, serif;
+      font-size: 82px;
+      font-weight: 700;
+      line-height: .9;
+      transform: rotate(-12deg);
+      pointer-events: none;
+      z-index: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .invoice-footer {
+      margin-top: 36px;
+      padding-top: 16px;
+      border-top: 1px solid #dfd5c4;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-line;
+    }
+
+    .invoice .meta-grid {
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+
+    .invoice .billing:has(.billing-block.is-hidden) {
+      grid-template-columns: 1fr;
+    }
+
+    .invoice::after {
+      content: "";
+      position: absolute;
+      inset: var(--title-badge-offset, 24px) var(--title-badge-offset, 24px) auto auto;
+      width: var(--title-badge-size, 150px);
+      height: var(--title-badge-size, 150px);
+      border: 1px solid color-mix(in srgb, var(--accent) var(--title-badge-strength, 22%), transparent);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .invoice.title-badge-rounded::after {
+      border-radius: 24px;
+    }
+
+    .invoice.title-badge-square::after {
+      border-radius: 0;
+    }
+
+    .invoice.title-badge-none::after {
+      display: none;
+    }
+
+    .invoice-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 34px;
+      align-items: start;
+      margin-bottom: 52px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .invoice-brand {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .invoice-logo {
+      display: grid;
+      place-items: center;
+      flex: 0 0 var(--logo-size, 52px);
+      width: var(--logo-size, 52px);
+      height: var(--logo-size, 52px);
+      border-radius: 50%;
+      color: #fffdf8;
+      background: var(--accent);
+      font-family: Newsreader, serif;
+      font-size: 26px;
+      font-weight: 700;
+      overflow: hidden;
+      box-sizing: border-box;
+      transition: border-radius .16s ease, padding .16s ease, background .16s ease;
+    }
+
+    .invoice-logo.has-image {
+      padding: var(--logo-padding, 5px);
+      border: 1px solid rgba(0, 0, 0, .08);
+      background: var(--logo-image-bg, #fffdf8);
+    }
+
+    .invoice-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: var(--logo-fit, contain);
+      object-position: center;
+      display: block;
+    }
+
+    .invoice.logo-square .invoice-logo {
+      border-radius: 6px;
+    }
+
+    .invoice.logo-rounded .invoice-logo {
+      border-radius: 16px;
+    }
+
+    .invoice.logo-diamond .invoice-logo {
+      border-radius: 8px;
+      transform: rotate(45deg);
+    }
+
+    .invoice.logo-diamond .invoice-logo > * {
+      transform: rotate(-45deg);
+    }
+
+    .company-name {
+      margin: 0 0 8px;
+      max-width: 460px;
+      font-family: Newsreader, Georgia, serif;
+      font-size: 34px;
+      line-height: 1;
+      letter-spacing: 0;
+      white-space: pre-line;
+      overflow-wrap: anywhere;
+    }
+
+    .company-meta,
+    .client-meta,
+    .notes,
+    .terms {
+      color: #696054;
+      font-size: 13px;
+      line-height: 1.65;
+      white-space: pre-line;
+    }
+
+    .invoice-title {
+      text-align: right;
+    }
+
+    .invoice-title strong {
+      display: block;
+      font-size: 12px;
+      color: var(--accent);
+      letter-spacing: 0;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .invoice-title span {
+      display: block;
+      font-family: Newsreader, Georgia, serif;
+      font-size: 58px;
+      line-height: .9;
+      letter-spacing: 0;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-block: 1px solid #dfd5c4;
+      margin-bottom: 38px;
+    }
+
+    .meta-cell {
+      padding: 18px 20px;
+      border-right: 1px solid #dfd5c4;
+    }
+
+    .meta-cell:last-child {
+      border-right: 0;
+    }
+
+    .kicker {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+      margin-bottom: 7px;
+    }
+
+    .value {
+      font-size: 15px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .billing {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 28px;
+      margin-bottom: 38px;
+    }
+
+    .billing-block {
+      border-top: 3px solid var(--accent);
+      padding-top: 15px;
+    }
+
+    .billing-block h3 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 28px;
+    }
+
+    th {
+      color: #fffdf8;
+      background: var(--accent);
+      font-size: 11px;
+      text-align: left;
+      text-transform: uppercase;
+      padding: 12px 14px;
+    }
+
+    th:first-child {
+      border-radius: 6px 0 0 6px;
+    }
+
+    th:last-child {
+      border-radius: 0 6px 6px 0;
+      text-align: right;
+    }
+
+    td {
+      border-bottom: 1px solid #e5dccf;
+      padding: 16px 14px;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    td:nth-child(2),
+    td:nth-child(3),
+    td:nth-child(4) {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .item-name {
+      font-weight: 900;
+    }
+
+    .item-desc {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      margin-top: 4px;
+      white-space: pre-line;
+    }
+
+    .item-desc.is-hidden {
+      display: none;
+    }
+
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 42px;
+      align-items: start;
+    }
+
+    .note-panel {
+      display: grid;
+      gap: 18px;
+    }
+
+    .note-panel h3 {
+      margin: 0 0 6px;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .detail-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 30px;
+    }
+
+    .detail-pill {
+      border-top: 1px solid #dfd5c4;
+      padding-top: 10px;
+    }
+
+    .detail-pill span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 900;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    .detail-pill strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.45;
+      white-space: pre-line;
+      overflow-wrap: anywhere;
+    }
+
+    .detail-heading {
+      grid-column: 1 / -1;
+      margin: 0;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .totals {
+      border: 1px solid #dfd5c4;
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 13px 16px;
+      border-bottom: 1px solid #dfd5c4;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .total-row strong {
+      color: var(--ink);
+      font-weight: 900;
+    }
+
+    .total-row.grand {
+      color: #fffdf8;
+      background: var(--accent);
+      border-bottom: 0;
+      font-size: 17px;
+      font-weight: 900;
+    }
+
+    .total-row.grand strong {
+      color: #fffdf8;
+    }
+
+    .signature {
+      margin-top: 50px;
+      padding-top: 16px;
+      border-top: 1px solid #cfc5b4;
+      width: 260px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .signature-image {
+      display: block;
+      width: 210px;
+      max-height: 78px;
+      object-fit: contain;
+      object-position: left center;
+      margin-bottom: 8px;
+    }
+
+    .signature-text {
+      display: block;
+      color: var(--ink);
+      font-family: Newsreader, Georgia, serif;
+      font-size: 28px;
+      line-height: 1.05;
+      text-transform: none;
+      margin-bottom: 8px;
+      overflow-wrap: anywhere;
+    }
+
+    .signature-caption {
+      display: block;
+    }
+
+    .signature-pad-wrap {
+      display: grid;
+      gap: 10px;
+    }
+
+    .signature-pad {
+      width: 100%;
+      height: 140px;
+      border: 1px solid #d8cfbf;
+      border-radius: var(--radius);
+      background: #fffdf8;
+      box-shadow: inset 0 0 0 1px rgba(92, 76, 54, .04);
+      touch-action: none;
+    }
+
+    .signature-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .empty-row {
+      color: var(--muted);
+      text-align: center;
+      padding: 34px 10px;
+    }
+
+    @media (max-width: 1020px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .control-panel {
+        position: static;
+        max-height: none;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .app {
+        display: block;
+        padding: 12px;
+      }
+
+      .control-panel,
+      .workspace {
+        width: calc(100vw - 24px);
+        max-width: calc(100vw - 24px);
+      }
+
+      .workspace {
+        margin-top: 18px;
+      }
+
+      .panel-head,
+      .section {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+
+      .actions {
+        grid-template-columns: 1fr;
+      }
+
+      .template-preview-row,
+      .toggle-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .panel-head p {
+        overflow-wrap: anywhere;
+      }
+
+      .grid,
+      .billing,
+      .bottom-grid,
+      .invoice-head,
+      .meta-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .invoice {
+        min-height: auto;
+        padding: 28px 20px;
+        background:
+          linear-gradient(180deg, var(--accent) 0 8px, transparent 8px),
+          var(--paper);
+      }
+
+      .invoice.layout-sidebar {
+        display: block;
+      }
+
+      .invoice.layout-sidebar::before {
+        display: none;
+      }
+
+      .invoice-title,
+      td:nth-child(2),
+      td:nth-child(3),
+      td:nth-child(4) {
+        text-align: left;
+      }
+
+      .invoice-title span {
+        font-size: 42px;
+      }
+
+      .meta-cell {
+        border-right: 0;
+        border-bottom: 1px solid #dfd5c4;
+      }
+
+      .meta-cell:last-child {
+        border-bottom: 0;
+      }
+
+      table,
+      thead,
+      tbody,
+      th,
+      td,
+      tr {
+        display: block;
+      }
+
+      thead {
+        display: none;
+      }
+
+      tr {
+        border: 1px solid #e5dccf;
+        border-radius: var(--radius);
+        margin-bottom: 12px;
+        overflow: hidden;
+      }
+
+      td {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        border-bottom: 1px solid #ece3d6;
+      }
+
+      td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+
+      td:first-child {
+        display: block;
+      }
+
+      td:first-child::before {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .item-row {
+        grid-template-columns: 1fr;
+      }
+
+      .detail-row,
+      .preset-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .icon-btn {
+        width: 100%;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      .app {
+        display: block;
+        min-height: 0;
+        padding: 0;
+      }
+
+      .control-panel,
+      .top-strip {
+        display: none;
+      }
+
+      .paper-wrap {
+        padding: 0;
+      }
+
+      .invoice {
+        width: 100%;
+        min-height: auto;
+        border-radius: 0;
+        box-shadow: none;
+        padding: 42px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <aside class="control-panel" aria-label="Invoice controls">
+      <div class="panel-head">
+        <div class="brand-row">
+          <div>
+            <h1>Invoice Studio</h1>
+            <p>Part of MyFileKit. Create a sharp client-ready invoice, then print or save as PDF.</p>
+          </div>
+          <div class="mark" aria-hidden="true">M</div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="printBtn" type="button">Print / PDF</button>
+          <button class="btn btn-ghost" id="resetBtn" type="button">Reset</button>
+        </div>
+      </div>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Templates</h2>
+          <span class="template-count" id="templateCount">540 styles</span>
+        </div>
+        <div class="template-tools">
+          <div class="field full">
+            <label for="templateSelect">Template Library</label>
+            <select id="templateSelect"></select>
+          </div>
+          <div class="template-actions">
+            <button class="btn btn-ghost mini" id="shuffleTemplatesBtn" type="button">Shuffle</button>
+            <button class="btn btn-ghost mini" id="showMoreTemplatesBtn" type="button">More Designs</button>
+          </div>
+          <div class="template-preview-row" id="templateCards"></div>
+          <div class="grid">
+            <div class="field">
+              <label for="paperMode">Paper</label>
+              <select id="paperMode" data-bind="paperMode">
+                <option value="cream">Warm Cream</option>
+                <option value="white">Pure White</option>
+              </select>
+            </div>
+            <label class="toggle-row" for="monoMode">
+              <input id="monoMode" type="checkbox" data-flag="monoMode">
+              Black & White
+            </label>
+            <div class="field">
+              <label for="tableStyle">Table Style</label>
+              <select id="tableStyle" data-bind="tableStyle">
+                <option value="solid">Solid Header</option>
+                <option value="open">Open Header</option>
+                <option value="boxed">Boxed Rows</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="cornerStyle">Corners</label>
+              <select id="cornerStyle" data-bind="cornerStyle">
+                <option value="normal">Normal</option>
+                <option value="square">Square</option>
+                <option value="soft">Soft</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="fontScale">Font Scale</label>
+              <input id="fontScale" data-bind="fontScale" type="number" min="0.85" max="1.2" step="0.05">
+            </div>
+            <div class="field">
+              <label for="watermarkText">Watermark</label>
+              <input id="watermarkText" data-bind="watermarkText">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Branding & Badge</h2>
+        </div>
+        <div class="grid">
+          <div class="field full">
+            <label for="logoUpload">Logo Upload</label>
+            <input id="logoUpload" type="file" accept="image/*">
+          </div>
+          <div class="field">
+            <label for="logoText">Logo Text</label>
+            <input id="logoText" data-bind="logoText">
+          </div>
+          <div class="field">
+            <label for="logoShape">Logo Shape</label>
+            <select id="logoShape" data-bind="logoShape">
+              <option value="circle">Circle</option>
+              <option value="rounded">Rounded</option>
+              <option value="square">Square</option>
+              <option value="diamond">Diamond</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="logoFit">Logo Fit</label>
+            <select id="logoFit" data-bind="logoFit">
+              <option value="contain">Fit Entire Logo</option>
+              <option value="cover">Fill Shape</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="logoBackground">Logo Background</label>
+            <select id="logoBackground" data-bind="logoBackground">
+              <option value="paper">Paper</option>
+              <option value="white">White</option>
+              <option value="transparent">Transparent</option>
+              <option value="accent">Accent</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="logoSize">Logo Size</label>
+            <input id="logoSize" data-bind="logoSize" type="number" min="36" max="120" step="1">
+          </div>
+          <div class="field">
+            <label for="logoPadding">Logo Padding</label>
+            <input id="logoPadding" data-bind="logoPadding" type="number" min="0" max="24" step="1">
+          </div>
+          <div class="field">
+            <label for="statusBadgeText">Badge Text</label>
+            <input id="statusBadgeText" data-bind="statusBadgeText">
+          </div>
+          <div class="field">
+            <label for="statusBadgeLabel">Badge Label</label>
+            <input id="statusBadgeLabel" data-bind="statusBadgeLabel">
+          </div>
+          <div class="field">
+            <label for="titleBadgeShape">Invoice Title Frame</label>
+            <select id="titleBadgeShape" data-bind="titleBadgeShape">
+              <option value="circle">Circle</option>
+              <option value="rounded">Rounded</option>
+              <option value="square">Square</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="titleBadgeSize">Frame Size</label>
+            <input id="titleBadgeSize" data-bind="titleBadgeSize" type="number" min="90" max="260" step="1">
+          </div>
+          <div class="field">
+            <label for="titleBadgeStrength">Frame Strength</label>
+            <input id="titleBadgeStrength" data-bind="titleBadgeStrength" type="number" min="0" max="100" step="1">
+          </div>
+          <div class="field full">
+            <button class="btn btn-danger mini" id="clearLogoBtn" type="button">Clear Logo</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Invoice Details</h2>
+        </div>
+        <div class="grid">
+          <div class="field full">
+            <label for="documentTitle">Document Title</label>
+            <input id="documentTitle" data-bind="documentTitle">
+          </div>
+          <div class="field">
+            <label for="invoiceNo">Invoice No.</label>
+            <input id="invoiceNo" data-bind="invoiceNo">
+          </div>
+          <div class="field">
+            <label for="status">Status</label>
+            <select id="status" data-bind="status">
+              <option>Due</option>
+              <option>Paid</option>
+              <option>Draft</option>
+              <option>Overdue</option>
+              <option>Sent</option>
+              <option>Viewed</option>
+              <option>Pending</option>
+              <option>Partially Paid</option>
+              <option>Approved</option>
+              <option>Cancelled</option>
+              <option>Refunded</option>
+              <option>Final</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="issueDate">Issue Date</label>
+            <input id="issueDate" data-bind="issueDate" type="date">
+          </div>
+          <div class="field">
+            <label for="dueDate">Due Date</label>
+            <input id="dueDate" data-bind="dueDate" type="date">
+          </div>
+          <div class="field">
+            <label for="currency">Currency</label>
+            <select id="currency" data-bind="currency">
+              <option value="INR">INR - Rupee</option>
+              <option value="USD">USD - Dollar</option>
+              <option value="EUR">EUR - Euro</option>
+              <option value="GBP">GBP - Pound</option>
+              <option value="AED">AED - Dirham</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="poNumber">PO / Ref.</label>
+            <input id="poNumber" data-bind="poNumber">
+          </div>
+          <div class="field">
+            <label for="supplyType">Supply Type</label>
+            <select id="supplyType" data-bind="supplyType">
+              <option value="Services">Services</option>
+              <option value="Goods">Goods</option>
+              <option value="Goods & Services">Goods & Services</option>
+              <option value="Export">Export</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="placeOfSupply">Place of Supply</label>
+            <input id="placeOfSupply" data-bind="placeOfSupply">
+          </div>
+          <div class="field">
+            <label for="hsnSac">HSN / SAC</label>
+            <input id="hsnSac" data-bind="hsnSac">
+          </div>
+          <div class="field">
+            <label for="reverseCharge">Reverse Charge</label>
+            <select id="reverseCharge" data-bind="reverseCharge">
+              <option value="No">No</option>
+              <option value="Yes">Yes</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Sender Profile</h2>
+        </div>
+        <div class="grid">
+          <div class="field full">
+            <label for="senderType">Sender Type</label>
+            <select id="senderType" data-bind="senderType">
+              <option value="freelancer">Freelancer / Individual</option>
+              <option value="company">Company / Agency</option>
+            </select>
+          </div>
+          <div class="field full">
+            <label for="senderName">Your Name</label>
+            <input id="senderName" data-bind="senderName">
+          </div>
+          <div class="field full">
+            <label for="senderTitle">Role / Tagline</label>
+            <input id="senderTitle" data-bind="senderTitle">
+          </div>
+          <div class="field full">
+            <label for="companyName">Company Name</label>
+            <input id="companyName" data-bind="companyName">
+          </div>
+          <div class="field full">
+            <label for="companyMeta">Address / Tax Details</label>
+            <textarea id="companyMeta" data-bind="companyMeta"></textarea>
+          </div>
+          <div class="field">
+            <label for="companyEmail">Email</label>
+            <input id="companyEmail" data-bind="companyEmail" type="email">
+          </div>
+          <div class="field">
+            <label for="companyPhone">Phone</label>
+            <input id="companyPhone" data-bind="companyPhone">
+          </div>
+          <div class="field">
+            <label for="senderGstin">GSTIN / VAT ID</label>
+            <input id="senderGstin" data-bind="senderGstin">
+          </div>
+          <div class="field">
+            <label for="senderPan">PAN / Tax ID</label>
+            <input id="senderPan" data-bind="senderPan">
+          </div>
+          <div class="field full">
+            <label for="senderWebsite">Website</label>
+            <input id="senderWebsite" data-bind="senderWebsite">
+          </div>
+          <div class="field full">
+            <label for="paymentInfo">Payment Details</label>
+            <textarea id="paymentInfo" data-bind="paymentInfo"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Client</h2>
+        </div>
+        <div class="grid">
+          <div class="field full">
+            <label for="clientName">Client Name</label>
+            <input id="clientName" data-bind="clientName">
+          </div>
+          <div class="field full">
+            <label for="clientMeta">Client Address / Email</label>
+            <textarea id="clientMeta" data-bind="clientMeta"></textarea>
+          </div>
+          <div class="field">
+            <label for="clientTaxId">Client GSTIN / Tax ID</label>
+            <input id="clientTaxId" data-bind="clientTaxId">
+          </div>
+          <div class="field">
+            <label for="clientContact">Client Contact</label>
+            <input id="clientContact" data-bind="clientContact">
+          </div>
+          <div class="field full">
+            <label for="shipTo">Ship To / Delivery Address</label>
+            <textarea id="shipTo" data-bind="shipTo"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Line Items</h2>
+          <button class="btn btn-ghost mini" id="addItemBtn" type="button">Add Item</button>
+        </div>
+        <div class="line-editor" id="lineEditor"></div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Totals</h2>
+        </div>
+        <div class="grid">
+          <div class="field">
+            <label for="taxRate">Tax %</label>
+            <input id="taxRate" data-bind="taxRate" type="number" min="0" step="0.01">
+          </div>
+          <div class="field">
+            <label for="discount">Discount</label>
+            <input id="discount" data-bind="discount" type="number" min="0" step="0.01">
+          </div>
+          <div class="field">
+            <label for="tdsMode">TDS Mode</label>
+            <select id="tdsMode" data-bind="tdsMode">
+              <option value="rate">Percentage</option>
+              <option value="amount">Fixed Amount</option>
+            </select>
+          </div>
+          <div class="field" data-tds-panel="rate">
+            <label for="tdsRate">TDS %</label>
+            <input id="tdsRate" data-bind="tdsRate" type="number" min="0" max="100" step="0.01">
+          </div>
+          <div class="field" data-tds-panel="amount">
+            <label for="tdsAmount">TDS Amount</label>
+            <input id="tdsAmount" data-bind="tdsAmount" type="number" min="0" step="0.01">
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Payment Collection</h2>
+        </div>
+        <div class="template-tools">
+          <div class="toggle-grid" id="paymentMethodToggles"></div>
+          <div class="grid">
+            <div class="field">
+              <label for="accountHolder">Account Holder</label>
+              <input id="accountHolder" data-bind="accountHolder">
+            </div>
+            <div class="field">
+              <label for="bankName">Bank Name</label>
+              <input id="bankName" data-bind="bankName">
+            </div>
+            <div class="field">
+              <label for="accountNumber">Account Number</label>
+              <input id="accountNumber" data-bind="accountNumber">
+            </div>
+            <div class="field">
+              <label for="ifscCode">IFSC / Routing Code</label>
+              <input id="ifscCode" data-bind="ifscCode">
+            </div>
+            <div class="field">
+              <label for="swiftCode">SWIFT / BIC</label>
+              <input id="swiftCode" data-bind="swiftCode">
+            </div>
+            <div class="field">
+              <label for="ibanCode">IBAN</label>
+              <input id="ibanCode" data-bind="ibanCode">
+            </div>
+            <div class="field">
+              <label for="branchName">Branch</label>
+              <input id="branchName" data-bind="branchName">
+            </div>
+            <div class="field">
+              <label for="upiId">UPI ID</label>
+              <input id="upiId" data-bind="upiId">
+            </div>
+            <div class="field">
+              <label for="paypalEmail">PayPal Email</label>
+              <input id="paypalEmail" data-bind="paypalEmail">
+            </div>
+            <div class="field">
+              <label for="wiseEmail">Wise Email</label>
+              <input id="wiseEmail" data-bind="wiseEmail">
+            </div>
+            <div class="field">
+              <label for="chequePayableTo">Cheque Payable To</label>
+              <input id="chequePayableTo" data-bind="chequePayableTo">
+            </div>
+            <div class="field full">
+              <label for="cashInstructions">Cash / Offline Instructions</label>
+              <textarea id="cashInstructions" data-bind="cashInstructions"></textarea>
+            </div>
+            <div class="field">
+              <label for="paymentLink">Payment Link</label>
+              <input id="paymentLink" data-bind="paymentLink">
+            </div>
+            <div class="field full">
+              <label for="bitcoinAddress">Bitcoin Address</label>
+              <input id="bitcoinAddress" data-bind="bitcoinAddress">
+            </div>
+            <div class="field full">
+              <label for="ethereumAddress">Ethereum / USDT Address</label>
+              <input id="ethereumAddress" data-bind="ethereumAddress">
+            </div>
+            <div class="field full" id="customPaymentPanel">
+              <label for="customPayment">Other Payment Instructions</label>
+              <textarea id="customPayment" data-bind="customPayment" placeholder="Example: Pay by cheque, Wise, cash on delivery, retainer credits, escrow instructions, or any custom method."></textarea>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Notes</h2>
+        </div>
+        <div class="grid">
+          <div class="field full">
+            <label for="notes">Notes</label>
+            <textarea id="notes" data-bind="notes"></textarea>
+          </div>
+          <div class="field full">
+            <label for="terms">Payment Terms</label>
+            <textarea id="terms" data-bind="terms"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Digital Signature</h2>
+        </div>
+        <div class="grid">
+          <div class="field full">
+            <label for="signatureText">Typed Signature</label>
+            <input id="signatureText" data-bind="signatureText">
+          </div>
+          <div class="field full signature-pad-wrap">
+            <label for="signaturePad">Draw Signature</label>
+            <canvas class="signature-pad" id="signaturePad" width="720" height="260"></canvas>
+            <div class="signature-actions">
+              <button class="btn btn-ghost mini" id="useNameSignatureBtn" type="button">Use My Name</button>
+              <button class="btn btn-danger mini" id="clearSignatureBtn" type="button">Clear</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Extra Details</h2>
+          <button class="btn btn-ghost mini" id="addCustomFieldBtn" type="button">Add Detail</button>
+        </div>
+        <div class="preset-grid">
+          <button class="preset-btn" type="button" data-preset-field="Project">Project</button>
+          <button class="preset-btn" type="button" data-preset-field="Milestone">Milestone</button>
+          <button class="preset-btn" type="button" data-preset-field="Contract ID">Contract ID</button>
+          <button class="preset-btn" type="button" data-preset-field="Late Fee">Late Fee</button>
+          <button class="preset-btn" type="button" data-preset-field="Warranty">Warranty</button>
+          <button class="preset-btn" type="button" data-preset-field="Export Note">Export Note</button>
+          <button class="preset-btn" type="button" data-preset-field="Retainer">Retainer</button>
+          <button class="preset-btn" type="button" data-preset-field="Billing Period">Billing Period</button>
+          <button class="preset-btn" type="button" data-preset-field="Delivery Date">Delivery Date</button>
+          <button class="preset-btn" type="button" data-preset-field="SLA">SLA</button>
+          <button class="preset-btn" type="button" data-preset-field="Support Window">Support Window</button>
+          <button class="preset-btn" type="button" data-preset-field="Purchase Order">Purchase Order</button>
+          <button class="preset-btn" type="button" data-preset-field="Tax Exemption">Tax Exemption</button>
+          <button class="preset-btn" type="button" data-preset-field="Client Reference">Client Reference</button>
+        </div>
+        <div class="line-editor" id="customFieldEditor"></div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Editable Labels</h2>
+        </div>
+        <div class="grid">
+          <div class="field">
+            <label for="fromLabel">From Label</label>
+            <input id="fromLabel" data-bind="fromLabel">
+          </div>
+          <div class="field">
+            <label for="clientLabel">Client Label</label>
+            <input id="clientLabel" data-bind="clientLabel">
+          </div>
+          <div class="field">
+            <label for="invoiceNoLabel">Invoice No. Label</label>
+            <input id="invoiceNoLabel" data-bind="invoiceNoLabel">
+          </div>
+          <div class="field">
+            <label for="issueDateLabel">Issue Date Label</label>
+            <input id="issueDateLabel" data-bind="issueDateLabel">
+          </div>
+          <div class="field">
+            <label for="dueDateLabel">Due Date Label</label>
+            <input id="dueDateLabel" data-bind="dueDateLabel">
+          </div>
+          <div class="field">
+            <label for="poLabel">PO / Ref Label</label>
+            <input id="poLabel" data-bind="poLabel">
+          </div>
+          <div class="field">
+            <label for="supplyTypeLabel">Supply Label</label>
+            <input id="supplyTypeLabel" data-bind="supplyTypeLabel">
+          </div>
+          <div class="field">
+            <label for="placeOfSupplyLabel">Place Label</label>
+            <input id="placeOfSupplyLabel" data-bind="placeOfSupplyLabel">
+          </div>
+          <div class="field">
+            <label for="hsnSacLabel">HSN/SAC Label</label>
+            <input id="hsnSacLabel" data-bind="hsnSacLabel">
+          </div>
+          <div class="field">
+            <label for="reverseChargeLabel">Reverse Charge Label</label>
+            <input id="reverseChargeLabel" data-bind="reverseChargeLabel">
+          </div>
+          <div class="field">
+            <label for="serviceLabel">Item Label</label>
+            <input id="serviceLabel" data-bind="serviceLabel">
+          </div>
+          <div class="field">
+            <label for="qtyLabel">Qty Label</label>
+            <input id="qtyLabel" data-bind="qtyLabel">
+          </div>
+          <div class="field">
+            <label for="rateLabel">Rate Label</label>
+            <input id="rateLabel" data-bind="rateLabel">
+          </div>
+          <div class="field">
+            <label for="amountLabel">Amount Label</label>
+            <input id="amountLabel" data-bind="amountLabel">
+          </div>
+          <div class="field">
+            <label for="totalLabel">Total Label</label>
+            <input id="totalLabel" data-bind="totalLabel">
+          </div>
+          <div class="field">
+            <label for="subtotalLabel">Subtotal Label</label>
+            <input id="subtotalLabel" data-bind="subtotalLabel">
+          </div>
+          <div class="field">
+            <label for="discountLabel">Discount Label</label>
+            <input id="discountLabel" data-bind="discountLabel">
+          </div>
+          <div class="field">
+            <label for="taxLabel">Tax Label</label>
+            <input id="taxLabel" data-bind="taxLabel">
+          </div>
+          <div class="field">
+            <label for="tdsLabel">TDS Label</label>
+            <input id="tdsLabel" data-bind="tdsLabel">
+          </div>
+          <div class="field">
+            <label for="codeLabel">Code Label</label>
+            <input id="codeLabel" data-bind="codeLabel">
+          </div>
+          <div class="field">
+            <label for="notesLabel">Notes Label</label>
+            <input id="notesLabel" data-bind="notesLabel">
+          </div>
+          <div class="field">
+            <label for="termsLabel">Terms Label</label>
+            <input id="termsLabel" data-bind="termsLabel">
+          </div>
+          <div class="field">
+            <label for="paymentLabel">Payment Label</label>
+            <input id="paymentLabel" data-bind="paymentLabel">
+          </div>
+          <div class="field">
+            <label for="signatureLabel">Signature Label</label>
+            <input id="signatureLabel" data-bind="signatureLabel">
+          </div>
+          <div class="field full">
+            <label for="customDetailsLabel">Extra Details Label</label>
+            <input id="customDetailsLabel" data-bind="customDetailsLabel">
+          </div>
+          <div class="field full">
+            <label for="footerText">Footer Text</label>
+            <textarea id="footerText" data-bind="footerText"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Show / Hide Fields</h2>
+        </div>
+        <div class="toggle-grid" id="fieldToggles"></div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Theme</h2>
+        </div>
+        <div class="theme-swatches" id="themeSwatches" aria-label="Accent colors"></div>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <div class="top-strip">
+        <span class="status-dot" id="saveState">Autosaved</span>
+        <span id="topTotal">Total: ₹0.00</span>
+      </div>
+      <div class="paper-wrap">
+        <article class="invoice" id="invoicePreview" aria-label="Invoice preview">
+          <header class="invoice-head">
+            <div class="invoice-brand">
+              <div class="invoice-logo" id="previewLogo" data-optional="logo">A</div>
+              <div>
+                <h2 class="company-name" id="previewCompanyName"></h2>
+                <div class="company-meta" id="previewSenderTitle" data-optional="senderTitle"></div>
+                <div class="company-meta" id="previewCompanyMeta"></div>
+              </div>
+            </div>
+            <div class="invoice-title">
+              <strong id="previewStatus" data-optional="status"></strong>
+              <span id="previewDocumentTitle">Invoice</span>
+            </div>
+          </header>
+
+          <section class="meta-grid" aria-label="Invoice metadata">
+            <div class="meta-cell" data-optional="invoiceNo">
+              <span class="kicker" id="previewInvoiceNoLabel">Invoice No.</span>
+              <span class="value" id="previewInvoiceNo"></span>
+            </div>
+            <div class="meta-cell" data-optional="issueDate">
+              <span class="kicker" id="previewIssueDateLabel">Issue Date</span>
+              <span class="value" id="previewIssueDate"></span>
+            </div>
+            <div class="meta-cell" data-optional="dueDate">
+              <span class="kicker" id="previewDueDateLabel">Due Date</span>
+              <span class="value" id="previewDueDate"></span>
+            </div>
+            <div class="meta-cell" data-optional="poNumber">
+              <span class="kicker" id="previewPoLabel">PO / Ref.</span>
+              <span class="value" id="previewPoNumber"></span>
+            </div>
+            <div class="meta-cell" data-optional="supplyType">
+              <span class="kicker" id="previewSupplyTypeLabel">Supply Type</span>
+              <span class="value" id="previewSupplyType"></span>
+            </div>
+            <div class="meta-cell" data-optional="placeOfSupply">
+              <span class="kicker" id="previewPlaceOfSupplyLabel">Place of Supply</span>
+              <span class="value" id="previewPlaceOfSupply"></span>
+            </div>
+            <div class="meta-cell" data-optional="hsnSac">
+              <span class="kicker" id="previewHsnSacLabel">HSN / SAC</span>
+              <span class="value" id="previewHsnSac"></span>
+            </div>
+            <div class="meta-cell" data-optional="reverseCharge">
+              <span class="kicker" id="previewReverseChargeLabel">Reverse Charge</span>
+              <span class="value" id="previewReverseCharge"></span>
+            </div>
+          </section>
+
+          <section class="billing">
+            <div class="billing-block" data-optional="fromBlock">
+              <h3 id="previewFromLabel">From</h3>
+              <div class="client-meta" id="previewFrom"></div>
+            </div>
+            <div class="billing-block" data-optional="clientBlock">
+              <h3 id="previewClientLabel">Bill To</h3>
+              <div class="client-meta" id="previewClient"></div>
+            </div>
+          </section>
+
+          <section class="detail-list" id="previewCustomFields" data-optional="customDetails"></section>
+
+          <table aria-label="Invoice items">
+            <thead>
+              <tr>
+                <th id="previewServiceLabel">Service</th>
+                <th id="previewQtyLabel">Qty</th>
+                <th id="previewRateLabel">Rate</th>
+                <th id="previewAmountLabel">Amount</th>
+              </tr>
+            </thead>
+            <tbody id="previewItems"></tbody>
+          </table>
+
+          <section class="bottom-grid">
+            <div class="note-panel">
+              <div data-optional="notes">
+                <h3 id="previewNotesLabel">Notes</h3>
+                <div class="notes" id="previewNotes"></div>
+              </div>
+              <div data-optional="terms">
+                <h3 id="previewTermsLabel">Terms</h3>
+                <div class="terms" id="previewTerms"></div>
+              </div>
+              <div data-optional="paymentInfo">
+                <h3 id="previewPaymentLabel">Payment</h3>
+                <div class="terms" id="previewPaymentInfo"></div>
+              </div>
+              <div class="signature" data-optional="signature">
+                <img class="signature-image" id="previewSignatureImage" alt="Digital signature">
+                <span class="signature-text" id="previewSignatureText"></span>
+                <span class="signature-caption" id="previewSignatureLabel">Authorized Signature</span>
+              </div>
+            </div>
+            <div class="totals" aria-label="Invoice totals">
+              <div class="total-row">
+                <span id="previewSubtotalLabel">Subtotal</span>
+                <strong id="previewSubtotal"></strong>
+              </div>
+              <div class="total-row" data-optional="discount">
+                <span id="previewDiscountLabel">Discount</span>
+                <strong id="previewDiscount"></strong>
+              </div>
+              <div class="total-row" data-optional="tax">
+                <span id="previewTaxLabel">Tax</span>
+                <strong id="previewTax"></strong>
+              </div>
+              <div class="total-row" data-optional="tds">
+                <span id="previewTdsLabel">TDS Deducted</span>
+                <strong id="previewTds"></strong>
+              </div>
+              <div class="total-row grand">
+                <span id="previewTotalLabel">Total Due</span>
+                <strong id="previewTotal"></strong>
+              </div>
+            </div>
+          </section>
+          <div class="watermark" id="previewWatermark" data-optional="watermark"></div>
+          <footer class="invoice-footer" id="previewFooter" data-optional="footerText"></footer>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const STORAGE_KEY = "premium-invoice-generator-v2";
+    const LEGACY_STORAGE_KEY = "premium-invoice-generator-v1";
+    const MAX_TEXT_LENGTH = 4000;
+    const MAX_SHORT_TEXT_LENGTH = 240;
+    const MAX_IMAGE_BYTES = 1200000;
+    const MAX_DATA_URL_LENGTH = 1800000;
+    const SAFE_IMAGE_DATA_URL = /^data:image\/(?:png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=\s]+$/i;
+    const SAFE_URL_PROTOCOLS = new Set(["https:", "http:", "mailto:", "upi:", "bitcoin:", "ethereum:"]);
+
+    const shortTextFields = [
+      "documentTitle", "invoiceNo", "status", "statusBadgeText", "statusBadgeLabel", "logoText", "logoShape", "logoFit", "logoBackground", "titleBadgeShape", "currency", "poNumber", "supplyType", "placeOfSupply",
+      "hsnSac", "reverseCharge", "senderName", "senderTitle", "companyName", "companyEmail",
+      "companyPhone", "senderGstin", "senderPan", "senderWebsite", "accountHolder", "bankName",
+      "accountNumber", "ifscCode", "swiftCode", "ibanCode", "branchName", "upiId", "paypalEmail",
+      "wiseEmail", "chequePayableTo", "paymentLink", "bitcoinAddress", "ethereumAddress", "signatureText", "clientName", "clientTaxId",
+      "clientContact", "fromLabel", "clientLabel", "invoiceNoLabel", "issueDateLabel", "dueDateLabel",
+      "poLabel", "supplyTypeLabel", "placeOfSupplyLabel", "hsnSacLabel", "reverseChargeLabel",
+      "serviceLabel", "qtyLabel", "rateLabel", "amountLabel", "totalLabel", "subtotalLabel",
+      "discountLabel", "taxLabel", "tdsLabel", "tdsMode", "codeLabel", "notesLabel", "termsLabel", "paymentLabel",
+      "signatureLabel", "customDetailsLabel", "watermarkText"
+    ];
+
+    const longTextFields = [
+      "companyMeta", "paymentInfo", "cashInstructions", "customPayment", "clientMeta", "shipTo", "notes", "terms", "footerText"
+    ];
+
+    const palettes = [
+      { name: "Executive Teal", accent: "#0f5b55", accent2: "#b48a3b", paper: "#fffdf8" },
+      { name: "Cabernet Gold", accent: "#7f2434", accent2: "#c79952", paper: "#fffaf6" },
+      { name: "Graphite Brass", accent: "#30343b", accent2: "#a77d3b", paper: "#fbfaf7" },
+      { name: "Indigo Copper", accent: "#213f75", accent2: "#c38546", paper: "#fbfcff" },
+      { name: "Forest Ledger", accent: "#23543a", accent2: "#ba8d42", paper: "#fbfdf8" },
+      { name: "Charcoal Lime", accent: "#202225", accent2: "#8aa84f", paper: "#ffffff" },
+      { name: "Ocean Steel", accent: "#075c78", accent2: "#8595a3", paper: "#fbfdff" },
+      { name: "Merlot Ink", accent: "#5d2438", accent2: "#7f8a62", paper: "#fffafc" },
+      { name: "Pure Mono", accent: "#111111", accent2: "#686868", paper: "#ffffff" },
+      { name: "Aviation Navy", accent: "#16243f", accent2: "#d9a441", paper: "#fbfcff" },
+      { name: "Studio Clay", accent: "#8b3f2f", accent2: "#355f62", paper: "#fff9f4" },
+      { name: "Sage Legal", accent: "#4e6657", accent2: "#b89b61", paper: "#fcfff9" },
+      { name: "Electric Cyan", accent: "#084c61", accent2: "#00a6a6", paper: "#f9feff" },
+      { name: "Rose Ledger", accent: "#8f2d56", accent2: "#d9b08c", paper: "#fff9fb" }
+    ];
+
+    const layouts = [
+      { id: "classic", name: "Classic Ledger" },
+      { id: "editorial", name: "Editorial Header" },
+      { id: "modern", name: "Modern Open" },
+      { id: "letterhead", name: "Letterhead" },
+      { id: "sidebar", name: "Sidebar Pro" },
+      { id: "compact", name: "Compact Sheet" },
+      { id: "minimal", name: "Minimal Line" },
+      { id: "luxe", name: "Luxe Serif" },
+      { id: "stripe", name: "Color Stripe" },
+      { id: "border", name: "Gradient Border" },
+      { id: "stamp", name: "Status Stamp" },
+      { id: "receipt", name: "Receipt Narrow" },
+      { id: "blocks", name: "Modular Blocks" }
+    ];
+
+    const treatments = [
+      { id: "balanced", name: "Balanced", typeClass: "", densityClass: "" },
+      { id: "airy", name: "Airy", typeClass: "", densityClass: "density-airy" },
+      { id: "compact", name: "Compact", typeClass: "", densityClass: "density-compact" },
+      { id: "serif", name: "Serif Formal", typeClass: "type-serif", densityClass: "" },
+      { id: "technical", name: "Technical", typeClass: "type-technical", densityClass: "density-compact" },
+      { id: "bold", name: "Bold Display", typeClass: "", densityClass: "density-bold" }
+    ];
+
+    const templates = buildTemplates();
+
+    const fieldOptions = [
+      ["logo", "Logo Mark"],
+      ["senderTitle", "Role / Tagline"],
+      ["companyName", "Company Name"],
+      ["companyMeta", "Address / Tax"],
+      ["email", "Email"],
+      ["phone", "Phone"],
+      ["senderGstin", "Sender GST/VAT"],
+      ["senderPan", "Sender PAN/Tax ID"],
+      ["senderWebsite", "Website"],
+      ["status", "Status"],
+      ["invoiceNo", "Invoice No."],
+      ["issueDate", "Issue Date"],
+      ["dueDate", "Due Date"],
+      ["poNumber", "PO / Ref."],
+      ["supplyType", "Supply Type"],
+      ["placeOfSupply", "Place of Supply"],
+      ["hsnSac", "HSN / SAC"],
+      ["reverseCharge", "Reverse Charge"],
+      ["fromBlock", "From Block"],
+      ["clientBlock", "Client Block"],
+      ["clientMeta", "Client Address"],
+      ["clientTaxId", "Client Tax ID"],
+      ["clientContact", "Client Contact"],
+      ["shipTo", "Ship To"],
+      ["itemCode", "Item Code / HSN"],
+      ["itemDescription", "Item Notes"],
+      ["discount", "Discount"],
+      ["tax", "Tax"],
+      ["tds", "TDS"],
+      ["notes", "Notes"],
+      ["terms", "Terms"],
+      ["paymentInfo", "Payment Info"],
+      ["customDetails", "Extra Details"],
+      ["watermark", "Watermark"],
+      ["footerText", "Footer"],
+      ["signature", "Signature"]
+    ];
+
+    const paymentMethodOptions = [
+      ["bank", "Bank Transfer"],
+      ["upi", "UPI"],
+      ["paymentLink", "Payment Link"],
+      ["paypal", "PayPal"],
+      ["card", "Card"],
+      ["wise", "Wise"],
+      ["cheque", "Cheque"],
+      ["cash", "Cash / Offline"],
+      ["crypto", "Crypto"],
+      ["custom", "Custom"]
+    ];
+
+    const visibleDefaults = Object.fromEntries(fieldOptions.map(([key]) => [key, true]));
+    visibleDefaults.companyName = false;
+
+    const defaultState = {
+      documentTitle: "Invoice",
+      invoiceNo: "INV-2026-001",
+      status: "Due",
+      issueDate: new Date().toISOString().slice(0, 10),
+      dueDate: nextDate(14),
+      currency: "INR",
+      poNumber: "PO-4582",
+      supplyType: "Services",
+      placeOfSupply: "Maharashtra",
+      hsnSac: "998313",
+      reverseCharge: "No",
+      senderType: "freelancer",
+      logoData: "",
+      logoText: "",
+      logoShape: "circle",
+      logoFit: "contain",
+      logoBackground: "paper",
+      logoSize: 52,
+      logoPadding: 5,
+      statusBadgeText: "Due",
+      statusBadgeLabel: "",
+      titleBadgeShape: "circle",
+      titleBadgeSize: 150,
+      titleBadgeStrength: 22,
+      senderName: "Your name",
+      senderTitle: "Your role or business",
+      companyName: "",
+      companyMeta: "City, State\nGSTIN / Tax ID: optional",
+      companyEmail: "hello@example.com",
+      companyPhone: "+00 00000 00000",
+      senderGstin: "",
+      senderPan: "",
+      senderWebsite: "",
+      paymentInfo: "Bank transfer / UPI accepted\nPayment reference: invoice number",
+      accountHolder: "Your name",
+      bankName: "Example Bank",
+      accountNumber: "000000000000",
+      ifscCode: "EXAMPLE0000",
+      swiftCode: "",
+      ibanCode: "",
+      branchName: "Main Branch",
+      upiId: "yourname@upi",
+      paypalEmail: "",
+      wiseEmail: "",
+      chequePayableTo: "",
+      cashInstructions: "",
+      paymentLink: "",
+      bitcoinAddress: "",
+      ethereumAddress: "",
+      customPayment: "",
+      paymentMethods: {
+        bank: true,
+        upi: true,
+        paymentLink: false,
+        paypal: false,
+        card: false,
+        wise: false,
+        cheque: false,
+        cash: false,
+        crypto: false,
+        custom: false
+      },
+      signatureText: "Your name",
+      signatureData: "",
+      clientName: "Client Company",
+      clientMeta: "Client Department\nClient City\nbilling@example.com",
+      clientTaxId: "",
+      clientContact: "Accounts Payable",
+      shipTo: "",
+      taxRate: 18,
+      discount: 2500,
+      tdsMode: "rate",
+      tdsRate: 10,
+      tdsAmount: 0,
+      notes: "Thank you for your business. I appreciate the opportunity to work with you.",
+      terms: "Payment is due within 14 days. Please include the invoice number in your transfer reference.",
+      fromLabel: "From",
+      clientLabel: "Bill To",
+      invoiceNoLabel: "Invoice No.",
+      issueDateLabel: "Issue Date",
+      dueDateLabel: "Due Date",
+      poLabel: "PO / Ref.",
+      supplyTypeLabel: "Supply Type",
+      placeOfSupplyLabel: "Place of Supply",
+      hsnSacLabel: "HSN / SAC",
+      reverseChargeLabel: "Reverse Charge",
+      serviceLabel: "Service",
+      qtyLabel: "Qty",
+      rateLabel: "Rate",
+      amountLabel: "Amount",
+      totalLabel: "Total Due",
+      subtotalLabel: "Subtotal",
+      discountLabel: "Discount",
+      taxLabel: "Tax",
+      tdsLabel: "TDS Deducted",
+      codeLabel: "Code",
+      notesLabel: "Notes",
+      termsLabel: "Terms",
+      paymentLabel: "Payment",
+      signatureLabel: "Authorized Signature",
+      customDetailsLabel: "Details",
+      footerText: "This invoice was generated electronically. Please retain it for your records.",
+      watermarkText: "",
+      tableStyle: "solid",
+      cornerStyle: "normal",
+      fontScale: 1,
+      templateIndex: 0,
+      templatePage: 0,
+      paletteId: 0,
+      layoutId: "classic",
+      treatmentId: "balanced",
+      paperMode: "cream",
+      monoMode: false,
+      visible: visibleDefaults,
+      customFields: [
+        { label: "Project", value: "Security advisory retainer" },
+        { label: "Payment Reference", value: "Use invoice number in transfer notes" }
+      ],
+      items: [
+        { name: "Security Assessment", code: "998313", description: "Application review, findings validation, and client-ready summary", quantity: 1, rate: 45000 },
+        { name: "Detection Engineering Support", code: "998313", description: "Custom detection logic, tuning notes, and implementation guidance", quantity: 1, rate: 28000 },
+        { name: "Advisory Hours", code: "998313", description: "Review calls, remediation guidance, and delivery handover", quantity: 6, rate: 3500 }
+      ]
+    };
+
+    let state = loadState();
+    let signatureCanvas;
+    let signatureContext;
+    let isSigning = false;
+    let signatureHasInk = false;
+    const moneyFormatters = {};
+    const dateFormat = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+
+    function buildTemplates() {
+      const result = [];
+      layouts.forEach((layout) => {
+        palettes.forEach((palette, paletteIndex) => {
+          treatments.forEach((treatment) => {
+            [false, true].forEach((mono) => {
+              result.push({
+                name: `${layout.name} / ${palette.name} / ${treatment.name}${mono ? " / B&W" : ""}`,
+                layoutId: layout.id,
+                paletteId: paletteIndex,
+                treatmentId: treatment.id,
+                mono
+              });
+            });
+          });
+        });
+      });
+      return result;
+    }
+
+    function nextDate(days) {
+      const date = new Date();
+      date.setDate(date.getDate() + days);
+      return date.toISOString().slice(0, 10);
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+        const saved = raw ? JSON.parse(raw) : {};
+        const merged = {
+          ...structuredClone(defaultState),
+          ...saved,
+          visible: { ...visibleDefaults, ...(saved.visible || {}) },
+          paymentMethods: { ...defaultState.paymentMethods, ...(saved.paymentMethods || {}) },
+          customFields: Array.isArray(saved.customFields) ? saved.customFields : structuredClone(defaultState.customFields),
+          items: Array.isArray(saved.items) && saved.items.length ? saved.items : structuredClone(defaultState.items)
+        };
+
+        if (!merged.senderName && saved.companyName) merged.senderName = saved.companyName;
+        if (Number.isInteger(saved.themeIndex) && !Number.isInteger(saved.paletteId)) merged.paletteId = saved.themeIndex;
+        return normalizeState(merged);
+      } catch {
+        return structuredClone(defaultState);
+      }
+    }
+
+    function normalizeState(next) {
+      next.templateIndex = clampIndex(numeric(next.templateIndex), templates.length);
+      next.paletteId = clampIndex(numeric(next.paletteId), palettes.length);
+      next.layoutId = layouts.some((layout) => layout.id === next.layoutId) ? next.layoutId : "classic";
+      next.treatmentId = treatments.some((treatment) => treatment.id === next.treatmentId) ? next.treatmentId : "balanced";
+      next.paperMode = next.paperMode === "white" ? "white" : "cream";
+      next.monoMode = Boolean(next.monoMode);
+      next.senderType = next.senderType === "company" ? "company" : "freelancer";
+      next.visible = { ...visibleDefaults, ...(next.visible || {}) };
+      next.paymentMethods = { ...defaultState.paymentMethods, ...(next.paymentMethods || {}) };
+      next.customFields = Array.isArray(next.customFields) ? next.customFields : [];
+      next.customFields = dedupeCustomFields(next.customFields);
+      next.tableStyle = ["solid", "open", "boxed"].includes(next.tableStyle) ? next.tableStyle : "solid";
+      next.cornerStyle = ["normal", "square", "soft"].includes(next.cornerStyle) ? next.cornerStyle : "normal";
+      next.logoShape = ["circle", "rounded", "square", "diamond"].includes(next.logoShape) ? next.logoShape : "circle";
+      next.logoFit = ["contain", "cover"].includes(next.logoFit) ? next.logoFit : "contain";
+      next.logoBackground = ["paper", "white", "transparent", "accent"].includes(next.logoBackground) ? next.logoBackground : "paper";
+      next.titleBadgeShape = ["circle", "rounded", "square", "none"].includes(next.titleBadgeShape) ? next.titleBadgeShape : "circle";
+      next.tdsMode = next.tdsMode === "amount" ? "amount" : "rate";
+      next.fontScale = Math.min(1.2, Math.max(0.85, numeric(next.fontScale) || 1));
+      shortTextFields.forEach((field) => {
+        next[field] = cleanText(next[field], MAX_SHORT_TEXT_LENGTH);
+      });
+      longTextFields.forEach((field) => {
+        next[field] = cleanText(next[field], MAX_TEXT_LENGTH);
+      });
+      next.paymentLink = cleanUrlText(next.paymentLink);
+      next.logoData = cleanImageDataUrl(next.logoData);
+      next.signatureData = cleanImageDataUrl(next.signatureData);
+      next.taxRate = Math.max(0, Math.min(100, numeric(next.taxRate)));
+      next.tdsRate = Math.max(0, Math.min(100, numeric(next.tdsRate)));
+      next.discount = Math.max(0, Math.min(1000000000, numeric(next.discount)));
+      next.tdsAmount = Math.max(0, Math.min(1000000000, numeric(next.tdsAmount)));
+      next.logoSize = Math.max(36, Math.min(120, numeric(next.logoSize) || 52));
+      next.logoPadding = Math.max(0, Math.min(24, numeric(next.logoPadding)));
+      next.titleBadgeSize = Math.max(90, Math.min(260, numeric(next.titleBadgeSize) || 150));
+      next.titleBadgeStrength = Math.max(0, Math.min(100, numeric(next.titleBadgeStrength) || 0));
+      next.items = sanitizeItems(next.items);
+      next.customFields = sanitizeCustomFields(next.customFields);
+      return next;
+    }
+
+    function dedupeCustomFields(fields) {
+      const seen = new Set();
+      return fields.filter((field) => {
+        const label = String(field.label || "").trim();
+        const value = String(field.value || "").trim();
+        if (!label && !value) return false;
+        const key = `${label.toLowerCase()}::${value.toLowerCase()}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    function cleanText(value, maxLength = MAX_TEXT_LENGTH) {
+      return String(value ?? "")
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+        .slice(0, maxLength);
+    }
+
+    function cleanUrlText(value) {
+      const text = cleanText(value, 1000).trim();
+      if (!text) return "";
+      try {
+        const url = new URL(text);
+        return SAFE_URL_PROTOCOLS.has(url.protocol) ? text : "";
+      } catch {
+        return text.startsWith("www.") ? `https://${text}` : "";
+      }
+    }
+
+    function cleanImageDataUrl(value) {
+      const text = String(value ?? "");
+      if (!text) return "";
+      if (text.length > MAX_DATA_URL_LENGTH) return "";
+      return SAFE_IMAGE_DATA_URL.test(text) ? text.replace(/\s/g, "") : "";
+    }
+
+    function sanitizeItems(items) {
+      if (!Array.isArray(items)) return structuredClone(defaultState.items);
+      return items.slice(0, 100).map((item) => ({
+        name: cleanText(item && item.name, MAX_SHORT_TEXT_LENGTH),
+        code: cleanText(item && item.code, MAX_SHORT_TEXT_LENGTH),
+        description: cleanText(item && item.description, MAX_TEXT_LENGTH),
+        quantity: Math.max(0, Math.min(1000000, numeric(item && item.quantity))),
+        rate: Math.max(0, Math.min(1000000000, numeric(item && item.rate)))
+      }));
+    }
+
+    function sanitizeCustomFields(fields) {
+      if (!Array.isArray(fields)) return [];
+      return dedupeCustomFields(fields.slice(0, 60).map((field) => ({
+        label: cleanText(field && field.label, MAX_SHORT_TEXT_LENGTH),
+        value: cleanText(field && field.value, MAX_TEXT_LENGTH)
+      })));
+    }
+
+    function clampIndex(index, length) {
+      if (!Number.isInteger(index) || index < 0 || index >= length) return 0;
+      return index;
+    }
+
+    function saveState() {
+      state = normalizeState(state);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        setText("saveState", "Autosaved");
+      } catch {
+        state.logoData = "";
+        state.signatureData = "";
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          setText("saveState", "Autosaved without images");
+        } catch {
+          setText("saveState", "Storage full");
+        }
+      }
+    }
+
+    function numeric(value) {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : 0;
+    }
+
+    function formatMoney(amount) {
+      const code = state.currency || "INR";
+      moneyFormatters[code] ||= new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency: code,
+        maximumFractionDigits: 2
+      });
+      return moneyFormatters[code].format(Number.isFinite(amount) ? amount : 0);
+    }
+
+    function formatDate(value) {
+      if (!value) return "Not set";
+      const parsed = new Date(value + "T00:00:00");
+      return Number.isNaN(parsed.getTime()) ? value : dateFormat.format(parsed);
+    }
+
+    function totals() {
+      const subtotal = state.items.reduce((sum, item) => sum + numeric(item.quantity) * numeric(item.rate), 0);
+      const discount = state.visible.discount ? Math.min(numeric(state.discount), subtotal) : 0;
+      const taxable = Math.max(subtotal - discount, 0);
+      const tax = state.visible.tax ? taxable * (numeric(state.taxRate) / 100) : 0;
+      const beforeTds = taxable + tax;
+      const tdsValue = state.tdsMode === "amount" ? numeric(state.tdsAmount) : taxable * (numeric(state.tdsRate) / 100);
+      const tds = state.visible.tds ? Math.min(Math.max(tdsValue, 0), beforeTds) : 0;
+      return { subtotal, discount, taxable, tax, tds, total: beforeTds - tds };
+    }
+
+    function bindControls() {
+      document.querySelectorAll("[data-bind]").forEach((input) => {
+        const key = input.dataset.bind;
+        input.addEventListener("input", () => {
+          state[key] = input.type === "number" ? numeric(input.value) : cleanText(input.value, longTextFields.includes(key) ? MAX_TEXT_LENGTH : MAX_SHORT_TEXT_LENGTH);
+          if (key === "paymentLink") state[key] = cleanUrlText(state[key]);
+          if (key === "senderType") {
+            syncSenderVisibility();
+            render(true);
+            return;
+          }
+          if (key === "tdsMode") syncTdsPanels();
+          if (["serviceLabel", "qtyLabel", "rateLabel", "amountLabel", "codeLabel"].includes(key)) renderLineEditor();
+          renderPreview();
+          saveState();
+        });
+      });
+
+      document.querySelectorAll("[data-flag]").forEach((input) => {
+        const key = input.dataset.flag;
+        input.addEventListener("change", () => {
+          state[key] = input.checked;
+          syncTemplateSelectFromState();
+          renderTemplateCards();
+          renderPreview();
+          saveState();
+        });
+      });
+
+      document.getElementById("templateSelect").addEventListener("change", (event) => {
+        applyTemplate(numeric(event.target.value));
+        render(true);
+      });
+
+      document.getElementById("showMoreTemplatesBtn").addEventListener("click", () => {
+        state.templatePage = (numeric(state.templatePage) + 1) % Math.ceil(layouts.length / 12);
+        renderTemplateCards();
+        saveState();
+      });
+
+      document.getElementById("shuffleTemplatesBtn").addEventListener("click", () => {
+        applyTemplate(Math.floor(Math.random() * templates.length));
+        render(true);
+      });
+
+      document.getElementById("logoUpload").addEventListener("change", (event) => {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type) || file.size > MAX_IMAGE_BYTES) {
+          alert("Please upload a PNG, JPG, WEBP, or GIF logo under 1.2 MB.");
+          event.target.value = "";
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const safeLogo = cleanImageDataUrl(reader.result);
+          if (!safeLogo) {
+            alert("That logo file could not be used safely.");
+            event.target.value = "";
+            return;
+          }
+          state.logoData = safeLogo;
+          renderPreview();
+          saveState();
+        };
+        reader.readAsDataURL(file);
+      });
+
+      document.getElementById("clearLogoBtn").addEventListener("click", () => {
+        state.logoData = "";
+        document.getElementById("logoUpload").value = "";
+        renderPreview();
+        saveState();
+      });
+
+      document.getElementById("useNameSignatureBtn").addEventListener("click", () => {
+        state.signatureText = state.senderName || state.companyName || "Your Name";
+        state.signatureData = "";
+        render(true);
+      });
+
+      document.getElementById("clearSignatureBtn").addEventListener("click", () => {
+        state.signatureData = "";
+        state.signatureText = "";
+        clearSignaturePad();
+        render(true);
+      });
+
+      document.getElementById("addCustomFieldBtn").addEventListener("click", () => {
+        state.customFields.push({ label: "Custom Detail", value: "" });
+        render();
+      });
+
+      document.querySelectorAll("[data-preset-field]").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.customFields.push({ label: button.dataset.presetField, value: "" });
+          render();
+        });
+      });
+
+      document.getElementById("addItemBtn").addEventListener("click", () => {
+        state.items.push({ name: "New service", code: "", description: "", quantity: 1, rate: 0 });
+        render();
+      });
+
+      document.getElementById("printBtn").addEventListener("click", () => window.print());
+      document.getElementById("resetBtn").addEventListener("click", () => {
+        if (!confirm("Reset this invoice to the freelancer sample?")) return;
+        state = structuredClone(defaultState);
+        render(true);
+      });
+
+      setupSignaturePad();
+    }
+
+    function setupSignaturePad() {
+      signatureCanvas = document.getElementById("signaturePad");
+      signatureContext = signatureCanvas.getContext("2d");
+      resizeSignaturePad();
+      window.addEventListener("resize", resizeSignaturePad);
+
+      signatureCanvas.addEventListener("pointerdown", (event) => {
+        isSigning = true;
+        signatureHasInk = true;
+        signatureCanvas.setPointerCapture(event.pointerId);
+        signatureContext.beginPath();
+        const point = signaturePoint(event);
+        signatureContext.moveTo(point.x, point.y);
+      });
+
+      signatureCanvas.addEventListener("pointermove", (event) => {
+        if (!isSigning) return;
+        const point = signaturePoint(event);
+        signatureContext.lineTo(point.x, point.y);
+        signatureContext.stroke();
+      });
+
+      ["pointerup", "pointercancel", "pointerleave"].forEach((eventName) => {
+        signatureCanvas.addEventListener(eventName, () => {
+          if (!isSigning) return;
+          isSigning = false;
+          state.signatureData = cleanImageDataUrl(signatureCanvas.toDataURL("image/png"));
+          renderPreview();
+          saveState();
+        });
+      });
+    }
+
+    function renderPaymentMethodToggles() {
+      const toggles = document.getElementById("paymentMethodToggles");
+      toggles.innerHTML = "";
+      paymentMethodOptions.forEach(([key, labelText]) => {
+        const label = document.createElement("label");
+        label.className = "toggle-row";
+        label.innerHTML = `<input type="checkbox" ${state.paymentMethods[key] ? "checked" : ""} data-payment-method="${key}">${escapeText(labelText)}`;
+        toggles.appendChild(label);
+      });
+
+      toggles.querySelectorAll("[data-payment-method]").forEach((input) => {
+        input.addEventListener("change", () => {
+          state.paymentMethods[input.dataset.paymentMethod] = input.checked;
+          if (input.dataset.paymentMethod === "custom" && input.checked) {
+            const customBox = document.getElementById("customPayment");
+            if (!state.customPayment) state.customPayment = "Custom payment instructions: ";
+            customBox.value = state.customPayment;
+            setTimeout(() => customBox.focus(), 0);
+          }
+          syncPaymentPanels();
+          renderPreview();
+          saveState();
+        });
+      });
+      syncPaymentPanels();
+    }
+
+    function syncPaymentPanels() {
+      const panel = document.getElementById("customPaymentPanel");
+      if (panel) panel.classList.toggle("is-control-hidden", !state.paymentMethods.custom);
+    }
+
+    function syncTdsPanels() {
+      document.querySelectorAll("[data-tds-panel]").forEach((panel) => {
+        panel.classList.toggle("is-control-hidden", panel.dataset.tdsPanel !== state.tdsMode);
+      });
+    }
+
+    function renderCustomFieldEditor() {
+      const editor = document.getElementById("customFieldEditor");
+      editor.innerHTML = "";
+
+      state.customFields.forEach((field, index) => {
+        const row = document.createElement("div");
+        row.className = "detail-row";
+        row.innerHTML = `
+          <div class="field">
+            <label>Label</label>
+            <input data-custom="${index}" data-prop="label" value="${escapeAttr(field.label)}">
+          </div>
+          <div class="field">
+            <label>Value</label>
+            <input data-custom="${index}" data-prop="value" value="${escapeAttr(field.value)}">
+          </div>
+          <button class="icon-btn" type="button" title="Remove detail" aria-label="Remove detail" data-remove-custom="${index}">x</button>
+        `;
+        editor.appendChild(row);
+      });
+
+      editor.querySelectorAll("[data-custom]").forEach((input) => {
+        input.addEventListener("input", () => {
+          const index = Number(input.dataset.custom);
+          const limit = input.dataset.prop === "label" ? MAX_SHORT_TEXT_LENGTH : MAX_TEXT_LENGTH;
+          state.customFields[index][input.dataset.prop] = cleanText(input.value, limit);
+          renderPreview();
+          saveState();
+        });
+      });
+
+      editor.querySelectorAll("[data-remove-custom]").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.customFields.splice(Number(button.dataset.removeCustom), 1);
+          render();
+        });
+      });
+    }
+
+    function resizeSignaturePad() {
+      if (!signatureCanvas || !signatureContext) return;
+      const image = state.signatureData;
+      const ratio = Math.max(window.devicePixelRatio || 1, 1);
+      const rect = signatureCanvas.getBoundingClientRect();
+      signatureCanvas.width = Math.max(1, Math.floor(rect.width * ratio));
+      signatureCanvas.height = Math.max(1, Math.floor(rect.height * ratio));
+      signatureContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+      signatureContext.lineWidth = 2.4;
+      signatureContext.lineCap = "round";
+      signatureContext.lineJoin = "round";
+      signatureContext.strokeStyle = "#111111";
+      clearSignaturePad(false);
+      if (image) drawSavedSignature(image);
+    }
+
+    function signaturePoint(event) {
+      const rect = signatureCanvas.getBoundingClientRect();
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top
+      };
+    }
+
+    function clearSignaturePad(updateState = true) {
+      if (!signatureContext || !signatureCanvas) return;
+      const rect = signatureCanvas.getBoundingClientRect();
+      signatureContext.clearRect(0, 0, rect.width, rect.height);
+      signatureHasInk = false;
+      if (updateState) {
+        state.signatureData = "";
+        renderPreview();
+        saveState();
+      }
+    }
+
+    function drawSavedSignature(dataUrl) {
+      const image = new Image();
+      image.onload = () => {
+        clearSignaturePad(false);
+        const rect = signatureCanvas.getBoundingClientRect();
+        const padding = 14;
+        const scale = Math.min((rect.width - padding * 2) / image.width, (rect.height - padding * 2) / image.height);
+        const width = image.width * scale;
+        const height = image.height * scale;
+        signatureContext.drawImage(image, padding, (rect.height - height) / 2, width, height);
+        signatureHasInk = true;
+      };
+      image.src = dataUrl;
+    }
+
+    function syncSenderVisibility() {
+      if (state.senderType === "freelancer" && !state.companyName.trim()) {
+        state.visible.companyName = false;
+      }
+      if (state.senderType === "company") {
+        state.visible.companyName = true;
+        if (!state.companyName.trim()) state.companyName = state.senderName || "Your Company";
+      }
+    }
+
+    function applyTemplate(index) {
+      const template = templates[clampIndex(index, templates.length)];
+      state.templateIndex = clampIndex(index, templates.length);
+      state.layoutId = template.layoutId;
+      state.paletteId = template.paletteId;
+      state.treatmentId = template.treatmentId;
+      state.monoMode = template.mono;
+    }
+
+    function syncTemplateSelectFromState() {
+      const match = templates.findIndex((template) =>
+        template.layoutId === state.layoutId &&
+        template.paletteId === state.paletteId &&
+        template.treatmentId === state.treatmentId &&
+        template.mono === Boolean(state.monoMode)
+      );
+      state.templateIndex = match >= 0 ? match : state.templateIndex;
+      const select = document.getElementById("templateSelect");
+      if (select) select.value = state.templateIndex;
+    }
+
+    function renderTemplateSelect() {
+      const select = document.getElementById("templateSelect");
+      select.innerHTML = templates.map((template, index) =>
+        `<option value="${index}">${String(index + 1).padStart(3, "0")} - ${escapeText(template.name)}</option>`
+      ).join("");
+      setText("templateCount", `${templates.length}+ styles`);
+      syncTemplateSelectFromState();
+    }
+
+    function renderTemplateCards() {
+      const cards = document.getElementById("templateCards");
+      const currentTemplate = templates[state.templateIndex];
+      const treatmentId = currentTemplate ? currentTemplate.treatmentId : state.treatmentId;
+      const pageSize = 12;
+      const page = numeric(state.templatePage);
+      const rotatedLayouts = layouts.slice(page * pageSize).concat(layouts.slice(0, page * pageSize));
+      const featured = rotatedLayouts
+        .map((layout) => templates.find((template) =>
+          template.layoutId === layout.id &&
+          template.paletteId === state.paletteId &&
+          template.treatmentId === treatmentId &&
+          template.mono === state.monoMode
+        ))
+        .filter(Boolean)
+        .slice(0, pageSize);
+
+      if (currentTemplate && !featured.includes(currentTemplate)) featured.unshift(currentTemplate);
+
+      cards.innerHTML = "";
+      featured.forEach((template) => {
+        const index = templates.indexOf(template);
+        const palette = palettes[template.paletteId];
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `template-card${index === state.templateIndex ? " is-active" : ""}`;
+        button.innerHTML = `
+          <div class="template-mini" style="--accent:${template.mono ? "#111" : palette.accent}; --accent-2:${template.mono ? "#666" : palette.accent2};">
+            <div class="template-line"></div>
+            <div class="template-line short"></div>
+            <div class="template-line thin"></div>
+          </div>
+          <span>${escapeText(layouts.find((layout) => layout.id === template.layoutId).name)}</span>
+        `;
+        button.addEventListener("click", () => {
+          applyTemplate(index);
+          render(true);
+        });
+        cards.appendChild(button);
+      });
+    }
+
+    function renderFieldToggles() {
+      const toggles = document.getElementById("fieldToggles");
+      toggles.innerHTML = "";
+      fieldOptions.forEach(([key, labelText]) => {
+        const label = document.createElement("label");
+        label.className = "toggle-row";
+        label.innerHTML = `<input type="checkbox" ${state.visible[key] ? "checked" : ""} data-visible-key="${key}">${escapeText(labelText)}`;
+        toggles.appendChild(label);
+      });
+
+      toggles.querySelectorAll("[data-visible-key]").forEach((input) => {
+        input.addEventListener("change", () => {
+          state.visible[input.dataset.visibleKey] = input.checked;
+          renderPreview();
+          saveState();
+        });
+      });
+    }
+
+    function renderLineEditor() {
+      const editor = document.getElementById("lineEditor");
+      editor.innerHTML = "";
+
+      state.items.forEach((item, index) => {
+        const row = document.createElement("div");
+        row.className = "item-row";
+        row.innerHTML = `
+          <div class="field">
+            <label>${escapeText(state.serviceLabel || "Service")}</label>
+            <input data-item="${index}" data-prop="name" value="${escapeAttr(item.name)}">
+          </div>
+          <div class="field">
+            <label>${escapeText(state.qtyLabel || "Qty")}</label>
+            <input data-item="${index}" data-prop="quantity" type="number" min="0" step="0.01" value="${escapeAttr(item.quantity)}">
+          </div>
+          <div class="field">
+            <label>${escapeText(state.rateLabel || "Rate")}</label>
+            <input data-item="${index}" data-prop="rate" type="number" min="0" step="0.01" value="${escapeAttr(item.rate)}">
+          </div>
+          <button class="icon-btn" type="button" title="Remove item" aria-label="Remove item" data-remove="${index}">x</button>
+          <div class="field full">
+            <label>Code / HSN / SAC</label>
+            <input data-item="${index}" data-prop="code" value="${escapeAttr(item.code || "")}">
+          </div>
+          <div class="field full">
+            <label>Description</label>
+            <textarea data-item="${index}" data-prop="description">${escapeText(item.description)}</textarea>
+          </div>
+        `;
+        editor.appendChild(row);
+      });
+
+      editor.querySelectorAll("[data-item]").forEach((input) => {
+        input.addEventListener("input", () => {
+          const index = Number(input.dataset.item);
+          const prop = input.dataset.prop;
+          state.items[index][prop] = input.type === "number" ? numeric(input.value) : cleanText(input.value, prop === "description" ? MAX_TEXT_LENGTH : MAX_SHORT_TEXT_LENGTH);
+          renderPreview();
+          saveState();
+        });
+      });
+
+      editor.querySelectorAll("[data-remove]").forEach((button) => {
+        button.addEventListener("click", () => {
+          if (state.items.length === 1) {
+            state.items[0] = { name: "", code: "", description: "", quantity: 1, rate: 0 };
+          } else {
+            state.items.splice(Number(button.dataset.remove), 1);
+          }
+          render();
+        });
+      });
+    }
+
+    function renderThemes() {
+      const swatches = document.getElementById("themeSwatches");
+      swatches.innerHTML = "";
+      palettes.forEach((palette, index) => {
+        const button = document.createElement("button");
+        button.className = `swatch${index === state.paletteId ? " is-active" : ""}`;
+        button.type = "button";
+        button.title = palette.name;
+        button.style.background = `linear-gradient(135deg, ${palette.accent} 0 55%, ${palette.accent2} 55%)`;
+        button.addEventListener("click", () => {
+          state.paletteId = index;
+          syncTemplateSelectFromState();
+          renderThemes();
+          renderTemplateCards();
+          renderPreview();
+          saveState();
+        });
+        swatches.appendChild(button);
+      });
+    }
+
+    function renderPreview() {
+      const palette = palettes[state.paletteId] || palettes[0];
+      const treatment = treatments.find((item) => item.id === state.treatmentId) || treatments[0];
+      const invoice = document.getElementById("invoicePreview");
+      document.documentElement.style.setProperty("--accent", state.monoMode ? "#111111" : palette.accent);
+      document.documentElement.style.setProperty("--accent-2", state.monoMode ? "#666666" : palette.accent2);
+      document.documentElement.style.setProperty("--paper", state.paperMode === "white" || state.monoMode ? "#ffffff" : palette.paper);
+
+      invoice.className = [
+        "invoice",
+        `layout-${state.layoutId}`,
+        state.logoShape === "rounded" ? "logo-rounded" : "",
+        state.logoShape === "square" ? "logo-square" : "",
+        state.logoShape === "diamond" ? "logo-diamond" : "",
+        state.titleBadgeShape === "rounded" ? "title-badge-rounded" : "",
+        state.titleBadgeShape === "square" ? "title-badge-square" : "",
+        state.titleBadgeShape === "none" ? "title-badge-none" : "",
+        state.paperMode === "white" ? "paper-white" : "paper-cream",
+        state.tableStyle === "open" ? "table-open" : "",
+        state.tableStyle === "boxed" ? "table-boxed" : "",
+        state.cornerStyle === "square" ? "corner-square" : "",
+        state.cornerStyle === "soft" ? "corner-soft" : "",
+        state.monoMode ? "is-mono" : "",
+        treatment.typeClass,
+        treatment.densityClass
+      ].filter(Boolean).join(" ");
+      invoice.dataset.stamp = state.status || "";
+      document.documentElement.style.setProperty("--invoice-font-scale", String(state.fontScale || 1));
+      document.documentElement.style.setProperty("--logo-size", `${state.logoSize || 52}px`);
+      document.documentElement.style.setProperty("--logo-padding", `${state.logoPadding || 0}px`);
+      document.documentElement.style.setProperty("--logo-fit", state.logoFit || "contain");
+      document.documentElement.style.setProperty("--logo-image-bg", logoBackgroundValue());
+      document.documentElement.style.setProperty("--title-badge-size", `${state.titleBadgeSize || 150}px`);
+      document.documentElement.style.setProperty("--title-badge-strength", `${state.titleBadgeStrength ?? 22}%`);
+
+      document.querySelectorAll("[data-optional]").forEach((node) => {
+        const key = node.dataset.optional;
+        const hasContent = optionalHasContent(key);
+        node.classList.toggle("is-hidden", state.visible[key] === false || !hasContent);
+      });
+
+      const displayName = senderDisplayName();
+      const logoLetter = makeLogoMark(state.logoText || displayName || state.documentTitle || "I");
+      const contactParts = [
+        state.visible.companyMeta ? state.companyMeta : "",
+        state.visible.senderGstin && state.senderGstin ? `GST/VAT: ${state.senderGstin}` : "",
+        state.visible.senderPan && state.senderPan ? `PAN/Tax ID: ${state.senderPan}` : "",
+        state.visible.email ? state.companyEmail : "",
+        state.visible.phone ? state.companyPhone : "",
+        state.visible.senderWebsite ? state.senderWebsite : ""
+      ].filter(Boolean);
+      const contact = contactParts.join("\n");
+      const from = [displayName, state.visible.senderTitle ? state.senderTitle : "", contact].filter(Boolean).join("\n");
+      const client = [
+        state.clientName,
+        state.visible.clientContact ? state.clientContact : "",
+        state.visible.clientMeta ? state.clientMeta : "",
+        state.visible.clientTaxId && state.clientTaxId ? `Tax ID: ${state.clientTaxId}` : "",
+        state.visible.shipTo && state.shipTo ? `Ship To:\n${state.shipTo}` : ""
+      ].filter(Boolean).join("\n");
+      const summary = totals();
+
+      renderLogoPreview(logoLetter);
+      setText("previewCompanyName", displayName);
+      setText("previewSenderTitle", state.senderTitle);
+      setText("previewCompanyMeta", contact);
+      setText("previewDocumentTitle", state.documentTitle || "Invoice");
+      setText("previewStatus", [state.statusBadgeLabel, state.statusBadgeText || state.status].filter(Boolean).join(": "));
+      setText("previewInvoiceNoLabel", state.invoiceNoLabel || "Invoice No.");
+      setText("previewInvoiceNo", state.invoiceNo);
+      setText("previewIssueDateLabel", state.issueDateLabel || "Issue Date");
+      setText("previewIssueDate", formatDate(state.issueDate));
+      setText("previewDueDateLabel", state.dueDateLabel || "Due Date");
+      setText("previewDueDate", formatDate(state.dueDate));
+      setText("previewPoLabel", state.poLabel || "PO / Ref.");
+      setText("previewPoNumber", state.poNumber);
+      setText("previewSupplyTypeLabel", state.supplyTypeLabel || "Supply Type");
+      setText("previewSupplyType", state.supplyType);
+      setText("previewPlaceOfSupplyLabel", state.placeOfSupplyLabel || "Place of Supply");
+      setText("previewPlaceOfSupply", state.placeOfSupply);
+      setText("previewHsnSacLabel", state.hsnSacLabel || "HSN / SAC");
+      setText("previewHsnSac", state.hsnSac);
+      setText("previewReverseChargeLabel", state.reverseChargeLabel || "Reverse Charge");
+      setText("previewReverseCharge", state.reverseCharge);
+      setText("previewFromLabel", state.fromLabel || "From");
+      setText("previewClientLabel", state.clientLabel || "Bill To");
+      setText("previewFrom", from);
+      setText("previewClient", client);
+      setText("previewServiceLabel", state.serviceLabel || "Service");
+      setText("previewQtyLabel", state.qtyLabel || "Qty");
+      setText("previewRateLabel", state.rateLabel || "Rate");
+      setText("previewAmountLabel", state.amountLabel || "Amount");
+      setText("previewNotesLabel", state.notesLabel || "Notes");
+      setText("previewTermsLabel", state.termsLabel || "Terms");
+      setText("previewPaymentLabel", state.paymentLabel || "Payment");
+      setText("previewNotes", state.notes);
+      setText("previewTerms", state.terms);
+      setText("previewPaymentInfo", composePaymentDetails());
+      setText("previewWatermark", state.watermarkText);
+      setText("previewFooter", state.footerText);
+      renderCustomFieldsPreview();
+      renderSignaturePreview();
+      setText("previewSubtotalLabel", state.subtotalLabel || "Subtotal");
+      setText("previewSubtotal", formatMoney(summary.subtotal));
+      setText("previewDiscountLabel", state.discountLabel || "Discount");
+      setText("previewDiscount", `-${formatMoney(summary.discount)}`);
+      setText("previewTaxLabel", state.taxLabel || "Tax");
+      setText("previewTax", formatMoney(summary.tax));
+      setText("previewTdsLabel", state.tdsLabel || "TDS Deducted");
+      setText("previewTds", `-${formatMoney(summary.tds)}`);
+      setText("previewTotalLabel", state.totalLabel || "Total Due");
+      setText("previewTotal", formatMoney(summary.total));
+      setText("topTotal", `Total: ${formatMoney(summary.total)}`);
+
+      renderPreviewItems();
+    }
+
+    function renderLogoPreview(fallbackLetter) {
+      const logo = document.getElementById("previewLogo");
+      if (!state.logoData) {
+        logo.classList.remove("has-image");
+        logo.textContent = "";
+        const mark = document.createElement("span");
+        mark.textContent = fallbackLetter;
+        logo.appendChild(mark);
+        return;
+      }
+      logo.classList.add("has-image");
+      logo.textContent = "";
+      const image = document.createElement("img");
+      image.alt = "Logo";
+      image.src = state.logoData;
+      logo.appendChild(image);
+    }
+
+    function logoBackgroundValue() {
+      if (state.logoBackground === "white") return "#ffffff";
+      if (state.logoBackground === "transparent") return "transparent";
+      if (state.logoBackground === "accent") return "var(--accent)";
+      return "var(--paper)";
+    }
+
+    function makeLogoMark(value) {
+      const text = String(value || "I").trim();
+      if (!text.includes(" ")) return text.slice(0, 2).toUpperCase();
+      return text
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((word) => word.charAt(0))
+        .join("")
+        .toUpperCase();
+    }
+
+    function senderDisplayName() {
+      if (state.senderType === "company") {
+        return state.visible.companyName && state.companyName.trim() ? state.companyName : state.senderName;
+      }
+      if (state.visible.companyName && state.companyName.trim()) {
+        return `${state.senderName}\n${state.companyName}`;
+      }
+      return state.senderName || state.companyName || "Your Name";
+    }
+
+    function optionalHasContent(key) {
+      const contentMap = {
+        logo: true,
+        senderTitle: state.senderTitle,
+        companyName: state.companyName,
+        companyMeta: state.companyMeta,
+        email: state.companyEmail,
+        phone: state.companyPhone,
+        status: state.status,
+        invoiceNo: state.invoiceNo,
+        issueDate: state.issueDate,
+        dueDate: state.dueDate,
+        poNumber: state.poNumber,
+        supplyType: state.supplyType,
+        placeOfSupply: state.placeOfSupply,
+        hsnSac: state.hsnSac,
+        reverseCharge: state.reverseCharge,
+        fromBlock: senderDisplayName(),
+        clientBlock: state.clientName || state.clientMeta,
+        clientMeta: state.clientMeta,
+        senderGstin: state.senderGstin,
+        senderPan: state.senderPan,
+        senderWebsite: state.senderWebsite,
+        clientTaxId: state.clientTaxId,
+        clientContact: state.clientContact,
+        shipTo: state.shipTo,
+        itemDescription: true,
+        discount: numeric(state.discount) > 0,
+        tax: numeric(state.taxRate) > 0,
+        tds: state.tdsMode === "amount" ? numeric(state.tdsAmount) > 0 : numeric(state.tdsRate) > 0,
+        notes: state.notes,
+        terms: state.terms,
+        paymentInfo: composePaymentDetails(),
+        customDetails: state.customFields.some((field) => field.label || field.value),
+        watermark: state.watermarkText,
+        footerText: state.footerText,
+        signature: true
+      };
+      return Boolean(contentMap[key]);
+    }
+
+    function composePaymentDetails() {
+      const lines = [];
+      if (state.paymentMethods.bank) {
+        const bankLines = [
+          state.accountHolder ? `Account holder: ${state.accountHolder}` : "",
+          state.bankName ? `Bank: ${state.bankName}` : "",
+          state.accountNumber ? `Account no: ${state.accountNumber}` : "",
+          state.ifscCode ? `IFSC/Routing: ${state.ifscCode}` : "",
+          state.swiftCode ? `SWIFT/BIC: ${state.swiftCode}` : "",
+          state.ibanCode ? `IBAN: ${state.ibanCode}` : "",
+          state.branchName ? `Branch: ${state.branchName}` : ""
+        ].filter(Boolean);
+        if (bankLines.length) lines.push(["Bank Transfer", ...bankLines].join("\n"));
+      }
+      if (state.paymentMethods.upi && state.upiId) lines.push(`UPI: ${state.upiId}`);
+      if (state.paymentMethods.paymentLink && state.paymentLink) lines.push(`Payment link: ${state.paymentLink}`);
+      if (state.paymentMethods.paypal && state.paypalEmail) lines.push(`PayPal: ${state.paypalEmail}`);
+      if (state.paymentMethods.card && state.paymentLink) lines.push(`Card: ${state.paymentLink}`);
+      if (state.paymentMethods.wise && state.wiseEmail) lines.push(`Wise: ${state.wiseEmail}`);
+      if (state.paymentMethods.cheque && state.chequePayableTo) lines.push(`Cheque payable to: ${state.chequePayableTo}`);
+      if (state.paymentMethods.cash && state.cashInstructions) lines.push(state.cashInstructions);
+      if (state.paymentMethods.crypto) {
+        if (state.bitcoinAddress) lines.push(`Bitcoin: ${state.bitcoinAddress}`);
+        if (state.ethereumAddress) lines.push(`Ethereum/USDT: ${state.ethereumAddress}`);
+      }
+      if (state.paymentMethods.custom && state.customPayment) lines.push(state.customPayment);
+      if (state.paymentInfo) lines.push(state.paymentInfo);
+      return lines.join("\n\n");
+    }
+
+    function renderCustomFieldsPreview() {
+      const list = document.getElementById("previewCustomFields");
+      list.innerHTML = "";
+      if (state.customDetailsLabel && state.customFields.some((field) => field.label || field.value)) {
+        const heading = document.createElement("h3");
+        heading.className = "detail-heading";
+        heading.textContent = state.customDetailsLabel;
+        list.appendChild(heading);
+      }
+      state.customFields
+        .filter((field) => field.label || field.value)
+        .forEach((field) => {
+          const item = document.createElement("div");
+          item.className = "detail-pill";
+          item.innerHTML = `<span>${escapeText(field.label || "Detail")}</span><strong>${escapeText(field.value || "-")}</strong>`;
+          list.appendChild(item);
+        });
+    }
+
+    function renderSignaturePreview() {
+      const image = document.getElementById("previewSignatureImage");
+      const text = document.getElementById("previewSignatureText");
+      setText("previewSignatureLabel", state.signatureLabel || "Authorized Signature");
+      if (state.signatureData) {
+        image.src = state.signatureData;
+        image.style.display = "block";
+        text.textContent = "";
+        text.style.display = "none";
+        return;
+      }
+      image.removeAttribute("src");
+      image.style.display = "none";
+      text.textContent = state.signatureText || "";
+      text.style.display = state.signatureText ? "block" : "none";
+    }
+
+    function renderPreviewItems() {
+      const body = document.getElementById("previewItems");
+      body.innerHTML = "";
+
+      if (!state.items.length) {
+        body.innerHTML = `<tr><td class="empty-row" colspan="4">No line items yet.</td></tr>`;
+        return;
+      }
+
+      state.items.forEach((item) => {
+        const amount = numeric(item.quantity) * numeric(item.rate);
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td data-label="${escapeAttr(state.serviceLabel || "Service")}">
+            <div class="item-name">${escapeText(item.name || "Untitled service")}</div>
+            <div class="item-desc ${state.visible.itemCode && item.code ? "" : "is-hidden"}">${escapeText(state.codeLabel || "Code")}: ${escapeText(item.code || "")}</div>
+            <div class="item-desc ${state.visible.itemDescription ? "" : "is-hidden"}">${escapeText(item.description || "")}</div>
+          </td>
+          <td data-label="${escapeAttr(state.qtyLabel || "Qty")}">${numeric(item.quantity).toLocaleString("en-IN")}</td>
+          <td data-label="${escapeAttr(state.rateLabel || "Rate")}">${formatMoney(numeric(item.rate))}</td>
+          <td data-label="${escapeAttr(state.amountLabel || "Amount")}">${formatMoney(amount)}</td>
+        `;
+        body.appendChild(row);
+      });
+    }
+
+    function render(syncControls = false) {
+      if (syncControls) {
+        document.querySelectorAll("[data-bind]").forEach((input) => {
+          input.value = state[input.dataset.bind] ?? "";
+        });
+        document.querySelectorAll("[data-flag]").forEach((input) => {
+          input.checked = Boolean(state[input.dataset.flag]);
+        });
+      }
+      renderTemplateSelect();
+      renderTemplateCards();
+      renderLineEditor();
+      renderPaymentMethodToggles();
+      renderCustomFieldEditor();
+      renderFieldToggles();
+      renderThemes();
+      syncTdsPanels();
+      renderPreview();
+      syncSignaturePad();
+      saveState();
+    }
+
+    function syncSignaturePad() {
+      if (!signatureCanvas) return;
+      if (state.signatureData) {
+        drawSavedSignature(state.signatureData);
+      } else {
+        clearSignaturePad(false);
+      }
+    }
+
+    function setText(id, value) {
+      const element = document.getElementById(id);
+      if (element) element.textContent = value || "";
+    }
+
+    function escapeText(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function escapeAttr(value) {
+      return escapeText(value).replaceAll('"', "&quot;");
+    }
+
+    bindControls();
+    render(true);
+  </script>
+</body>
+</html>
