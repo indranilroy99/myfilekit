@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <title>MyFileKit - File Tools Workspace</title>
+  <link rel="icon" href="assets/myfilekit-logo.svg" type="image/svg+xml">
+  <style>
+    :root {
+      --ink: #161411;
+      --muted: #68635a;
+      --panel: #fffdf8;
+      --soft: #f3eee5;
+      --line: #ded4c3;
+      --accent: #0e665f;
+      --accent-dark: #093f3c;
+      --gold: #b1843b;
+      --danger: #9d392f;
+      --ok: #236846;
+      --radius: 10px;
+      --shadow: 0 24px 70px rgba(35, 27, 17, .14);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        linear-gradient(135deg, rgba(14, 102, 95, .14), transparent 34%),
+        linear-gradient(245deg, rgba(177, 132, 59, .18), transparent 38%),
+        #ebe5da;
+      min-height: 100vh;
+    }
+
+    button, input, select { font: inherit; }
+    button { border: 0; cursor: pointer; }
+
+    .shell {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 48px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 28px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      min-width: 0;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    .brand img {
+      width: 48px;
+      height: 48px;
+      border-radius: 13px;
+      box-shadow: 0 12px 26px rgba(14, 102, 95, .2);
+    }
+
+    .brand h1 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 27px;
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .brand p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    .nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .pill, .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      color: var(--ink);
+      background: rgba(255, 253, 248, .64);
+      box-shadow: inset 0 0 0 1px rgba(91, 76, 52, .16);
+      font-size: 13px;
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      color: #fffdf8;
+      background: var(--accent);
+      box-shadow: 0 14px 30px rgba(14, 102, 95, .22);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr);
+      gap: 22px;
+      align-items: stretch;
+      margin-bottom: 22px;
+    }
+
+    .hero-panel, .workbench, .catalog {
+      border: 1px solid rgba(222, 212, 195, .9);
+      border-radius: var(--radius);
+      background: rgba(255, 253, 248, .82);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+    }
+
+    .hero-panel {
+      padding: 34px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero-panel::after {
+      content: "";
+      position: absolute;
+      right: 32px;
+      top: 32px;
+      width: 164px;
+      height: 164px;
+      border: 1px solid rgba(14, 102, 95, .16);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 10px 0 12px;
+      max-width: 760px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(42px, 7vw, 82px);
+      line-height: .88;
+      letter-spacing: 0;
+    }
+
+    .hero-copy {
+      max-width: 650px;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.65;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 24px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 28px;
+      max-width: 760px;
+    }
+
+    .stat {
+      padding: 16px;
+      border-radius: var(--radius);
+      background: rgba(243, 238, 229, .74);
+      border: 1px solid rgba(222, 212, 195, .9);
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .stat span {
+      display: block;
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .quick-panel {
+      padding: 24px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .quick-card {
+      display: grid;
+      gap: 6px;
+      padding: 18px;
+      border-radius: var(--radius);
+      color: inherit;
+      text-decoration: none;
+      background: #fffdf8;
+      border: 1px solid var(--line);
+    }
+
+    .quick-card strong {
+      font-size: 18px;
+    }
+
+    .quick-card span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin: 32px 0 14px;
+    }
+
+    .section-head h3 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .section-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+    }
+
+    .tools {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .tool {
+      display: grid;
+      gap: 10px;
+      min-height: 154px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 253, 248, .78);
+      box-shadow: 0 12px 28px rgba(38, 31, 20, .06);
+    }
+
+    .tool-icon {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      color: #fffdf8;
+      background: var(--accent);
+      font-weight: 900;
+    }
+
+    .tool h4 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .tool p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .tool .tag {
+      align-self: end;
+      width: max-content;
+      padding: 5px 8px;
+      border-radius: 999px;
+      color: var(--accent-dark);
+      background: rgba(14, 102, 95, .1);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .workbench {
+      padding: 24px;
+      margin-top: 22px;
+    }
+
+    .workbench-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .tool-panel {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fffdf8;
+    }
+
+    .tool-panel h4 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    .tool-panel p {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .field {
+      display: grid;
+      gap: 7px;
+      margin-bottom: 12px;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fffaf2;
+      padding: 11px 12px;
+      outline: none;
+    }
+
+    .result {
+      min-height: 42px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-line;
+    }
+
+    .download-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .download-list a {
+      color: var(--accent-dark);
+      font-weight: 800;
+    }
+
+    @media (max-width: 960px) {
+      .hero, .workbench-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .tools {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 640px) {
+      .shell {
+        width: min(100vw - 22px, 1180px);
+        padding-top: 14px;
+      }
+
+      .topbar, .section-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .nav {
+        justify-content: flex-start;
+      }
+
+      .hero-panel, .quick-panel, .workbench {
+        padding: 18px;
+      }
+
+      .stats, .tools {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="MyFileKit home">
+        <img src="assets/myfilekit-logo.svg" alt="">
+        <div>
+          <h1>MyFileKit</h1>
+          <p>All your file tools in one clean workspace.</p>
+        </div>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a class="pill" href="#workbench">Try Tools</a>
+        <a class="pill" href="invoice-generator/index.html">Invoice Studio</a>
+        <a class="pill" href="#catalog">Tool Library</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div class="hero-panel">
+        <span class="eyebrow">Private-first document workspace</span>
+        <h2>Invoices, PDFs, images, signatures, and business files.</h2>
+        <p class="hero-copy">MyFileKit is growing into a complete utility suite for people who need fast document work without bouncing between ten different websites.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="invoice-generator/index.html">Open Invoice Studio</a>
+          <a class="btn" href="#workbench">Use File Tools</a>
+        </div>
+        <div class="stats" aria-label="Product coverage">
+          <div class="stat"><strong>3</strong><span>Working tools now</span></div>
+          <div class="stat"><strong>30+</strong><span>Planned utilities</span></div>
+          <div class="stat"><strong>Local</strong><span>Browser processing</span></div>
+        </div>
+      </div>
+      <aside class="quick-panel" aria-label="Featured tools">
+        <a class="quick-card" href="invoice-generator/index.html">
+          <strong>Premium Invoice Generator</strong>
+          <span>Templates, TDS, bank details, signatures, logos, payment methods, and print-ready output.</span>
+        </a>
+        <a class="quick-card" href="#image-compressor">
+          <strong>Image Compressor</strong>
+          <span>Compress JPG, PNG, and WebP files directly in your browser.</span>
+        </a>
+        <a class="quick-card" href="#pdf-tools">
+          <strong>PDF Merge & Split</strong>
+          <span>Combine PDFs or split pages into separate files locally in the browser.</span>
+        </a>
+      </aside>
+    </section>
+
+    <section class="workbench" id="workbench">
+      <div class="section-head" style="margin-top:0">
+        <div>
+          <h3>Working Tools</h3>
+          <p>These are usable now. More tools can be added behind this same modular layout.</p>
+        </div>
+        <span class="pill">No upload server required</span>
+      </div>
+      <div class="workbench-grid">
+        <article class="tool-panel" id="image-compressor">
+          <h4>Image Compressor</h4>
+          <p>Choose an image, set quality and output format, then download a smaller copy.</p>
+          <div class="field">
+            <label for="imageInput">Image File</label>
+            <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp">
+          </div>
+          <div class="field">
+            <label for="imageFormat">Output Format</label>
+            <select id="imageFormat">
+              <option value="image/jpeg">JPEG</option>
+              <option value="image/webp">WebP</option>
+              <option value="image/png">PNG</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="imageQuality">Quality</label>
+            <input id="imageQuality" type="range" min="0.25" max="0.95" step="0.05" value="0.72">
+          </div>
+          <button class="btn btn-primary" id="compressImageBtn" type="button">Compress Image</button>
+          <div class="result" id="imageResult">Waiting for an image.</div>
+        </article>
+
+        <article class="tool-panel" id="pdf-tools">
+          <h4>Merge PDF</h4>
+          <p>Select two or more PDFs. They are combined in the order selected.</p>
+          <div class="field">
+            <label for="mergeInput">PDF Files</label>
+            <input id="mergeInput" type="file" accept="application/pdf" multiple>
+          </div>
+          <button class="btn btn-primary" id="mergePdfBtn" type="button">Merge PDFs</button>
+          <div class="result" id="mergeResult">Waiting for PDF files.</div>
+        </article>
+
+        <article class="tool-panel">
+          <h4>Split PDF</h4>
+          <p>Upload one PDF and export every page as a separate PDF file.</p>
+          <div class="field">
+            <label for="splitInput">PDF File</label>
+            <input id="splitInput" type="file" accept="application/pdf">
+          </div>
+          <button class="btn btn-primary" id="splitPdfBtn" type="button">Split PDF</button>
+          <div class="result" id="splitResult">Waiting for one PDF.</div>
+          <div class="download-list" id="splitDownloads"></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="catalog">
+      <div class="section-head">
+        <div>
+          <h3>Tool Library</h3>
+          <p>Coverage map for the full MyFileKit suite.</p>
+        </div>
+      </div>
+      <div class="tools" id="toolCatalog"></div>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js" defer></script>
+  <script>
+    const catalog = [
+      ["Merge PDF", "Combine multiple PDFs into one ordered file.", "Live"],
+      ["Split PDF", "Export pages into separate PDF files.", "Live"],
+      ["Compress PDF", "Reduce PDF size for sharing and upload.", "Planned"],
+      ["Edit PDF", "Add text, highlights, images, and simple annotations.", "Planned"],
+      ["Sign PDF", "Draw or upload a signature and place it on a document.", "Planned"],
+      ["Watermark PDF", "Add text or image marks across pages.", "Planned"],
+      ["Rotate PDF", "Rotate pages and save a cleaned PDF.", "Planned"],
+      ["Remove Pages", "Delete selected pages from a PDF.", "Planned"],
+      ["Extract Pages", "Pull selected pages into a new PDF.", "Planned"],
+      ["Organize PDF", "Reorder, rotate, delete, and extract pages.", "Planned"],
+      ["Protect PDF", "Add password protection.", "Planned"],
+      ["Unlock PDF", "Remove protection when the user owns the password.", "Planned"],
+      ["JPG to PDF", "Turn images into a polished PDF.", "Planned"],
+      ["PDF to JPG", "Export pages as images.", "Planned"],
+      ["Word to PDF", "Convert DOCX files to PDF.", "Backend"],
+      ["PDF to Word", "Convert PDF content to editable DOCX.", "Backend"],
+      ["PowerPoint to PDF", "Convert slide decks to PDF.", "Backend"],
+      ["Excel to PDF", "Convert spreadsheets to PDF.", "Backend"],
+      ["HTML to PDF", "Capture web pages as PDFs.", "Backend"],
+      ["PDF to PDF/A", "Archive-ready PDF conversion.", "Backend"],
+      ["OCR PDF", "Recognize text in scanned documents.", "Backend"],
+      ["Repair PDF", "Recover damaged PDF structure.", "Backend"],
+      ["PDF Forms", "Fill and prepare form PDFs.", "Planned"],
+      ["Compare PDF", "Compare two documents for changes.", "Planned"],
+      ["Redact PDF", "Permanently remove sensitive content.", "Planned"],
+      ["Image Compressor", "Shrink images locally.", "Live"],
+      ["Image Converter", "Convert JPG, PNG, and WebP.", "Planned"],
+      ["QR Generator", "Create QR codes for links and payments.", "Planned"],
+      ["Invoice Generator", "Create client-ready invoices.", "Live"],
+      ["Quote Generator", "Create estimates and proposals.", "Planned"],
+      ["Receipt Generator", "Create payment receipts.", "Planned"],
+      ["AI Summarizer", "Summarize long documents.", "Backend"]
+    ];
+
+    function formatBytes(bytes) {
+      if (!bytes) return "0 B";
+      const units = ["B", "KB", "MB", "GB"];
+      const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      return `${(bytes / Math.pow(1024, index)).toFixed(index ? 2 : 0)} ${units[index]}`;
+    }
+
+    function safeName(name, suffix, extension) {
+      const base = String(name || "file").replace(/\.[^.]+$/, "").replace(/[^a-z0-9._-]+/gi, "-").slice(0, 80) || "file";
+      return `${base}-${suffix}.${extension}`;
+    }
+
+    function downloadBytes(bytes, filename, mimeType) {
+      const blob = bytes instanceof Blob ? bytes : new Blob([bytes], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1200);
+    }
+
+    function renderCatalog() {
+      const root = document.getElementById("toolCatalog");
+      root.innerHTML = catalog.map(([name, description, status]) => `
+        <article class="tool">
+          <div class="tool-icon">${name.charAt(0)}</div>
+          <h4>${name}</h4>
+          <p>${description}</p>
+          <span class="tag">${status}</span>
+        </article>
+      `).join("");
+    }
+
+    async function compressImage() {
+      const file = document.getElementById("imageInput").files[0];
+      const result = document.getElementById("imageResult");
+      const format = document.getElementById("imageFormat").value;
+      const quality = Number(document.getElementById("imageQuality").value);
+      if (!file) {
+        result.textContent = "Choose an image first.";
+        return;
+      }
+
+      const bitmap = await createImageBitmap(file);
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext("2d");
+      context.drawImage(bitmap, 0, 0);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, format, quality));
+      if (!blob) {
+        result.textContent = "This browser could not compress that image.";
+        return;
+      }
+      const extension = format === "image/png" ? "png" : format === "image/webp" ? "webp" : "jpg";
+      downloadBytes(blob, safeName(file.name, "compressed", extension), format);
+      const saved = Math.max(0, file.size - blob.size);
+      const percent = file.size ? Math.round((saved / file.size) * 100) : 0;
+      result.textContent = `Original: ${formatBytes(file.size)}\nCompressed: ${formatBytes(blob.size)}\nSaved: ${formatBytes(saved)} (${percent}%)`;
+    }
+
+    async function ensurePdfLib() {
+      if (!window.PDFLib) throw new Error("PDF engine is still loading. Try again in a moment.");
+      return window.PDFLib;
+    }
+
+    async function mergePdf() {
+      const files = Array.from(document.getElementById("mergeInput").files || []);
+      const result = document.getElementById("mergeResult");
+      if (files.length < 2) {
+        result.textContent = "Choose at least two PDF files.";
+        return;
+      }
+      try {
+        const { PDFDocument } = await ensurePdfLib();
+        const merged = await PDFDocument.create();
+        for (const file of files) {
+          const source = await PDFDocument.load(await file.arrayBuffer());
+          const pages = await merged.copyPages(source, source.getPageIndices());
+          pages.forEach((page) => merged.addPage(page));
+        }
+        const bytes = await merged.save();
+        downloadBytes(bytes, "myfilekit-merged.pdf", "application/pdf");
+        result.textContent = `Merged ${files.length} PDFs into ${formatBytes(bytes.length)}.`;
+      } catch (error) {
+        result.textContent = error.message || "Could not merge those PDFs.";
+      }
+    }
+
+    async function splitPdf() {
+      const file = document.getElementById("splitInput").files[0];
+      const result = document.getElementById("splitResult");
+      const downloads = document.getElementById("splitDownloads");
+      downloads.innerHTML = "";
+      if (!file) {
+        result.textContent = "Choose one PDF file.";
+        return;
+      }
+      try {
+        const { PDFDocument } = await ensurePdfLib();
+        const source = await PDFDocument.load(await file.arrayBuffer());
+        const pageCount = source.getPageCount();
+        for (let index = 0; index < pageCount; index += 1) {
+          const output = await PDFDocument.create();
+          const [page] = await output.copyPages(source, [index]);
+          output.addPage(page);
+          const bytes = await output.save();
+          const blob = new Blob([bytes], { type: "application/pdf" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = safeName(file.name, `page-${index + 1}`, "pdf");
+          link.textContent = `Download page ${index + 1}`;
+          downloads.appendChild(link);
+        }
+        result.textContent = `Split ${pageCount} page${pageCount === 1 ? "" : "s"}.`;
+      } catch (error) {
+        result.textContent = error.message || "Could not split that PDF.";
+      }
+    }
+
+    renderCatalog();
+    document.getElementById("compressImageBtn").addEventListener("click", compressImage);
+    document.getElementById("mergePdfBtn").addEventListener("click", mergePdf);
+    document.getElementById("splitPdfBtn").addEventListener("click", splitPdf);
+  </script>
+</body>
+</html>

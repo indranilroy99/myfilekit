@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">MyFileKit logo</title>
+  <desc id="desc">A folded document mark with layered tool panels.</desc>
+  <defs>
+    <linearGradient id="paper" x1="54" y1="32" x2="204" y2="226" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFDF8"/>
+      <stop offset="1" stop-color="#EDE5D6"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="49" y1="38" x2="220" y2="224" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E6B63"/>
+      <stop offset="1" stop-color="#0B3D3A"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="78" y1="75" x2="178" y2="177" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D7B46A"/>
+      <stop offset="1" stop-color="#A8762E"/>
+    </linearGradient>
+    <filter id="shadow" x="18" y="14" width="220" height="230" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="14" flood-color="#16211F" flood-opacity=".22"/>
+    </filter>
+  </defs>
+  <rect width="256" height="256" rx="58" fill="#F2ECE0"/>
+  <g filter="url(#shadow)">
+    <path d="M64 30h82l48 48v148H64z" fill="url(#paper)"/>
+    <path d="M146 30v48h48z" fill="#DCD1C0"/>
+    <path d="M64 30h82l48 48v148H64z" fill="none" stroke="url(#accent)" stroke-width="10" stroke-linejoin="round"/>
+  </g>
+  <rect x="86" y="93" width="84" height="12" rx="6" fill="url(#accent)"/>
+  <rect x="86" y="121" width="58" height="12" rx="6" fill="url(#gold)"/>
+  <rect x="86" y="149" width="84" height="12" rx="6" fill="#CFC4B4"/>
+  <path d="M90 190h34l14-52 14 52h34" fill="none" stroke="url(#accent)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+
