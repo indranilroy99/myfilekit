@@ -152,9 +152,9 @@ function Dashboard() {
       <section className="hero-panel surface-panel wabi-edge overflow-hidden">
         <EtherealShadow
           className="wabi-shadow"
-          color="rgba(70, 83, 65, .34)"
-          animation={{ scale: 72, speed: 42 }}
-          noise={{ opacity: .34, scale: 1.18 }}
+          color="rgba(190, 190, 180, .3)"
+          animation={{ scale: 88, speed: 58 }}
+          noise={{ opacity: .56, scale: 1.28 }}
           sizing="fill"
           style={{ position: "absolute", inset: 0 }}
         />

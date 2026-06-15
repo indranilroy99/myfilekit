@@ -44,7 +44,7 @@ const useInstanceId = (): string => {
 
 export function Component({
   sizing = "fill",
-  color = "rgba(70, 83, 65, .38)",
+  color = "rgba(185, 185, 176, .28)",
   animation,
   noise,
   style,
@@ -130,7 +130,7 @@ export function Component({
             background:
               sizing === "stretch"
                 ? `linear-gradient(118deg, transparent 0 18%, ${color} 18% 72%, transparent 72%)`
-                : `radial-gradient(circle at 22% 18%, ${color}, transparent 34%), radial-gradient(circle at 82% 20%, rgba(139, 82, 48, .18), transparent 30%), radial-gradient(circle at 62% 82%, rgba(33, 48, 77, .16), transparent 38%)`,
+                : `radial-gradient(circle at 22% 18%, ${color}, transparent 34%), radial-gradient(circle at 82% 20%, rgba(195, 195, 186, .16), transparent 30%), radial-gradient(circle at 62% 82%, rgba(70, 70, 68, .22), transparent 38%)`,
             maskImage:
               "radial-gradient(circle at 30% 25%, #000 0 18%, transparent 48%), radial-gradient(circle at 64% 46%, #000 0 32%, transparent 68%), radial-gradient(circle at 42% 76%, #000 0 24%, transparent 58%)",
             maskSize: sizing === "stretch" ? "100% 100%" : "cover",
