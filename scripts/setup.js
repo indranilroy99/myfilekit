@@ -62,4 +62,4 @@ log("- app type: static browser app");
 log("");
 log("Next commands:");
 log("- npm run dev");
-log("- open http://localhost:4173");
+log("- open the local URL printed by the dev server");

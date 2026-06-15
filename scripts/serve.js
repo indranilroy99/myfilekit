@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const port = Number(process.env.PORT || 4173);
+const preferredPort = Number(process.env.PORT || 4173);
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -22,6 +22,7 @@ const mimeTypes = {
 
 function send(response, status, body, type = "text/plain; charset=utf-8") {
   response.writeHead(status, {
+    "Cache-Control": "no-store",
     "Content-Type": type,
     "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'",
     "Referrer-Policy": "no-referrer",
@@ -37,23 +38,41 @@ function safePath(urlPath) {
   return resolved.startsWith(root) ? resolved : null;
 }
 
-const server = http.createServer((request, response) => {
-  const filePath = safePath(request.url || "/");
-  if (!filePath) {
-    send(response, 403, "Forbidden");
-    return;
-  }
+startServer(preferredPort);
 
-  fs.readFile(filePath, (error, data) => {
-    if (error) {
-      send(response, 404, "Not found");
+function startServer(port, attempts = 0) {
+  const server = createServer();
+
+  server.once("error", (error) => {
+    if (error.code === "EADDRINUSE" && attempts < 10 && !process.env.PORT) {
+      const nextPort = port + 1;
+      process.stdout.write(`Port ${port} is busy. Trying ${nextPort}...\n`);
+      startServer(nextPort, attempts + 1);
       return;
     }
-    send(response, 200, data, mimeTypes[path.extname(filePath)] || "application/octet-stream");
+    throw error;
   });
-});
 
-server.listen(port, () => {
-  process.stdout.write(`MyFileKit dev server running at http://localhost:${port}\n`);
-  process.stdout.write("Press Ctrl+C to stop.\n");
-});
+  server.listen(port, () => {
+    process.stdout.write(`MyFileKit dev server running at http://localhost:${port}\n`);
+    process.stdout.write("Press Ctrl+C to stop.\n");
+  });
+}
+
+function createServer() {
+  return http.createServer((request, response) => {
+    const filePath = safePath(request.url || "/");
+    if (!filePath) {
+      send(response, 403, "Forbidden");
+      return;
+    }
+
+    fs.readFile(filePath, (error, data) => {
+      if (error) {
+        send(response, 404, "Not found");
+        return;
+      }
+      send(response, 200, data, mimeTypes[path.extname(filePath)] || "application/octet-stream");
+    });
+  });
+}

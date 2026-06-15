@@ -22,6 +22,6 @@ npm run preflight
 - Add tool metadata in `src/registry/tools.registry.js`.
 - Add implementation code in `src/tools/tool-implementations.js` or a focused service module.
 - Keep each visible tool fully usable: upload/input, controls, action, output/download, reset, and helpful error state.
-- Do not add placeholder cards to the dashboard.
+- Do not add unfinished cards to the dashboard.
 - Keep browser-side processing local unless a future architecture explicitly adds a backend.
 - Use clear human copy. Avoid hype and unsupported claims.
