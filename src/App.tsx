@@ -59,7 +59,7 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
 
 const quickSearches = ["Merge PDF", "Compress Image", "Invoice", "Signature", "JSON", "File Hash"];
 const recentToolsStorageKey = "myfilekit:recentTools";
-const featuredToolIds = ["merge-pdf-tool", "compress-image-tool", "invoice-generator-tool", "metadata-cleaner", "json-formatter-tool", "file-hash-tool"];
+const popularToolIds = ["merge-pdf-tool", "compress-image-tool", "resize-image-tool", "invoice-generator-tool", "json-formatter-tool", "file-hash-tool"];
 
 export default function App() {
   const [hash, setHash] = useState(window.location.hash || "#dashboard");
@@ -89,7 +89,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <header className="site-header sticky top-0 z-30 backdrop-blur-xl">
-        <div className="mx-auto flex w-[min(1760px,calc(100vw-clamp(28px,5vw,96px)))] items-center justify-between gap-4 py-4">
+        <div className="mx-auto flex w-full max-w-screen-2xl items-center justify-between gap-4 px-5 py-4 sm:px-6 lg:px-10 2xl:max-w-[1680px] 2xl:px-0">
           <a href="#dashboard" className="flex items-center text-[var(--ink)] no-underline">
             <span className="leading-tight">
               <span className="block font-display text-xl font-black">MyFileKit</span>
@@ -109,7 +109,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-      <main id="app-main" className="mx-auto w-[min(1760px,calc(100vw-clamp(28px,5vw,96px)))] pb-16 pt-7">
+      <main id="app-main" className="mx-auto w-full max-w-screen-2xl px-5 pb-16 pt-7 sm:px-6 lg:px-10 2xl:max-w-[1680px] 2xl:px-0">
         {children}
       </main>
     </>
@@ -131,7 +131,7 @@ function Dashboard() {
   const [recentTools, setRecentTools] = useState<Tool[]>(() => loadRecentTools());
   const matches = useMemo(() => filterTools(query), [query]);
   const isSearching = Boolean(query.trim());
-  const featuredTools = featuredToolIds.map(findToolById).filter(Boolean) as Tool[];
+  const popularTools = popularToolIds.map(findToolById).filter(Boolean) as Tool[];
   const updateQuery = (value: string) => {
     setQuery(value);
     writeSessionValue("myfilekit:lastSearch", value);
@@ -176,7 +176,7 @@ function Dashboard() {
   return (
     <div className="dashboard-page">
       <section className={`hero-panel surface-panel wabi-edge overflow-hidden ${isSearching ? "hero-panel-searching" : ""}`}>
-        <NeuralNoise className="hero-neural" color={[0.07, 0.2, 0.34]} opacity={0.17} speed={0.00018} />
+        <NeuralNoise className="hero-neural" color={[0.05, 0.11, 0.18]} opacity={0.055} speed={0.00008} />
         <div className="relative z-10 mx-auto grid max-w-6xl justify-items-center gap-6 px-6 py-10 text-center md:px-10 lg:px-12">
           <div className="grid w-full justify-items-center gap-5">
             {!isSearching && (
@@ -205,6 +205,10 @@ function Dashboard() {
                 onChange={(event) => updateQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") updateQuery("");
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    openBestMatch();
+                  }
                 }}
                 placeholder="Search PDF, image, invoice, signature..."
                 type="search"
@@ -243,16 +247,12 @@ function Dashboard() {
         </div>
       </section>
 
-      {!isSearching && <ProductCommandStrip />}
-      {!isSearching && <CategoryRail />}
-
-      {!isSearching && featuredTools.length > 0 && (
+      {!isSearching && popularTools.length > 0 && (
         <section className="dashboard-shelf">
-          <SectionHeader title="Featured Workflows" subtitle="The fastest paths for common file work." />
+          <SectionHeader title="Popular Tools" subtitle="Fast paths for the most common file tasks." />
           <div className="dashboard-tool-row">
-            {featuredTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
+            {popularTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
           </div>
-          <a className="secondary-button w-fit" href="#browse-tools">Browse all tools</a>
         </section>
       )}
 
@@ -265,19 +265,25 @@ function Dashboard() {
         </section>
       )}
 
+      {!isSearching && <CategoryOverview />}
+      {!isSearching && <ProductCommandStrip />}
+      {!isSearching && <WhyMyFileKit />}
+      {!isSearching && <Footer />}
     </div>
   );
 }
 
 function ProductCommandStrip() {
   const stats = [
-    { icon: Zap, label: "Fast everyday workflows", note: "Handle common file tasks in seconds" },
-    { icon: Layers3, label: "Everything organized", note: "PDF, image, business, privacy, and data" },
-    { icon: ShieldCheck, label: "Private by design", note: "Supported files stay in your browser" },
-    { icon: FolderSearch, label: "Search-first workspace", note: "Find the right tool by task or file type" },
+    { icon: ShieldCheck, label: "Local-first processing", note: "Supported files stay in your browser" },
+    { icon: Zap, label: "No unnecessary uploads", note: "Run common tasks without a server path" },
+    { icon: Layers3, label: "Organized tools", note: "PDF, image, business, privacy, and data" },
+    { icon: FolderSearch, label: "Search-first", note: "Find tools by task, category, or file type" },
   ];
   return (
-    <section className="command-strip" aria-label="Product highlights">
+    <section className="dashboard-shelf">
+      <SectionHeader title="Privacy And Trust" subtitle="Simple guarantees for everyday file work." />
+      <div className="command-strip" aria-label="Product highlights">
       {stats.map(({ icon: Icon, label, note }) => (
         <div className="command-stat" key={label}>
           <span className="command-stat-icon"><Icon size={17} /></span>
@@ -287,25 +293,66 @@ function ProductCommandStrip() {
           </span>
         </div>
       ))}
+      </div>
     </section>
   );
 }
 
-function CategoryRail() {
+function CategoryOverview() {
   return (
-    <nav className="category-rail" aria-label="Tool categories">
+    <section className="dashboard-shelf">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <SectionHeader title="Tool Categories" subtitle="Browse focused workspaces when you know the file type." />
+        <a className="secondary-button w-fit" href="#browse-tools">Browse all tools</a>
+      </div>
+      <div className="category-overview-grid" aria-label="Tool categories">
       {categories.map((category) => {
         const Icon = categoryIcons[category] || Sparkles;
         const count = tools.filter((tool: Tool) => tool.category === category).length;
         return (
-          <a key={category} className="category-rail-link" href={categoryRoute(category)}>
-            <Icon size={17} />
-            <span>{category.replace(" Tools", "")}</span>
+          <a key={category} className="category-card" href={categoryRoute(category)}>
+            <span className="category-icon"><Icon size={19} /></span>
+            <span className="grid gap-1">
+              <span className="font-black">{category}</span>
+              <span className="text-sm font-semibold text-neutral-500">{categoryDetails[category]?.description}</span>
+            </span>
             <span className="category-count">{count}</span>
           </a>
         );
       })}
-    </nav>
+      </div>
+    </section>
+  );
+}
+
+function WhyMyFileKit() {
+  const points = [
+    ["Search without friction", "Start with a task like merge, resize, invoice, hash, or metadata."],
+    ["Working tools only", "Visible cards open real routes with practical export or download actions."],
+    ["Built for your computer", "Runs in a modern browser on macOS, Windows, and Linux."],
+    ["Easy to extend", "New tools are added through one registry so the dashboard stays consistent."],
+  ];
+  return (
+    <section className="dashboard-shelf">
+      <SectionHeader title="Why MyFileKit" subtitle="A quiet utility workspace for files you handle every day." />
+      <div className="why-grid">
+        {points.map(([title, description]) => (
+          <article className="why-card" key={title}>
+            <p className="font-black">{title}</p>
+            <p className="mt-2 text-sm font-semibold leading-6 text-neutral-600">{description}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="site-footer">
+      <span>MyFileKit</span>
+      <span>Local-first file tools for PDF, image, business, signature, privacy, and data workflows.</span>
+    </footer>
   );
 }
 
@@ -332,7 +379,7 @@ function SectionHeader({ title, subtitle }: { title: string; subtitle: string })
   );
 }
 
-function ToolSection({ title, tools: sectionTools, searchMode = false }: { title: string; tools: Tool[]; searchMode?: boolean }) {
+function ToolSection({ title, tools: sectionTools, searchMode = false, layout = "row" }: { title: string; tools: Tool[]; searchMode?: boolean; layout?: "row" | "grid" }) {
   const Icon = categoryIcons[title] || Sparkles;
   const details = categoryDetails[title];
   return (
@@ -351,8 +398,8 @@ function ToolSection({ title, tools: sectionTools, searchMode = false }: { title
           </a>
         )}
       </div>
-      <div className="dashboard-tool-row">
-        {sectionTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} compact />)}
+      <div className={layout === "grid" ? "tool-grid" : "dashboard-tool-row"}>
+        {sectionTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} compact={layout === "row"} />)}
       </div>
     </section>
   );
@@ -361,6 +408,7 @@ function ToolSection({ title, tools: sectionTools, searchMode = false }: { title
 function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) {
   const Icon = iconForTool(tool);
   const visibleBadges = (tool.badges || []).filter((badge: string) => !["Local", "Local processing", categoryDetails[tool.category]?.accent].includes(badge)).slice(0, 2);
+  const multiFile = multiFileLabel(tool);
   return (
     <a href={tool.route} className={`tool-card group grid gap-4 rounded-3xl p-5 text-[var(--ink)] no-underline transition hover:-translate-y-1 focus-visible:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
       <div className="flex items-start justify-between gap-3">
@@ -377,6 +425,7 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
         <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{categoryDetails[tool.category]?.accent || tool.category}</span>
         {visibleBadges.map((badge: string) => <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>)}
         {tool.localProcessing && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">Local processing</span>}
+        {multiFile && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{multiFile}</span>}
         {fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
       </div>
     </a>
@@ -420,7 +469,7 @@ function BrowseToolsPage() {
         </div>
         <div className="grid gap-10">
           {grouped.map(([category, items]) => (
-            <ToolSection key={category} title={category} tools={items} searchMode={isSearching} />
+            <ToolSection key={category} title={category} tools={items} searchMode={isSearching} layout="grid" />
           ))}
         </div>
         {!visibleTools.length && <EmptyState query={query} onPick={setQuery} />}
@@ -478,8 +527,8 @@ function ToolPage({ tool }: { tool: Tool }) {
   return (
     <div className="grid gap-6">
       <Toolbar title={tool.name} subtitle={tool.category} />
-      <section className={`grid gap-5 ${related.length ? "lg:grid-cols-[minmax(0,1fr)_330px]" : ""}`}>
-        <div className="surface-panel wabi-edge p-5 md:p-7">
+      <section className="grid gap-6">
+        <div className="surface-panel wabi-edge tool-page-panel p-5 md:p-7">
           <div className="mb-6 flex items-start gap-4">
             <span className="icon-tile grid h-14 w-14 place-items-center rounded-2xl"><Icon size={24} /></span>
             <div>
@@ -489,6 +538,7 @@ function ToolPage({ tool }: { tool: Tool }) {
               <div className="mt-3 flex flex-wrap gap-2">
                 <span className="local-badge rounded-full px-3 py-1 text-xs font-black uppercase">Local processing</span>
                 {fileTypeLabel(tool) && <span className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{fileTypeLabel(tool)}</span>}
+                {multiFileLabel(tool) && <span className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{multiFileLabel(tool)}</span>}
                 <span className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{tool.category}</span>
               </div>
               <p className="mt-3 text-sm font-semibold text-neutral-500">For supported tools, selected files stay in your browser session.</p>
@@ -499,16 +549,124 @@ function ToolPage({ tool }: { tool: Tool }) {
           </div>
         </div>
         {related.length > 0 && (
-          <aside className="grid content-start gap-4">
-            <div className="surface-card wabi-card-edge p-5">
-              <p className="font-black">More in {tool.category}</p>
-              <div className="mt-3 grid gap-2">
-                {related.map((item: Tool) => <a key={item.id} className="side-link" href={item.route}>{item.name}</a>)}
-              </div>
+          <section className="related-tools-section">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <SectionHeader title={`More ${tool.category.replace(" Tools", "")} Tools`} subtitle="Keep working in the same category." />
+              <a className="secondary-button w-fit" href={categoryRoute(tool.category)}>View category</a>
             </div>
-          </aside>
+            <div className="dashboard-tool-row">
+              {related.slice(0, 6).map((item: Tool) => <ToolCard key={item.id} tool={item} compact />)}
+            </div>
+          </section>
         )}
       </section>
+    </div>
+  );
+}
+
+function ToolMetaPanel({ status, onReset }: { status: Status; onReset: () => void }) {
+  return (
+    <aside className="tool-form-status">
+      <div>
+        <p className="text-xs font-black uppercase text-neutral-500">Status</p>
+        <StatusBox status={status} />
+      </div>
+      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+        Supported files are processed locally in this browser session. Reset clears the current form state.
+      </div>
+      <SecondaryButton label="Reset" onClick={onReset} />
+    </aside>
+  );
+}
+
+function ToolForm({ children, status, onReset }: { children: React.ReactNode; status: Status; onReset: () => void }) {
+  return (
+    <div className="tool-form-grid">
+      <div className="tool-form-actions">
+        {children}
+      </div>
+      <ToolMetaPanel status={status} onReset={onReset} />
+    </div>
+  );
+}
+
+function StatusBox({ status }: { status: Status }) {
+  return <p role="status" aria-live="polite" className={`min-h-12 whitespace-pre-line rounded-2xl border px-4 py-3 text-sm font-bold ${status.tone === "error" ? "border-red-200 bg-red-50 text-red-800" : status.tone === "success" ? "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f]" : "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]"}`}>{status.message}</p>;
+}
+
+function FileControl({ accept, multiple = false, files, setFiles }: { accept: string; multiple?: boolean; files: File[]; setFiles: (files: File[]) => void }) {
+  return <label
+    className="surface-card grid cursor-pointer gap-3 rounded-3xl border-dashed border-neutral-300 p-5 transition hover:border-[var(--moss)]"
+    onDragOver={(event) => event.preventDefault()}
+    onDrop={(event) => {
+      event.preventDefault();
+      setFiles(Array.from(event.dataTransfer.files || []));
+    }}
+  >
+    <span className="flex items-center gap-3 font-black"><Upload size={20} /> Choose or drop file{multiple ? "s" : ""}</span>
+    <input aria-label={`Choose ${multiple ? "files" : "file"}`} className="sr-only" type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} />
+    <span className="text-sm font-semibold text-neutral-500">{files.length ? files.map((file) => file.name).join(", ") : "No file selected"}</span>
+  </label>;
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-1 border-b border-[var(--border)] pb-2 last:border-b-0 last:pb-0 sm:grid-cols-[140px_1fr]">
+      <dt className="text-neutral-500">{label}</dt>
+      <dd className="break-words text-[var(--foreground)]">{value}</dd>
+    </div>
+  );
+}
+
+function Input({ label, value, onChange, placeholder = "", helper = "", type = "text" }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; helper?: string; type?: string }) {
+  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}</span><input className="field-input" type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />{helper && <span className="text-xs font-semibold text-neutral-500">{helper}</span>}</label>;
+}
+
+function Textarea({ label, value, onChange, rows = 8 }: { label: string; value: string; onChange: (value: string) => void; rows?: number }) {
+  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}</span><textarea className="field-input resize-y leading-6" rows={rows} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+}
+
+function Select({ label, value, onChange, options, labels = options }: { label: string; value: string; onChange: (value: string) => void; options: string[]; labels?: string[] }) {
+  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}</span><select className="field-input" value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option, index) => <option key={option} value={option}>{labels[index]}</option>)}</select></label>;
+}
+
+function Range({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}: {value}</span><input type="range" min="0.25" max="0.95" step="0.05" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+}
+
+function Checkbox({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
+  return <label className="surface-card flex items-center gap-3 rounded-2xl px-4 py-3 font-bold"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />{label}</label>;
+}
+
+function PrimaryButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return <button className="primary-button" type="button" onClick={onClick}><Download size={17} />{label}</button>;
+}
+
+function SecondaryButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return <button className="secondary-button" type="button" onClick={onClick}>{label}</button>;
+}
+
+function EmptyState({ query, onPick }: { query: string; onPick?: (term: string) => void }) {
+  const runSuggestion = (term: string) => {
+    if (onPick) {
+      onPick(term);
+      return;
+    }
+    sessionStorage.setItem("myfilekit:lastSearch", term);
+    window.dispatchEvent(new CustomEvent("myfilekit:search", { detail: term }));
+  };
+
+  return (
+    <div className="surface-card rounded-3xl border-dashed border-neutral-300 p-10 text-center">
+      <p className="font-display text-2xl font-black">No tools found for “{query}”</p>
+      <p className="mx-auto mt-2 max-w-xl font-semibold text-neutral-500">Try a shorter task name or one of the common searches below.</p>
+      <div className="mt-5 flex flex-wrap justify-center gap-2">
+        {quickSearches.map((term) => (
+          <button key={term} className="quick-chip" type="button" onClick={() => runSuggestion(term)}>
+            {term}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1071,95 +1229,6 @@ function InvoiceLauncher() {
   );
 }
 
-function ToolForm({ children, status, onReset }: { children: React.ReactNode; status: Status; onReset: () => void }) {
-  return <div className="grid gap-4">
-    {children}
-    <div className="flex flex-wrap gap-2"><SecondaryButton label="Reset" onClick={onReset} /></div>
-    <StatusBox status={status} />
-  </div>;
-}
-
-function StatusBox({ status }: { status: Status }) {
-  return <p role="status" aria-live="polite" className={`min-h-12 whitespace-pre-line rounded-2xl border px-4 py-3 text-sm font-bold ${status.tone === "error" ? "border-red-200 bg-red-50 text-red-800" : status.tone === "success" ? "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f]" : "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]"}`}>{status.message}</p>;
-}
-
-function FileControl({ accept, multiple = false, files, setFiles }: { accept: string; multiple?: boolean; files: File[]; setFiles: (files: File[]) => void }) {
-  return <label
-    className="surface-card grid cursor-pointer gap-3 rounded-3xl border-dashed border-neutral-300 p-5 transition hover:border-[var(--moss)]"
-    onDragOver={(event) => event.preventDefault()}
-    onDrop={(event) => {
-      event.preventDefault();
-      setFiles(Array.from(event.dataTransfer.files || []));
-    }}
-  >
-    <span className="flex items-center gap-3 font-black"><Upload size={20} /> Choose or drop file{multiple ? "s" : ""}</span>
-    <input aria-label={`Choose ${multiple ? "files" : "file"}`} className="sr-only" type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} />
-    <span className="text-sm font-semibold text-neutral-500">{files.length ? files.map((file) => file.name).join(", ") : "No file selected"}</span>
-  </label>;
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid gap-1 border-b border-[var(--border)] pb-2 last:border-b-0 last:pb-0 sm:grid-cols-[140px_1fr]">
-      <dt className="text-neutral-500">{label}</dt>
-      <dd className="break-words text-[var(--foreground)]">{value}</dd>
-    </div>
-  );
-}
-
-function Input({ label, value, onChange, placeholder = "", helper = "", type = "text" }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; helper?: string; type?: string }) {
-  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}</span><input className="field-input" type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />{helper && <span className="text-xs font-semibold text-neutral-500">{helper}</span>}</label>;
-}
-
-function Textarea({ label, value, onChange, rows = 8 }: { label: string; value: string; onChange: (value: string) => void; rows?: number }) {
-  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}</span><textarea className="field-input resize-y leading-6" rows={rows} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
-}
-
-function Select({ label, value, onChange, options, labels = options }: { label: string; value: string; onChange: (value: string) => void; options: string[]; labels?: string[] }) {
-  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}</span><select className="field-input" value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option, index) => <option key={option} value={option}>{labels[index]}</option>)}</select></label>;
-}
-
-function Range({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}: {value}</span><input type="range" min="0.25" max="0.95" step="0.05" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
-}
-
-function Checkbox({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return <label className="surface-card flex items-center gap-3 rounded-2xl px-4 py-3 font-bold"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />{label}</label>;
-}
-
-function PrimaryButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return <button className="primary-button" type="button" onClick={onClick}><Download size={17} />{label}</button>;
-}
-
-function SecondaryButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return <button className="secondary-button" type="button" onClick={onClick}>{label}</button>;
-}
-
-function EmptyState({ query, onPick }: { query: string; onPick?: (term: string) => void }) {
-  const runSuggestion = (term: string) => {
-    if (onPick) {
-      onPick(term);
-      return;
-    }
-    sessionStorage.setItem("myfilekit:lastSearch", term);
-    window.dispatchEvent(new CustomEvent("myfilekit:search", { detail: term }));
-  };
-
-  return (
-    <div className="surface-card rounded-3xl border-dashed border-neutral-300 p-10 text-center">
-      <p className="font-display text-2xl font-black">No tools found for “{query}”</p>
-      <p className="mx-auto mt-2 max-w-xl font-semibold text-neutral-500">Try a shorter task name or one of the common searches below.</p>
-      <div className="mt-5 flex flex-wrap justify-center gap-2">
-        {quickSearches.map((term) => (
-          <button key={term} className="quick-chip" type="button" onClick={() => runSuggestion(term)}>
-            {term}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function MissingPage() {
   return <div className="surface-panel wabi-edge p-10 text-center"><h1 className="font-display text-4xl font-black">Page not found</h1><a className="primary-button mx-auto mt-5 w-fit" href="#dashboard">Return to dashboard</a></div>;
 }
@@ -1224,6 +1293,11 @@ function fileTypeLabel(tool: Tool) {
   if (file.types?.includes("application/pdf")) return "PDF";
   if (file.types?.some((type) => type.startsWith("image/"))) return "Image";
   return "";
+}
+
+function multiFileLabel(tool: Tool) {
+  const file = tool.file as { maxFiles?: number };
+  return file.maxFiles && file.maxFiles > 1 ? "Multiple files" : "";
 }
 
 function iconForTool(tool: Tool) {
