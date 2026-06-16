@@ -15,8 +15,10 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Confirm the header uses user-facing product copy and does not show release/version labels.
 - Confirm the dashboard uses the premium utility theme: light cinematic background, glass surfaces, softer depth, refined typography, and fewer hard divider lines.
 - Confirm the dashboard hero includes a subtle monochrome WebGL hills background behind the product copy.
-- Confirm the main dashboard search is centered inside the hero and the product-quality cards appear below the tool library.
-- Confirm Popular Tools appears above the full category library.
+- Confirm the main dashboard search is centered inside the hero and search results appear directly below it.
+- Confirm the compact product trust strip appears below the hero.
+- Confirm the category rail links to each tool category.
+- Confirm Featured Workflows appears above the full tool library.
 - Open one tool, return to the dashboard, and confirm Recently Used appears.
 - Search `merge pdf` and confirm Merge PDF is shown.
 - Search `compress image` and confirm Compress Image is shown.
@@ -28,6 +30,7 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - On desktop, open the header search dock, search `json`, press Enter, and confirm the dashboard filters to JSON tools.
 - Search a nonsense query and confirm the empty state appears with suggested searches.
 - Click every visible card and confirm it opens a real tool route.
+- Open a category page, use the category search field, and confirm the visible cards filter within that category.
 
 ## Navigation
 

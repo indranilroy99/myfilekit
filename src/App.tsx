@@ -6,8 +6,10 @@ import {
   Download,
   FileArchive,
   FileText,
+  FolderSearch,
   Hash,
   Image,
+  Layers3,
   LayoutDashboard,
   PenLine,
   ReceiptText,
@@ -17,6 +19,7 @@ import {
   ShieldCheck,
   Sparkles,
   Upload,
+  Zap,
 } from "lucide-react";
 import { AnimatedLogo } from "./components/AnimatedLogo";
 import { ExpandingSearchDock } from "@/components/ui/expanding-search-dock-shadcnui";
@@ -58,6 +61,7 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
 
 const quickSearches = ["Merge PDF", "Compress Image", "Invoice", "Signature", "JSON", "File Hash"];
 const recentToolsStorageKey = "myfilekit:recentTools";
+const featuredToolIds = ["merge-pdf-tool", "compress-image-tool", "invoice-generator-tool", "metadata-cleaner", "json-formatter-tool", "file-hash-tool"];
 
 export default function App() {
   const [hash, setHash] = useState(window.location.hash || "#dashboard");
@@ -141,6 +145,7 @@ function Dashboard() {
   const matches = useMemo(() => filterTools(query), [query]);
   const isSearching = Boolean(query.trim());
   const grouped = categories.map((category) => [category, tools.filter((tool: Tool) => tool.category === category)] as const);
+  const featuredTools = featuredToolIds.map(findToolById).filter(Boolean) as Tool[];
   const updateQuery = (value: string) => {
     setQuery(value);
     writeSessionValue("myfilekit:lastSearch", value);
@@ -255,6 +260,18 @@ function Dashboard() {
         </div>
       </section>
 
+      {!isSearching && <ProductCommandStrip />}
+      {!isSearching && <CategoryRail />}
+
+      {!isSearching && featuredTools.length > 0 && (
+        <section className="dashboard-shelf">
+          <SectionHeader title="Featured Workflows" subtitle="The fastest paths for common file work." />
+          <div className="dashboard-tool-row">
+            {featuredTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
+          </div>
+        </section>
+      )}
+
       {!isSearching && recentTools.length > 0 && (
         <section className="dashboard-shelf">
           <SectionHeader title="Recently Used" subtitle="Quickly jump back into your last tools." />
@@ -267,7 +284,7 @@ function Dashboard() {
       {!isSearching && <section className="dashboard-tools-shell">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h2 className="font-display text-3xl font-black">Tools</h2>
+            <h2 className="font-display text-3xl font-black">Tool Library</h2>
           </div>
           <span className="local-badge inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-black">
             <ShieldCheck size={16} />
@@ -281,6 +298,46 @@ function Dashboard() {
         </div>
       </section>}
     </div>
+  );
+}
+
+function ProductCommandStrip() {
+  const stats = [
+    { icon: Zap, label: `${tools.length} working tools`, note: "No placeholder cards" },
+    { icon: Layers3, label: `${categories.length} focused categories`, note: "PDF, image, business, privacy, data" },
+    { icon: ShieldCheck, label: "Local-first processing", note: "No server upload path" },
+    { icon: FolderSearch, label: "Search-first workflow", note: "Find tools by task or file type" },
+  ];
+  return (
+    <section className="command-strip" aria-label="Product highlights">
+      {stats.map(({ icon: Icon, label, note }) => (
+        <div className="command-stat" key={label}>
+          <span className="command-stat-icon"><Icon size={17} /></span>
+          <span>
+            <span className="block text-sm font-black">{label}</span>
+            <span className="block text-xs font-bold text-neutral-500">{note}</span>
+          </span>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function CategoryRail() {
+  return (
+    <nav className="category-rail" aria-label="Tool categories">
+      {categories.map((category) => {
+        const Icon = categoryIcons[category] || Sparkles;
+        const count = tools.filter((tool: Tool) => tool.category === category).length;
+        return (
+          <a key={category} className="category-rail-link" href={categoryRoute(category)}>
+            <Icon size={17} />
+            <span>{category.replace(" Tools", "")}</span>
+            <span className="category-count">{count}</span>
+          </a>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -359,7 +416,11 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
 }
 
 function CategoryPage({ category }: { category: string }) {
+  const [query, setQuery] = useState("");
   const categoryTools = tools.filter((tool: Tool) => tool.category === category);
+  const visibleTools = query.trim()
+    ? categoryTools.filter((tool: Tool) => searchableText(tool).includes(query.trim().toLowerCase()))
+    : categoryTools;
   const Icon = categoryIcons[category] || Sparkles;
   const details = categoryDetails[category];
   return (
@@ -374,9 +435,20 @@ function CategoryPage({ category }: { category: string }) {
             <p className="mt-1 max-w-2xl font-semibold text-neutral-500">{details?.description || "Choose any working tool below."}</p>
           </div>
         </div>
-        <div className="tool-grid">
-          {categoryTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} />)}
+        <div className="category-filter mb-5 flex items-center gap-3">
+          <Search size={18} />
+          <input
+            aria-label={`Search ${category}`}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={`Search ${category.replace(" Tools", "").toLowerCase()} tools...`}
+          />
+          {query && <button type="button" aria-label="Clear category search" onClick={() => setQuery("")}>×</button>}
         </div>
+        <div className="tool-grid">
+          {visibleTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} />)}
+        </div>
+        {!visibleTools.length && <EmptyState query={query} onPick={setQuery} />}
       </section>
     </div>
   );
@@ -1049,8 +1121,12 @@ function SecondaryButton({ label, onClick }: { label: string; onClick: () => voi
   return <button className="secondary-button" type="button" onClick={onClick}>{label}</button>;
 }
 
-function EmptyState({ query }: { query: string }) {
+function EmptyState({ query, onPick }: { query: string; onPick?: (term: string) => void }) {
   const runSuggestion = (term: string) => {
+    if (onPick) {
+      onPick(term);
+      return;
+    }
     sessionStorage.setItem("myfilekit:lastSearch", term);
     window.dispatchEvent(new CustomEvent("myfilekit:search", { detail: term }));
   };
@@ -1077,7 +1153,11 @@ function MissingPage() {
 function filterTools(query: string) {
   const parts = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return tools;
-  return tools.filter((tool: Tool) => parts.every((part) => [tool.name, tool.category, tool.description, ...(tool.keywords || []), ...(tool.badges || [])].join(" ").toLowerCase().includes(part)));
+  return tools.filter((tool: Tool) => parts.every((part) => searchableText(tool).includes(part)));
+}
+
+function searchableText(tool: Tool) {
+  return [tool.name, tool.category, tool.description, ...(tool.keywords || []), ...(tool.badges || []), ...(tool.acceptedTypes || [])].join(" ").toLowerCase();
 }
 
 function findToolById(id: string) {
