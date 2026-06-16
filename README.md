@@ -4,7 +4,7 @@ MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, si
 
 ## Version
 
-Current app version: `2.0.13`
+Current app version: `2.0.14`
 
 Use the version scripts for future changes:
 
@@ -20,7 +20,7 @@ Use patch versions such as `2.0.1` and `2.0.2` for small fixes. Use a major vers
 
 - PDF: Merge PDF, Split / Extract PDF Pages, Delete PDF Pages, Rotate PDF Pages, Images to PDF.
 - Image: Compress Image, Resize Image, Convert Image, Crop Image, Rotate / Flip Image.
-- Business: Invoice Generator, Receipt Generator, Quote / Estimate Generator.
+- Business: Invoice Generator with premium templates, payment details, tax/TDS fields, signatures, logo controls, and customizable invoice-style document wording.
 - Signature: Draw Signature, Type Signature.
 - Text & Data: Text to PDF, Markdown Preview, JSON Formatter, CSV to JSON, JSON to CSV.
 - Privacy: Metadata Cleaner removes embedded metadata from supported image files locally in your browser.
