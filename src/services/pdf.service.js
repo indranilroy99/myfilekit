@@ -49,6 +49,64 @@ export async function rotatePdfPages(file, pageIndexes, degrees) {
   return output.save();
 }
 
+export async function addPdfPageNumbers(file, options = {}) {
+  const { StandardFonts, rgb } = getPdfLib();
+  const pdf = await loadPdf(file);
+  const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const pages = pdf.getPages();
+  const fontSize = Number(options.fontSize || 10);
+  const prefix = String(options.prefix || "");
+  pages.forEach((page, index) => {
+    const { width } = page.getSize();
+    const text = `${prefix}${index + 1}`;
+    page.drawText(text, {
+      x: width / 2 - (text.length * fontSize * 0.25),
+      y: Number(options.margin || 24),
+      size: fontSize,
+      font,
+      color: rgb(0.12, 0.16, 0.24),
+    });
+  });
+  return pdf.save();
+}
+
+export async function watermarkPdf(file, text, options = {}) {
+  const { StandardFonts, rgb, degrees: pdfDegrees } = getPdfLib();
+  const pdf = await loadPdf(file);
+  const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const label = String(text || "Watermark").trim();
+  if (!label) throw new Error("Enter watermark text.");
+  const size = Number(options.size || 48);
+  const opacity = clamp(Number(options.opacity || 0.18), 0.05, 0.6);
+  pdf.getPages().forEach((page) => {
+    const { width, height } = page.getSize();
+    page.drawText(label, {
+      x: width * 0.18,
+      y: height * 0.48,
+      size,
+      font,
+      color: rgb(0.1, 0.16, 0.28),
+      opacity,
+      rotate: pdfDegrees(Number(options.rotation || -32)),
+    });
+  });
+  return pdf.save();
+}
+
+export async function cleanPdfMetadata(file) {
+  const pdf = await loadPdf(file);
+  const now = new Date();
+  pdf.setTitle("");
+  pdf.setAuthor("");
+  pdf.setSubject("");
+  pdf.setKeywords([]);
+  pdf.setProducer("MyFileKit");
+  pdf.setCreator("MyFileKit");
+  pdf.setCreationDate(now);
+  pdf.setModificationDate(now);
+  return pdf.save();
+}
+
 export async function textToPdf(text) {
   const { PDFDocument, StandardFonts, rgb } = getPdfLib();
   const pdf = await PDFDocument.create();
@@ -115,3 +173,6 @@ function wrapText(text, maxChars) {
   return lines;
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
+}

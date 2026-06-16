@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import QRCode from "qrcode";
 import {
   ArrowLeft,
   ArrowRight,
@@ -40,7 +41,8 @@ import { downloadBlob, downloadBytes, downloadText } from "./services/download.s
 import { csvToJson, jsonToCsv } from "./services/csv.service.js";
 import { cleanImageMetadata, compressImage, cropImage, exportCanvas, imageDimensions, imageToCanvas, resizeImage, rotateFlipImage } from "./services/image.service.js";
 import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.service.js";
-import { deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf } from "./services/pdf.service.js";
+import { addPdfPageNumbers, cleanPdfMetadata, deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
+import { cleanFilenameList, diffToText, generatePassword, jsonToYaml, lineDiff, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 
 type Tool = (typeof tools)[number];
 type Status = { tone: "idle" | "success" | "error"; message: string };
@@ -773,8 +775,13 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "split-pdf-tool") return <PageRangeTool tool={tool} action="Extract pages" suffix="extracted" run={extractPdfPages} />;
   if (tool.id === "delete-pdf-pages-tool") return <PageRangeTool tool={tool} action="Delete pages" suffix="pages-deleted" run={deletePdfPages} />;
   if (tool.id === "rotate-pdf-tool") return <RotatePdfTool tool={tool} />;
+  if (tool.id === "pdf-page-numbers-tool") return <PdfPageNumbersTool tool={tool} />;
+  if (tool.id === "watermark-pdf-tool") return <WatermarkPdfTool tool={tool} />;
+  if (tool.id === "pdf-metadata-cleaner-tool") return <PdfMetadataCleanerTool tool={tool} />;
   if (tool.id === "images-to-pdf-tool") return <PdfFileTool tool={tool} action="Create PDF" multiple accept="image/jpeg,image/png,image/webp" run={(files) => imagesToPdf(files).then((bytes) => downloadBytes(bytes, "myfilekit-images.pdf", "application/pdf"))} />;
   if (["compress-image-tool", "convert-image-tool"].includes(tool.id)) return <ImageOutputTool tool={tool} mode={tool.id === "compress-image-tool" ? "compress" : "convert"} />;
+  if (tool.id === "batch-compress-images-tool") return <BatchImageTool tool={tool} mode="compress" />;
+  if (tool.id === "batch-resize-images-tool") return <BatchImageTool tool={tool} mode="resize" />;
   if (tool.id === "resize-image-tool") return <ResizeImageTool tool={tool} />;
   if (tool.id === "crop-image-tool") return <CropImageTool tool={tool} />;
   if (tool.id === "rotate-flip-image-tool") return <RotateFlipImageTool tool={tool} />;
@@ -785,9 +792,17 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "json-formatter-tool") return <JsonTool />;
   if (tool.id === "csv-to-json-tool") return <CsvToJsonTool />;
   if (tool.id === "json-to-csv-tool") return <JsonToCsvTool />;
+  if (tool.id === "json-to-yaml-tool") return <JsonToYamlTool />;
+  if (tool.id === "url-codec-tool") return <UrlCodecTool />;
+  if (tool.id === "diff-checker-tool") return <DiffCheckerTool />;
+  if (tool.id === "word-counter-tool") return <WordCounterTool />;
   if (tool.id === "metadata-cleaner") return <MetadataCleanerTool tool={tool} />;
   if (tool.id === "base64-tool") return <Base64Tool />;
   if (tool.id === "file-hash-tool") return <FileHashTool tool={tool} />;
+  if (tool.id === "hash-compare-tool") return <HashCompareTool tool={tool} />;
+  if (tool.id === "password-generator-tool") return <PasswordGeneratorTool />;
+  if (tool.id === "qr-code-generator-tool") return <QrCodeTool />;
+  if (tool.id === "filename-cleaner-tool") return <FilenameCleanerTool />;
   return <StatusBox status={{ tone: "error", message: "This tool renderer is missing." }} />;
 }
 
@@ -907,6 +922,57 @@ function RotatePdfTool({ tool }: { tool: Tool }) {
   </ToolForm>;
 }
 
+function PdfPageNumbersTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [prefix, setPrefix] = useState("Page ");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setPrefix("Page "); setStatus(initialStatus); }}>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Input label="Prefix" value={prefix} onChange={setPrefix} placeholder="Page " helper="Example output: Page 1, Page 2, Page 3" />
+    <PrimaryButton label="Add page numbers" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = await addPdfPageNumbers(file, { prefix });
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-page-numbers`, "pdf"), "application/pdf");
+      return `Added page numbers to ${file.name}.`;
+    })} />
+  </ToolForm>;
+}
+
+function WatermarkPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [text, setText] = useState("CONFIDENTIAL");
+  const [opacity, setOpacity] = useState("0.18");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setText("CONFIDENTIAL"); setOpacity("0.18"); setStatus(initialStatus); }}>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Input label="Watermark text" value={text} onChange={setText} />
+    <Input label="Opacity" value={opacity} onChange={setOpacity} type="number" helper="Use a value from 0.05 to 0.6." />
+    <PrimaryButton label="Watermark PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = await watermarkPdf(file, text, { opacity: Number(opacity) });
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-watermarked`, "pdf"), "application/pdf");
+      return `Watermark applied to ${file.name}.`;
+    })} />
+  </ToolForm>;
+}
+
+function PdfMetadataCleanerTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      This removes common PDF document metadata fields such as title, author, subject, keywords, creator, and producer. It does not claim to redact page content or hidden objects.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <PrimaryButton label="Clean PDF metadata" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = await cleanPdfMetadata(file);
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-metadata-cleaned`, "pdf"), "application/pdf");
+      return `Common document metadata cleaned from ${file.name}.`;
+    })} />
+  </ToolForm>;
+}
+
 function ImageOutputTool({ tool, mode }: { tool: Tool; mode: "compress" | "convert" }) {
   const [files, setFiles] = useState<File[]>([]);
   const [format, setFormat] = useState("image/jpeg");
@@ -923,6 +989,34 @@ function ImageOutputTool({ tool, mode }: { tool: Tool; mode: "compress" | "conve
         : await exportCanvas(await imageToCanvas(file), format, 0.92);
       downloadBlob(blob, withExtension(`${safeFilename(file.name)}-${mode}`, imageExt(format)));
       return `Original: ${formatBytes(file.size)}\nOutput: ${formatBytes(blob.size)}`;
+    })} />
+  </ToolForm>;
+}
+
+function BatchImageTool({ tool, mode }: { tool: Tool; mode: "compress" | "resize" }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [quality, setQuality] = useState("0.82");
+  const [width, setWidth] = useState("1200");
+  const [height, setHeight] = useState("800");
+  const [format, setFormat] = useState("image/jpeg");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <FileControl accept="image/jpeg,image/png,image/webp" multiple files={files} setFiles={setFiles} />
+    <Select label="Output format" value={format} onChange={setFormat} options={["image/jpeg", "image/png", "image/webp"]} labels={["JPEG", "PNG", "WebP"]} />
+    {mode === "compress" ? <Range label="Quality" value={quality} onChange={setQuality} /> : <div className="grid gap-3 sm:grid-cols-2"><Input label="Width" value={width} onChange={setWidth} type="number" /><Input label="Height" value={height} onChange={setHeight} type="number" /></div>}
+    <PrimaryButton label={mode === "compress" ? "Compress batch" : "Resize batch"} onClick={() => runSafely(setStatus, async () => {
+      const valid = validateFiles(files, tool.file);
+      let totalBefore = 0;
+      let totalAfter = 0;
+      for (const file of valid) {
+        totalBefore += file.size;
+        const blob = mode === "compress"
+          ? await compressImage(file, format, Number(quality))
+          : await exportCanvas(await resizeImage(file, Number(width), Number(height), true), format, 0.88);
+        totalAfter += blob.size;
+        downloadBlob(blob, withExtension(`${safeFilename(file.name)}-${mode}`, imageExt(format)));
+      }
+      return `Processed ${valid.length} image${valid.length === 1 ? "" : "s"}.\nBefore: ${formatBytes(totalBefore)}\nAfter: ${formatBytes(totalAfter)}`;
     })} />
   </ToolForm>;
 }
@@ -1323,6 +1417,75 @@ function JsonToCsvTool() {
   </ToolForm>;
 }
 
+function JsonToYamlTool() {
+  const [input, setInput] = useState('{"name":"MyFileKit","local":true,"tools":["pdf","image","data"]}');
+  const [output, setOutput] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
+    <Textarea label="JSON input" value={input} onChange={setInput} rows={9} />
+    <Textarea label="YAML output" value={output} onChange={setOutput} rows={10} />
+    <div className="flex flex-wrap gap-2">
+      <PrimaryButton label="Convert to YAML" onClick={() => runSafely(setStatus, async () => { setOutput(jsonToYaml(input)); return "JSON converted to YAML."; })} />
+      <SecondaryButton label="Download YAML" onClick={() => downloadText(output, "converted", "yaml", "text/yaml;charset=utf-8")} />
+    </div>
+  </ToolForm>;
+}
+
+function UrlCodecTool() {
+  const [input, setInput] = useState("https://example.com/search?q=MyFileKit tools");
+  const [output, setOutput] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
+    <Textarea label="Input" value={input} onChange={setInput} rows={7} />
+    <Textarea label="Output" value={output} onChange={setOutput} rows={7} />
+    <div className="flex flex-wrap gap-2">
+      <PrimaryButton label="Encode URL text" onClick={() => { setOutput(urlEncode(input)); setStatus({ tone: "success", message: "URL text encoded." }); }} />
+      <SecondaryButton label="Decode URL text" onClick={() => runSafely(setStatus, async () => { setOutput(urlDecode(input)); return "URL text decoded."; })} />
+    </div>
+  </ToolForm>;
+}
+
+function DiffCheckerTool() {
+  const [left, setLeft] = useState("Line one\nLine two");
+  const [right, setRight] = useState("Line one\nLine two updated");
+  const [output, setOutput] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setLeft(""); setRight(""); setOutput(""); setStatus(initialStatus); }}>
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Textarea label="Original" value={left} onChange={setLeft} rows={9} />
+      <Textarea label="Changed" value={right} onChange={setRight} rows={9} />
+    </div>
+    <Textarea label="Diff output" value={output} onChange={setOutput} rows={10} />
+    <div className="flex flex-wrap gap-2">
+      <PrimaryButton label="Compare text" onClick={() => runSafely(setStatus, async () => { const rows = lineDiff(left, right); setOutput(diffToText(rows)); return `${rows.filter((row) => row.type !== "same").length} changed line entries found.`; })} />
+      <SecondaryButton label="Download diff" onClick={() => downloadText(output, "text-diff", "diff", "text/plain;charset=utf-8")} />
+    </div>
+  </ToolForm>;
+}
+
+function WordCounterTool() {
+  const [input, setInput] = useState("Paste or type text here.");
+  const stats = textStats(input);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setInput(""); setStatus(initialStatus); }}>
+    <Textarea label="Text" value={input} onChange={setInput} rows={12} />
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      {[
+        ["Words", stats.words],
+        ["Characters", stats.characters],
+        ["No spaces", stats.charactersNoSpaces],
+        ["Lines", stats.lines],
+        ["Read time", `${stats.readingMinutes} min`],
+      ].map(([label, value]) => (
+        <div key={label} className="surface-card wabi-card-edge p-4">
+          <p className="text-xs font-black uppercase text-neutral-500">{label}</p>
+          <p className="mt-1 font-display text-2xl font-black">{value}</p>
+        </div>
+      ))}
+    </div>
+  </ToolForm>;
+}
+
 function Base64Tool() {
   const [input, setInput] = useState("Hello MyFileKit");
   const [output, setOutput] = useState("");
@@ -1341,7 +1504,71 @@ function FileHashTool({ tool }: { tool: Tool }) {
   return <ToolForm status={status} onReset={() => { setFiles([]); setOutput(""); setStatus(initialStatus); }}>
     <FileControl accept="*/*" files={files} setFiles={setFiles} />
     <Textarea label="SHA-256" value={output} onChange={setOutput} rows={3} />
-    <PrimaryButton label="Generate SHA-256" onClick={() => runSafely(setStatus, async () => { const [file] = validateFiles(files, tool.file); const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer()); setOutput([...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("")); return `Hashed ${file.name}.`; })} />
+    <PrimaryButton label="Generate SHA-256" onClick={() => runSafely(setStatus, async () => { const [file] = validateFiles(files, tool.file); setOutput(await sha256File(file)); return `Hashed ${file.name}.`; })} />
+  </ToolForm>;
+}
+
+function HashCompareTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [expected, setExpected] = useState("");
+  const [actual, setActual] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setExpected(""); setActual(""); setStatus(initialStatus); }}>
+    <FileControl accept="*/*" files={files} setFiles={setFiles} />
+    <Input label="Expected SHA-256" value={expected} onChange={setExpected} placeholder="Paste expected checksum" />
+    <Textarea label="Actual SHA-256" value={actual} onChange={setActual} rows={3} />
+    <PrimaryButton label="Compare hash" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const digest = await sha256File(file);
+      setActual(digest);
+      const normalized = expected.trim().toLowerCase().replace(/\s+/g, "");
+      if (!normalized) return `Hash generated for ${file.name}. Paste an expected hash to compare.`;
+      return normalized === digest ? "Hash match. File integrity check passed." : "Hash mismatch. The file does not match the expected SHA-256.";
+    })} />
+  </ToolForm>;
+}
+
+function PasswordGeneratorTool() {
+  const [length, setLength] = useState("20");
+  const [symbols, setSymbols] = useState(true);
+  const [output, setOutput] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setOutput(""); setLength("20"); setStatus(initialStatus); }}>
+    <Input label="Length" value={length} onChange={setLength} type="number" />
+    <Checkbox label="Include symbols" checked={symbols} onChange={setSymbols} />
+    <Textarea label="Generated password" value={output} onChange={setOutput} rows={3} />
+    <div className="flex flex-wrap gap-2">
+      <PrimaryButton label="Generate password" onClick={() => runSafely(setStatus, async () => { setOutput(generatePassword({ length: Number(length), symbols })); return "Password generated locally."; })} />
+      <SecondaryButton label="Copy password" onClick={() => { navigator.clipboard?.writeText(output); setStatus({ tone: "success", message: "Password copied." }); }} />
+    </div>
+  </ToolForm>;
+}
+
+function QrCodeTool() {
+  const [input, setInput] = useState("https://github.com/indranilroy99/myfilekit");
+  const [dataUrl, setDataUrl] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setInput(""); setDataUrl(""); setStatus(initialStatus); }}>
+    <Textarea label="Text or link" value={input} onChange={setInput} rows={5} />
+    {dataUrl && <img className="surface-card wabi-card-edge mx-auto aspect-square w-full max-w-xs p-4" src={dataUrl} alt="Generated QR code" />}
+    <div className="flex flex-wrap gap-2">
+      <PrimaryButton label="Generate QR code" onClick={() => runSafely(setStatus, async () => { setDataUrl(await QRCode.toDataURL(input, { width: 720, margin: 2, errorCorrectionLevel: "M" })); return "QR code generated locally."; })} />
+      {dataUrl && <SecondaryButton label="Download PNG" onClick={async () => { const blob = await (await fetch(dataUrl)).blob(); downloadBlob(blob, "myfilekit-qr-code.png"); }} />}
+    </div>
+  </ToolForm>;
+}
+
+function FilenameCleanerTool() {
+  const [input, setInput] = useState("Project final?.pdf\nmy photo 2026.jpg");
+  const [output, setOutput] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
+    <Textarea label="Filenames" value={input} onChange={setInput} rows={8} />
+    <Textarea label="Cleaned filenames" value={output} onChange={setOutput} rows={8} />
+    <div className="flex flex-wrap gap-2">
+      <PrimaryButton label="Clean filenames" onClick={() => { setOutput(cleanFilenameList(input)); setStatus({ tone: "success", message: "Filenames cleaned for safer cross-platform use." }); }} />
+      <SecondaryButton label="Download list" onClick={() => downloadText(output, "cleaned-filenames", "txt")} />
+    </div>
   </ToolForm>;
 }
 
@@ -1491,6 +1718,11 @@ async function runSafely(setStatus: (status: Status) => void, task: () => Promis
   } catch (error: any) {
     setStatus({ tone: "error", message: error?.message || "Something went wrong." });
   }
+}
+
+async function sha256File(file: File) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function imageExt(type: string) {
