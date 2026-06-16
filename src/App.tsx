@@ -461,6 +461,7 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
   const Icon = iconForTool(tool);
   const visibleBadges = (tool.badges || []).filter((badge: string) => !["Local", "Local processing", categoryDetails[tool.category]?.accent].includes(badge)).slice(0, 2);
   const multiFile = multiFileLabel(tool);
+  const primaryBadge = categoryDetails[tool.category]?.accent || tool.category.replace(" Tools", "");
   return (
     <GlowCard customSize glowColor={glowColorForTool(tool)} className={`tool-card group p-0 transition hover:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
       <a href={tool.route} className={`tool-card-link gap-4 rounded-3xl p-5 transition focus-visible:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
@@ -468,18 +469,18 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
           <span className="icon-tile grid h-12 w-12 place-items-center rounded-2xl transition group-hover:rotate-3">
             <Icon size={21} />
           </span>
-          <span className="tool-arrow" aria-hidden="true">Open <ChevronRight size={15} /></span>
+          <span className="tool-arrow" aria-hidden="true"><ChevronRight size={17} /></span>
         </div>
         <div>
           <h4 className="text-lg font-black">{tool.name}</h4>
           <p className={`tool-description mt-1 text-sm font-semibold leading-6 text-neutral-600 ${compact ? "tool-description-compact" : ""}`}>{tool.description}</p>
         </div>
         <div className="mt-auto flex flex-wrap gap-2">
-          <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{categoryDetails[tool.category]?.accent || tool.category}</span>
-          {visibleBadges.map((badge: string) => <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>)}
-          {tool.localProcessing && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">Local processing</span>}
-          {multiFile && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{multiFile}</span>}
-          {fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
+          <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{primaryBadge}</span>
+          {!compact && visibleBadges.map((badge: string) => <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>)}
+          {tool.localProcessing && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{compact ? "Local" : "Local processing"}</span>}
+          {!compact && multiFile && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{multiFile}</span>}
+          {!compact && fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
         </div>
       </a>
     </GlowCard>
