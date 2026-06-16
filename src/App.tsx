@@ -469,12 +469,12 @@ function BrowseToolsPage() {
 
   return (
     <div className="grid gap-6">
-      <Toolbar title="Browse Tools" subtitle="All MyFileKit workflows in one searchable library" />
+      <Toolbar />
       <section className="surface-panel wabi-edge p-6">
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="moss-text text-xs font-black uppercase">Tool library</p>
-            <h1 className="font-display text-4xl font-black">Find the right workflow</h1>
+            <h1 className="font-display text-4xl font-black">Browse tools</h1>
             <p className="mt-1 max-w-2xl font-semibold text-neutral-500">
               Browse by category or search by task, file type, or outcome.
             </p>
@@ -523,7 +523,7 @@ function CategoryPage({ category }: { category: string }) {
   const details = categoryDetails[category];
   return (
     <div className="grid gap-6">
-      <Toolbar title={category} subtitle={`${categoryTools.length} available workflows`} />
+      <Toolbar />
       <section className="surface-panel wabi-edge p-6">
         <div className="mb-6 flex items-start gap-3">
           <span className="icon-tile grid h-14 w-14 place-items-center rounded-2xl"><Icon size={24} /></span>
@@ -561,7 +561,7 @@ function ToolPage({ tool }: { tool: Tool }) {
 
   return (
     <div className="grid gap-6">
-      <Toolbar title={tool.name} subtitle={tool.category} />
+      <Toolbar />
       <section className="grid gap-6">
         <div className="surface-panel wabi-edge tool-page-panel p-5 md:p-7">
           <div className="mb-6 flex items-start gap-4">
@@ -710,14 +710,9 @@ function EmptyState({ query, onPick }: { query: string; onPick?: (term: string) 
   );
 }
 
-function Toolbar({ title, subtitle }: { title: string; subtitle: string }) {
+function Toolbar() {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <p className="text-xs font-black uppercase text-neutral-500">MyFileKit</p>
-        <p className="font-display text-2xl font-black">{title}</p>
-        <p className="text-sm font-semibold text-neutral-500">{subtitle}</p>
-      </div>
+    <div className="page-toolbar flex flex-wrap items-center justify-end gap-2" aria-label="Page navigation">
       <div className="flex flex-wrap gap-2">
         <button className="nav-action nav-action-icon" type="button" aria-label="Go back" title="Back" onClick={() => history.back()}><ArrowLeft size={18} /></button>
         <button className="nav-action nav-action-icon" type="button" aria-label="Go forward" title="Forward" onClick={() => history.forward()}><ArrowRight size={18} /></button>
