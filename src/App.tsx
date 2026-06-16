@@ -22,7 +22,6 @@ import {
   Zap,
 } from "lucide-react";
 import { AnimatedLogo } from "./components/AnimatedLogo";
-import { ExpandingSearchDock } from "@/components/ui/expanding-search-dock-shadcnui";
 import { GLSLHills } from "@/components/ui/glsl-hills";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
@@ -87,14 +86,6 @@ export default function App() {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  const runHeaderSearch = (value: string) => {
-    const nextQuery = value.trim();
-    if (!nextQuery) return;
-    writeSessionValue("myfilekit:lastSearch", nextQuery);
-    window.dispatchEvent(new CustomEvent("myfilekit:search", { detail: nextQuery }));
-    window.location.hash = "#dashboard";
-  };
-
   return (
     <>
       <header className="site-header sticky top-0 z-30 backdrop-blur-xl">
@@ -113,9 +104,6 @@ function Shell({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
           <div className="flex items-center gap-2">
-            <div className="hidden md:block">
-              <ExpandingSearchDock onSearch={runHeaderSearch} placeholder="Search tools..." />
-            </div>
             <a className="ink-button rounded-full px-4 py-2 text-sm font-black no-underline" href="#category-pdf-tools">
               Browse tools
             </a>
