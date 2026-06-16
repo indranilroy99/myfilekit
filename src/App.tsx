@@ -22,7 +22,7 @@ import {
   Zap,
 } from "lucide-react";
 import { AnimatedLogo } from "./components/AnimatedLogo";
-import { GLSLHills } from "@/components/ui/glsl-hills";
+import { NeuralNoise } from "@/components/ui/neural-noise";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "./utils/format.js";
@@ -178,7 +178,7 @@ function Dashboard() {
   return (
     <div className="dashboard-page">
       <section className={`hero-panel surface-panel wabi-edge overflow-hidden ${isSearching ? "hero-panel-searching" : ""}`}>
-        <GLSLHills className="hero-hills" cameraZ={138} planeSize={192} speed={0.18} />
+        <NeuralNoise className="hero-neural" color={[0.07, 0.2, 0.34]} opacity={0.17} speed={0.00018} />
         <div className="relative z-10 mx-auto grid max-w-6xl justify-items-center gap-6 px-6 py-10 text-center md:px-10 lg:px-12">
           <div className="grid w-full justify-items-center gap-5">
             {!isSearching && (

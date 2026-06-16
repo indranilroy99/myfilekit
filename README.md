@@ -4,7 +4,7 @@ MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, si
 
 ## Version
 
-Current app version: `3.0.4`
+Current app version: `3.0.5`
 
 Use the version scripts for future changes:
 
@@ -53,7 +53,6 @@ Supported tools run in the browser using local files selected by the user. MyFil
 - Vite
 - lucide-react
 - framer-motion
-- Three.js
 - Local vendored `pdf-lib` for browser-side PDF operations
 - Node.js tests and release checks
 

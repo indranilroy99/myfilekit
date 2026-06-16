@@ -26,6 +26,14 @@ The Vite and TypeScript configs map `@` to `src`, so imports such as `@/componen
 
 The app header intentionally does not include a secondary search dock. The dashboard Spotlight search is the primary search experience, which keeps navigation cleaner and avoids duplicate controls.
 
+The dashboard hero uses a local WebGL neural-noise background component at:
+
+```text
+src/components/ui/neural-noise.tsx
+```
+
+It is intentionally subtle, respects reduced-motion preferences, and does not require external assets or runtime dependencies.
+
 The local shadow experiment lives at:
 
 ```text

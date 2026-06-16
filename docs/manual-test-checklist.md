@@ -14,7 +14,7 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Confirm the professional MyFileKit logo renders in the header and hero.
 - Confirm the header uses user-facing product copy and does not show release/version labels.
 - Confirm the dashboard uses the premium utility theme: light cinematic background, glass surfaces, softer depth, refined typography, and fewer hard divider lines.
-- Confirm the dashboard hero includes a subtle monochrome WebGL hills background behind the product copy.
+- Confirm the dashboard hero includes a subtle local WebGL neural-noise background behind the product copy.
 - Confirm the main dashboard search is centered inside the hero and search results appear directly below it.
 - Confirm the compact product trust strip appears below the hero.
 - Confirm the category rail links to each tool category.
