@@ -282,14 +282,6 @@ button {
   box-shadow: 0 18px 44px rgba(16, 24, 40, .18);
 }
 
-.nav-pill {
-  background: rgba(255, 255, 255, .62);
-  border: 1px solid rgba(255, 255, 255, .8);
-  color: var(--ink);
-  box-shadow: 0 10px 30px rgba(15, 23, 42, .05);
-}
-
-.nav-pill:hover,
 .tool-card:hover {
   border-color: var(--ring);
 }
