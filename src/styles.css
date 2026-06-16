@@ -294,6 +294,43 @@ button {
   border-color: var(--ring);
 }
 
+.dashboard-page {
+  display: grid;
+  gap: clamp(26px, 3vw, 46px);
+}
+
+.dashboard-shelf,
+.dashboard-tools-shell {
+  display: grid;
+  gap: 22px;
+  padding-inline: clamp(2px, 1vw, 14px);
+}
+
+.dashboard-tool-section {
+  display: grid;
+  gap: 16px;
+}
+
+.dashboard-tool-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(240px, 310px);
+  gap: clamp(14px, 1.4vw, 22px);
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: inline proximity;
+  padding: 4px clamp(4px, 1vw, 14px) 22px;
+  scrollbar-width: none;
+}
+
+.dashboard-tool-row::-webkit-scrollbar {
+  display: none;
+}
+
+.dashboard-tool-row .tool-card {
+  scroll-snap-align: start;
+}
+
 .tool-card {
   border-color: rgba(255, 255, 255, .76);
   background:
@@ -415,8 +452,12 @@ button {
 
 .hero-panel {
   position: relative;
-  min-height: 560px;
+  min-height: 510px;
   border-color: rgba(255, 255, 255, .8);
+}
+
+.hero-panel-searching {
+  min-height: 0;
 }
 
 .hero-panel::before {
@@ -443,6 +484,72 @@ button {
 
 .hero-hills canvas {
   mix-blend-mode: multiply;
+}
+
+.hero-search-results {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(220px, 310px);
+  gap: 14px;
+  width: min(100%, 980px);
+  overflow-x: auto;
+  padding: 4px 4px 16px;
+  scroll-snap-type: inline proximity;
+  scrollbar-width: none;
+}
+
+.hero-search-results::-webkit-scrollbar {
+  display: none;
+}
+
+.search-result-card,
+.hero-empty-result {
+  min-height: 92px;
+  border: 1px solid rgba(255, 255, 255, .78);
+  border-radius: 1.35rem;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, .78), rgba(248, 250, 252, .56));
+  color: var(--ink);
+  box-shadow: 0 18px 52px rgba(15, 23, 42, .075);
+  backdrop-filter: blur(18px);
+}
+
+.search-result-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  scroll-snap-align: start;
+  padding: 14px;
+  text-align: left;
+  text-decoration: none;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.search-result-card:hover,
+.search-result-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(15, 23, 42, .18);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .12);
+}
+
+.search-result-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border-radius: 1rem;
+  background: linear-gradient(135deg, #101828, #1d2939);
+  color: #fff;
+}
+
+.hero-empty-result {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 16px;
+  text-align: left;
+  color: var(--stone);
 }
 
 .spotlight-search {

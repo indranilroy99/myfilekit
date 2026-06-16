@@ -138,9 +138,8 @@ function Dashboard() {
   const [query, setQuery] = useState(() => readSessionValue("myfilekit:lastSearch"));
   const [recentTools, setRecentTools] = useState<Tool[]>(() => loadRecentTools());
   const matches = useMemo(() => filterTools(query), [query]);
-  const grouped = query
-    ? [["Search results", matches] as const]
-    : categories.map((category) => [category, tools.filter((tool: Tool) => tool.category === category)] as const);
+  const isSearching = Boolean(query.trim());
+  const grouped = categories.map((category) => [category, tools.filter((tool: Tool) => tool.category === category)] as const);
   const updateQuery = (value: string) => {
     setQuery(value);
     writeSessionValue("myfilekit:lastSearch", value);
@@ -183,24 +182,28 @@ function Dashboard() {
   }, []);
 
   return (
-    <div className="grid gap-8">
-      <section className="hero-panel surface-panel wabi-edge overflow-hidden">
+    <div className="dashboard-page">
+      <section className={`hero-panel surface-panel wabi-edge overflow-hidden ${isSearching ? "hero-panel-searching" : ""}`}>
         <GLSLHills className="hero-hills" cameraZ={138} planeSize={192} speed={0.18} />
-        <div className="relative z-10 mx-auto grid max-w-5xl justify-items-center gap-6 px-6 py-12 text-center md:px-10 lg:px-12 lg:py-16">
-          <div className="grid justify-items-center gap-6">
-            <div className="grid justify-items-center gap-4 sm:flex sm:items-center">
-              <AnimatedLogo />
-              <div>
-                <p className="app-badge mx-auto w-fit text-xs font-black uppercase sm:mx-0">Local-first file toolkit</p>
-                <h1 className="font-display text-5xl font-black md:text-7xl">MyFileKit</h1>
+        <div className="relative z-10 mx-auto grid max-w-6xl justify-items-center gap-6 px-6 py-10 text-center md:px-10 lg:px-12">
+          <div className="grid w-full justify-items-center gap-5">
+            {!isSearching && (
+              <div className="grid justify-items-center gap-5">
+                <div className="grid justify-items-center gap-4 sm:flex sm:items-center">
+                  <AnimatedLogo />
+                  <div>
+                    <p className="app-badge mx-auto w-fit text-xs font-black uppercase sm:mx-0">Local-first file toolkit</p>
+                    <h1 className="font-display text-5xl font-black md:text-7xl">MyFileKit</h1>
+                  </div>
+                </div>
+                <p className="max-w-3xl text-xl font-semibold leading-snug text-neutral-700 md:text-2xl">
+                  PDF, image, business, signature, and data tools — fast, private, and ready when you are.
+                </p>
+                <p className="max-w-2xl text-sm font-bold text-neutral-500">
+                  Supported tools process files locally in your browser. No unnecessary uploads.
+                </p>
               </div>
-            </div>
-            <p className="max-w-3xl text-xl font-semibold leading-snug text-neutral-700 md:text-2xl">
-              PDF, image, business, signature, and data tools — fast, private, and ready when you are.
-            </p>
-            <p className="max-w-2xl text-sm font-bold text-neutral-500">
-              Supported tools process files locally in your browser. No unnecessary uploads.
-            </p>
+            )}
             <form className="spotlight-search surface-card wabi-card-edge flex w-full max-w-3xl items-center gap-3 p-3 text-left" role="search" onSubmit={(event) => { event.preventDefault(); openBestMatch(); }}>
               <button className="search-submit-button icon-tile grid h-11 w-11 place-items-center rounded-2xl" type="submit" aria-label={query ? "Open best matching tool" : "Focus search"}>
                 <Search size={21} />
@@ -223,50 +226,74 @@ function Dashboard() {
                 </button>
               ) : null}
             </form>
-            <div className="flex max-w-3xl flex-wrap justify-center gap-2">
-              {quickSearches.map((term) => (
-                <button key={term} className="quick-chip" type="button" onClick={() => { updateQuery(term); searchRef.current?.focus(); }}>
-                  {term}
-                </button>
-              ))}
-            </div>
+            {!isSearching && (
+              <div className="flex max-w-3xl flex-wrap justify-center gap-2">
+                {quickSearches.map((term) => (
+                  <button key={term} className="quick-chip" type="button" onClick={() => { updateQuery(term); searchRef.current?.focus(); }}>
+                    {term}
+                  </button>
+                ))}
+              </div>
+            )}
             <p className="text-sm font-bold text-neutral-500">
               {query ? `${matches.length} matching tool${matches.length === 1 ? "" : "s"}` : `${tools.length} tools across ${categories.length} categories`}
             </p>
+            {isSearching && (
+              <div className="hero-search-results" aria-live="polite">
+                {matches.length ? (
+                  matches.slice(0, 8).map((tool: Tool) => <SearchResultCard key={tool.id} tool={tool} />)
+                ) : (
+                  <div className="hero-empty-result">
+                    <p className="font-black">No matching tool yet</p>
+                    <p>Try a shorter task like “pdf”, “image”, “sign”, or “json”.</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </section>
 
-      {!query && recentTools.length > 0 && (
-        <section className="surface-panel wabi-edge grid gap-5 p-5 md:p-7">
+      {!isSearching && recentTools.length > 0 && (
+        <section className="dashboard-shelf">
           <SectionHeader title="Recently Used" subtitle="Quickly jump back into your last tools." />
-          <div className="tool-grid">
+          <div className="dashboard-tool-row">
             {recentTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
           </div>
         </section>
       )}
 
-      <section className="surface-panel wabi-edge grid gap-6 p-5 md:p-7">
+      {!isSearching && <section className="dashboard-tools-shell">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h2 className="font-display text-3xl font-black">{query ? "Results" : "Tools"}</h2>
+            <h2 className="font-display text-3xl font-black">Tools</h2>
           </div>
           <span className="local-badge inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-black">
             <ShieldCheck size={16} />
             Local-first
           </span>
         </div>
-        {matches.length === 0 ? (
-          <EmptyState query={query} />
-        ) : (
-          <div className="grid gap-8">
-            {grouped.filter(([, items]) => items.length).map(([category, items]) => (
-              <ToolSection key={category} title={category} tools={items} searchMode={Boolean(query)} />
-            ))}
-          </div>
-        )}
-      </section>
+        <div className="grid gap-10">
+          {grouped.filter(([, items]) => items.length).map(([category, items]) => (
+            <ToolSection key={category} title={category} tools={items} />
+          ))}
+        </div>
+      </section>}
     </div>
+  );
+}
+
+function SearchResultCard({ tool }: { tool: Tool }) {
+  const Icon = iconForTool(tool);
+  return (
+    <a className="search-result-card" href={tool.route}>
+      <span className="search-result-icon"><Icon size={18} /></span>
+      <span className="min-w-0">
+        <span className="block truncate font-black">{tool.name}</span>
+        <span className="block truncate text-sm font-semibold text-neutral-500">{tool.category}</span>
+      </span>
+      <ChevronRight size={16} className="ml-auto shrink-0" />
+    </a>
   );
 }
 
@@ -283,7 +310,7 @@ function ToolSection({ title, tools: sectionTools, searchMode = false }: { title
   const Icon = categoryIcons[title] || Sparkles;
   const details = categoryDetails[title];
   return (
-    <section className="grid gap-4">
+    <section className="dashboard-tool-section">
       <div className="category-heading flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-start gap-3">
           <span className="category-icon"><Icon size={19} /></span>
@@ -298,7 +325,7 @@ function ToolSection({ title, tools: sectionTools, searchMode = false }: { title
           </a>
         )}
       </div>
-      <div className="tool-grid">
+      <div className="dashboard-tool-row">
         {sectionTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} compact />)}
       </div>
     </section>
