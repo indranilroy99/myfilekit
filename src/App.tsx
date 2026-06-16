@@ -49,7 +49,7 @@ const categoryIcons: Record<string, any> = {
 const categoryDetails: Record<string, { description: string; accent: string }> = {
   "PDF Tools": { description: "Merge, split, rotate, and create PDFs in your browser.", accent: "PDF" },
   "Image Tools": { description: "Compress, resize, convert, crop, and rotate everyday images.", accent: "Image" },
-  "Business Tools": { description: "Create clean invoices, receipts, quotes, and estimates.", accent: "Business" },
+  "Business Tools": { description: "Create polished invoices with templates, tax, payments, signatures, and brand controls.", accent: "Business" },
   "Signature Tools": { description: "Draw or type signatures and export them as PNG files.", accent: "Signature" },
   "Text & Data Tools": { description: "Format JSON, convert CSV, preview Markdown, and create PDFs from text.", accent: "Data" },
   "Privacy Tools": { description: "Clean supported image metadata locally in your browser.", accent: "Privacy" },
@@ -420,10 +420,10 @@ function ToolPage({ tool }: { tool: Tool }) {
         <aside className="grid content-start gap-4">
           <div className="surface-muted wabi-card-edge p-5">
             <p className="flex items-center gap-2 font-black"><BadgeCheck size={18} /> Navigation</p>
-            <div className="mt-4 grid gap-2">
-              <a className="side-link" href="#dashboard"><LayoutDashboard size={16} /> Dashboard</a>
-              <a className="side-link" href={categoryRoute(tool.category)}>All {tool.category}</a>
-              <button className="side-link text-left" type="button" onClick={() => history.back()}>Back to previous page</button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button className="nav-action nav-action-icon" type="button" aria-label="Go back" title="Back" onClick={() => history.back()}><ArrowLeft size={18} /></button>
+              <a className="nav-action nav-action-icon" aria-label="Dashboard" title="Dashboard" href="#dashboard"><LayoutDashboard size={18} /></a>
+              <a className="nav-action" href={categoryRoute(tool.category)}>All {tool.category}</a>
             </div>
           </div>
           {related.length > 0 && (
@@ -449,9 +449,9 @@ function Toolbar({ title, subtitle }: { title: string; subtitle: string }) {
         <p className="text-sm font-semibold text-neutral-500">{subtitle}</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button className="nav-action" type="button" onClick={() => history.back()}><ArrowLeft size={16} /> Back</button>
-        <button className="nav-action" type="button" onClick={() => history.forward()}>Forward <ArrowRight size={16} /></button>
-        <a className="nav-action" href="#dashboard"><LayoutDashboard size={16} /> Dashboard</a>
+        <button className="nav-action nav-action-icon" type="button" aria-label="Go back" title="Back" onClick={() => history.back()}><ArrowLeft size={18} /></button>
+        <button className="nav-action nav-action-icon" type="button" aria-label="Go forward" title="Forward" onClick={() => history.forward()}><ArrowRight size={18} /></button>
+        <a className="nav-action nav-action-icon" aria-label="Dashboard" title="Dashboard" href="#dashboard"><LayoutDashboard size={18} /></a>
       </div>
     </div>
   );
@@ -468,8 +468,6 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "resize-image-tool") return <ResizeImageTool tool={tool} />;
   if (tool.id === "crop-image-tool") return <CropImageTool tool={tool} />;
   if (tool.id === "rotate-flip-image-tool") return <RotateFlipImageTool tool={tool} />;
-  if (tool.id === "receipt-generator-tool") return <BusinessDocument title="Receipt Generator" name="receipt" labels={["Merchant", "Customer", "Payment method", "Reference"]} />;
-  if (tool.id === "quote-generator-tool") return <BusinessDocument title="Quote / Estimate Generator" name="quote" labels={["Business", "Client", "Valid until", "Terms"]} />;
   if (tool.id === "draw-signature-tool") return <DrawSignatureTool />;
   if (tool.id === "type-signature-tool") return <TypeSignatureTool />;
   if (tool.id === "text-to-pdf-tool") return <TextToPdfTool />;
@@ -712,20 +710,6 @@ function MetadataCleanerTool({ tool }: { tool: Tool }) {
   );
 }
 
-function BusinessDocument({ title, name, labels }: { title: string; name: string; labels: string[] }) {
-  const [fields, setFields] = useState(Object.fromEntries(labels.map((label) => [label, ""])));
-  const [items, setItems] = useState("Item, quantity, price\nConsulting, 1, 5000");
-  const [status, setStatus] = useState(initialStatus);
-  return <ToolForm status={status} onReset={() => { setFields(Object.fromEntries(labels.map((label) => [label, ""]))); setItems(""); setStatus(initialStatus); }}>
-    <div className="grid gap-3 sm:grid-cols-2">{labels.map((label) => <Input key={label} label={label} value={fields[label]} onChange={(value) => setFields({ ...fields, [label]: value })} />)}</div>
-    <Textarea label="Items" value={items} onChange={setItems} />
-    <PrimaryButton label={`Export ${name}`} onClick={() => runSafely(setStatus, async () => {
-      downloadText(printableDocument(title, fields, items), name, "html", "text/html;charset=utf-8");
-      return `${title} exported as HTML. Open it and print to PDF if needed.`;
-    })} />
-  </ToolForm>;
-}
-
 function DrawSignatureTool() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [color, setColor] = useState("#111111");
@@ -917,10 +901,32 @@ function FileHashTool({ tool }: { tool: Tool }) {
 }
 
 function InvoiceLauncher() {
-  return <div className="surface-card wabi-card-edge grid gap-4 p-5">
-    <p className="font-semibold leading-7 text-neutral-700">The invoice generator opens the full editor with templates, line items, tax, discount, TDS, payment details, logo controls, signatures, and print/PDF export.</p>
-    <a className="primary-button w-fit" href="/invoice-generator/index.html">Open Invoice Generator</a>
-  </div>;
+  const features = [
+    "Premium template library",
+    "Editable invoice, receipt, quote, and estimate wording",
+    "Tax, discount, TDS, GST/VAT, HSN/SAC, and reverse-charge fields",
+    "Bank, UPI, card, crypto, and custom payment instructions",
+    "Logo upload, signature drawing, watermark, footer, and print/PDF export",
+    "Show/hide controls for almost every invoice section",
+  ];
+
+  return (
+    <div className="surface-card wabi-card-edge grid gap-5 p-5">
+      <div>
+        <p className="text-xs font-black uppercase text-neutral-500">Premium business document editor</p>
+        <h3 className="mt-1 font-display text-2xl font-black">One invoice editor, fully customizable</h3>
+        <p className="mt-2 max-w-2xl font-semibold leading-7 text-neutral-700">
+          Receipts, quotes, and estimates are handled as invoice-style business documents inside the full editor, instead of split into weaker duplicate tools.
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {features.map((feature) => (
+          <div key={feature} className="surface-muted wabi-card-edge px-4 py-3 text-sm font-bold text-neutral-700">{feature}</div>
+        ))}
+      </div>
+      <a className="primary-button w-fit" href="/invoice-generator/index.html">Open premium invoice editor</a>
+    </div>
+  );
 }
 
 function ToolForm({ children, status, onReset }: { children: React.ReactNode; status: Status; onReset: () => void }) {
@@ -1093,15 +1099,4 @@ async function runSafely(setStatus: (status: Status) => void, task: () => Promis
 
 function imageExt(type: string) {
   return type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
-}
-
-function printableDocument(title: string, details: Record<string, string>, itemText: string) {
-  const rows = String(itemText || "").split(/\r?\n/).filter(Boolean).map((row) => row.split(",").map((cell) => cell.trim()));
-  const detailsHtml = Object.entries(details).map(([key, value]) => `<p><strong>${escapeHtml(key)}:</strong> ${escapeHtml(value)}</p>`).join("");
-  const rowsHtml = rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:system-ui;margin:40px;color:#111}table{width:100%;border-collapse:collapse}td{border-bottom:1px solid #ddd;padding:10px}</style></head><body><h1>${escapeHtml(title)}</h1>${detailsHtml}<table>${rowsHtml}</table></body></html>`;
-}
-
-function escapeHtml(value: string) {
-  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

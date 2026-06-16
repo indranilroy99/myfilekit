@@ -34,7 +34,7 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Click Dashboard and confirm it returns home.
 - Click PDF in the top navigation and confirm all PDF tools are listed.
 - Click Image in the top navigation and confirm all image tools are listed.
-- Open a tool and confirm Back, Forward, Dashboard, and category links are visible.
+- Open a tool and confirm icon-only Back, Forward, Dashboard, and category links are visible.
 - Use browser back and forward across two tool pages.
 
 ## PDF Tools
@@ -65,9 +65,8 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 
 ## Business And Signature Tools
 
-- Open the invoice generator and confirm the editor loads.
-- Export a receipt HTML file.
-- Export a quote HTML file.
+- Open the invoice generator and confirm the premium editor loads.
+- Confirm the invoice launcher mentions templates, tax/TDS, payment details, logo controls, signatures, and show/hide customization.
 - Draw a signature and download PNG.
 - Type a signature and download PNG.
 
