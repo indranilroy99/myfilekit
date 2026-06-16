@@ -306,14 +306,14 @@ button {
 
 .dashboard-page {
   display: grid;
-  gap: clamp(26px, 3vw, 46px);
+  gap: clamp(34px, 4vw, 64px);
 }
 
 .dashboard-shelf,
 .dashboard-tools-shell {
   display: grid;
-  gap: 22px;
-  padding-inline: clamp(2px, 1vw, 14px);
+  gap: 20px;
+  padding-inline: clamp(4px, 1.2vw, 18px);
 }
 
 .command-strip {
@@ -407,13 +407,15 @@ button {
 .dashboard-tool-row {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(240px, 310px);
-  gap: clamp(14px, 1.4vw, 22px);
+  grid-auto-columns: minmax(250px, 320px);
+  gap: clamp(16px, 1.8vw, 28px);
   overflow-x: auto;
   overscroll-behavior-inline: contain;
   scroll-snap-type: inline proximity;
-  padding: 4px clamp(4px, 1vw, 14px) 22px;
+  margin-inline: clamp(-12px, -1vw, -4px);
+  padding: 6px clamp(12px, 1.4vw, 22px) 30px;
   scrollbar-width: none;
+  mask-image: linear-gradient(90deg, transparent 0, #000 20px, #000 calc(100% - 34px), transparent 100%);
 }
 
 .dashboard-tool-row::-webkit-scrollbar {
@@ -481,10 +483,12 @@ button {
 }
 
 .tool-card {
-  border-color: rgba(255, 255, 255, .76);
+  border-color: transparent !important;
+  border-radius: 1.75rem !important;
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, .78), rgba(248, 250, 252, .58));
-  box-shadow: 0 18px 52px rgba(15, 23, 42, .06);
+    radial-gradient(circle at 18% 10%, rgba(255, 255, 255, .88), transparent 34%),
+    linear-gradient(145deg, rgba(255, 255, 255, .86), rgba(248, 250, 252, .6));
+  box-shadow: 0 18px 54px rgba(15, 23, 42, .07);
   backdrop-filter: blur(18px);
 }
 
@@ -499,7 +503,8 @@ button {
 
 .tool-card:hover {
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, .92), rgba(248, 250, 252, .74));
+    radial-gradient(circle at 18% 10%, rgba(255, 255, 255, .94), transparent 34%),
+    linear-gradient(145deg, rgba(255, 255, 255, .94), rgba(248, 250, 252, .78));
   box-shadow: var(--shadow-lift);
 }
 
@@ -525,8 +530,8 @@ button {
 }
 
 .tag-badge {
-  border: 1px solid rgba(15, 23, 42, .06);
-  background: rgba(255, 255, 255, .62);
+  border: 1px solid rgba(15, 23, 42, .07);
+  background: rgba(255, 255, 255, .56);
   color: var(--stone);
 }
 
@@ -587,25 +592,36 @@ button {
 .tool-arrow {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  gap: 0;
   border-radius: 999px;
+  background: rgba(255, 255, 255, .54);
   color: var(--stone);
   font-size: 12px;
   font-weight: 900;
-  opacity: .85;
-  transition: color .18s ease, opacity .18s ease;
+  opacity: .78;
+  transition: color .18s ease, opacity .18s ease, transform .18s ease, background .18s ease;
 }
 
 .tool-card:hover .tool-arrow,
 .tool-card:focus-visible .tool-arrow {
   color: var(--foreground);
   opacity: 1;
+  transform: translateX(2px);
+  background: rgba(255, 255, 255, .8);
 }
 
 .hero-panel {
   position: relative;
   min-height: 500px;
-  border-color: rgba(255, 255, 255, .8);
+  border-color: transparent;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, .9), transparent 44%),
+    radial-gradient(circle at 18% 24%, rgba(219, 234, 254, .55), transparent 32%),
+    linear-gradient(145deg, rgba(255, 255, 255, .78), rgba(248, 250, 252, .58));
+  box-shadow: 0 34px 90px rgba(15, 23, 42, .08);
 }
 
 .hero-panel-searching {
@@ -618,8 +634,8 @@ button {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at 50% 5%, rgba(255, 255, 255, .85), transparent 42%),
-    linear-gradient(135deg, rgba(15, 23, 42, .055), transparent 50%);
+    radial-gradient(circle at 50% 5%, rgba(255, 255, 255, .7), transparent 42%),
+    linear-gradient(135deg, rgba(15, 23, 42, .025), transparent 50%);
   background-size: auto;
 }
 
@@ -1193,7 +1209,7 @@ html.dark .tool-form-status {
 }
 
 html.dark .surface-panel {
-  background: linear-gradient(145deg, rgba(15, 23, 42, .86), rgba(15, 23, 42, .62));
+  background: linear-gradient(145deg, rgba(15, 23, 42, .74), rgba(15, 23, 42, .42));
 }
 
 html.dark .surface-card,
@@ -1214,13 +1230,18 @@ html.dark .tool-form-status {
 }
 
 html.dark .hero-panel {
-  border-color: rgba(148, 163, 184, .18);
+  border-color: transparent;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(37, 99, 235, .2), transparent 42%),
+    radial-gradient(circle at 12% 16%, rgba(59, 130, 246, .14), transparent 34%),
+    linear-gradient(145deg, rgba(15, 23, 42, .7), rgba(8, 13, 24, .42));
+  box-shadow: 0 36px 100px rgba(0, 0, 0, .34);
 }
 
 html.dark .hero-panel::before {
   background:
-    radial-gradient(circle at 50% 5%, rgba(59, 130, 246, .13), transparent 42%),
-    linear-gradient(135deg, rgba(148, 163, 184, .08), transparent 50%);
+    radial-gradient(circle at 50% 5%, rgba(96, 165, 250, .12), transparent 42%),
+    linear-gradient(135deg, rgba(148, 163, 184, .045), transparent 50%);
 }
 
 html.dark .hero-neural {
@@ -1261,20 +1282,22 @@ html.dark .category-filter {
 html.dark .tool-card {
   --backdrop: rgba(12, 18, 32, .86);
   --backup-border: rgba(148, 163, 184, .16);
-  --outer: .55;
-  background-color: rgba(12, 18, 32, .9) !important;
+  --outer: .34;
+  background-color: rgba(12, 18, 32, .76) !important;
   background-image:
     radial-gradient(
-      240px 220px at calc(var(--x, 0) * 1px) calc(var(--y, 0) * 1px),
-      hsl(var(--hue, 210) 92% 68% / .13),
+      260px 240px at calc(var(--x, 0) * 1px) calc(var(--y, 0) * 1px),
+      hsl(var(--hue, 210) 92% 68% / .09),
       transparent 72%
     ),
-    linear-gradient(145deg, rgb(12, 18, 32), rgb(17, 25, 44)) !important;
-  border-color: rgba(148, 163, 184, .18) !important;
+    radial-gradient(circle at 20% 10%, rgba(148, 197, 255, .12), transparent 34%),
+    linear-gradient(145deg, rgba(16, 24, 40, .88), rgba(11, 18, 32, .72)) !important;
+  border-color: transparent !important;
+  border-radius: 1.85rem !important;
   color: #f8fafc !important;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .06),
-    0 22px 64px rgba(0, 0, 0, .34);
+    0 24px 68px rgba(0, 0, 0, .28);
 }
 
 html.dark .tool-card::before {
@@ -1299,8 +1322,8 @@ html.dark .tool-card::after {
 }
 
 html.dark .tool-card .glow-card-inner {
-  opacity: .36;
-  filter: blur(calc(var(--border-size) * 5));
+  opacity: .18;
+  filter: blur(calc(var(--border-size) * 7));
 }
 
 html.dark .tool-card-link {
@@ -1316,7 +1339,8 @@ html.dark .tool-card .tool-description {
 }
 
 html.dark .tool-card .tool-arrow {
-  color: #8fa3bf;
+  background: rgba(148, 163, 184, .08);
+  color: #9fb0c8;
 }
 
 html.dark .tool-card:hover,
@@ -1325,8 +1349,8 @@ html.dark .category-card:focus-visible,
 html.dark .why-card:hover,
 html.dark .search-result-card:hover,
 html.dark .search-result-card:focus-visible {
-  border-color: rgba(96, 165, 250, .38);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, .42);
+  border-color: rgba(96, 165, 250, .22);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .38);
 }
 
 html.dark .tag-badge,
@@ -1349,8 +1373,8 @@ html.dark .pagination-page-button {
 }
 
 html.dark .tool-card .tag-badge {
-  border-color: rgba(148, 163, 184, .18);
-  background: rgba(226, 232, 240, .08);
+  border-color: rgba(148, 163, 184, .14);
+  background: rgba(226, 232, 240, .07);
   color: #dbeafe;
   box-shadow: none;
 }
