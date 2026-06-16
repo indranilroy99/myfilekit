@@ -22,6 +22,7 @@ import {
   Zap,
 } from "lucide-react";
 import { FlowButton } from "@/components/ui/flow-button";
+import { Icons } from "@/components/ui/icons";
 import { LimelightNav, type NavItem } from "@/components/ui/limelight-nav";
 import { NeuralNoise } from "@/components/ui/neural-noise";
 import { GlowCard, type GlowColor } from "@/components/ui/spotlight-card";
@@ -359,6 +360,10 @@ function Footer() {
     <footer className="site-footer">
       <span>MyFileKit</span>
       <span>Local-first file tools for PDF, image, business, signature, privacy, and data workflows.</span>
+      <a className="footer-link" href="https://github.com/indranilroy99/myfilekit" target="_blank" rel="noreferrer" aria-label="MyFileKit on GitHub">
+        <Icons.gitHub className="h-4 w-4" />
+        GitHub
+      </a>
     </footer>
   );
 }

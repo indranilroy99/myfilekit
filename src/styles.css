@@ -995,6 +995,20 @@ button {
   font-weight: 800;
 }
 
+.footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  text-decoration: none;
+  transition: color .2s ease, opacity .2s ease;
+}
+
+.footer-link:hover,
+.footer-link:focus-visible {
+  color: var(--primary);
+}
+
 :where(.rounded-full, .rounded-3xl, .rounded-2xl, .rounded-xl) {
   border-radius: var(--radius);
 }
