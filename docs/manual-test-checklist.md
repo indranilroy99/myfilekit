@@ -13,12 +13,14 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 
 - Confirm the MyFileKit text wordmark renders in the header and hero without a separate icon mark.
 - Confirm the header uses user-facing product copy and does not show release/version labels.
-- Confirm the dashboard uses the premium utility theme: light cinematic background, glass surfaces, softer depth, refined typography, and fewer hard divider lines.
-- Confirm the dashboard hero includes a subtle local WebGL neural-noise background behind the product copy.
+- Confirm the dashboard uses the premium utility theme: warm light background, clean cards, subtle borders, softer depth, refined typography, and fewer hard divider lines.
+- Confirm the dashboard hero keeps visual texture subtle and does not overpower the product copy.
 - Confirm the main dashboard search is centered inside the hero and search results appear directly below it.
-- Confirm the compact product trust strip appears below the hero.
-- Confirm the category rail links to each tool category.
-- Confirm Featured Workflows appears on the dashboard, but the full tool library is not dumped on the landing page.
+- Confirm Popular Tools appears below the hero.
+- Confirm Recently Used stays hidden until a tool has been opened.
+- Confirm category overview cards link to each tool category.
+- Confirm the privacy and trust strip appears below the category cards.
+- Confirm the full tool library is not dumped on the landing page.
 - Click Browse tools and confirm the full searchable tool library opens.
 - Open one tool, return to the dashboard, and confirm Recently Used appears.
 - Search `merge pdf` and confirm Merge PDF is shown.
@@ -28,7 +30,7 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Click a quick search chip and confirm it filters the dashboard.
 - Press `Cmd+K` on macOS or `Ctrl+K` on Windows/Linux and confirm the dashboard search receives focus.
 - Press `Escape` inside the dashboard search and confirm the query clears.
-- On desktop, open the header search dock, search `json`, press Enter, and confirm the dashboard filters to JSON tools.
+- Search `json`, press Enter, and confirm the best matching JSON tool route opens.
 - Search a nonsense query and confirm the empty state appears with suggested searches.
 - Click every visible card and confirm it opens a real tool route.
 - Open a category page, use the category search field, and confirm the visible cards filter within that category.

@@ -153,9 +153,9 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at 16% 8%, rgba(148, 163, 184, .22), transparent 30%),
-    radial-gradient(circle at 86% 2%, rgba(15, 23, 42, .08), transparent 26%),
-    linear-gradient(180deg, #ffffff 0%, #f7f8fb 42%, #f2f4f8 100%),
+    radial-gradient(circle at 16% 8%, rgba(59, 130, 246, .08), transparent 32%),
+    radial-gradient(circle at 86% 2%, rgba(20, 184, 166, .08), transparent 28%),
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 42%, #f3f6fa 100%),
     var(--app-bg);
   background-size: auto;
 }
@@ -166,7 +166,7 @@ body::before {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  opacity: .16;
+  opacity: .08;
   background-image:
     linear-gradient(120deg, transparent 0 46%, rgba(15, 23, 42, .04) 46% 47%, transparent 47%),
     radial-gradient(circle at 50% 0%, rgba(255, 255, 255, .82), transparent 44%);
@@ -228,13 +228,13 @@ button {
 }
 
 .surface-panel {
-  background: linear-gradient(145deg, rgba(255, 255, 255, .82), rgba(248, 250, 252, .66));
+  background: linear-gradient(145deg, rgba(255, 255, 255, .9), rgba(248, 250, 252, .76));
   box-shadow: var(--shadow-soft);
 }
 
 .surface-card {
-  background: rgba(255, 255, 255, .68);
-  box-shadow: 0 16px 48px rgba(15, 23, 42, .055);
+  background: rgba(255, 255, 255, .82);
+  box-shadow: 0 16px 42px rgba(15, 23, 42, .045);
 }
 
 .surface-muted {
@@ -308,9 +308,9 @@ button {
 
 .command-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: clamp(10px, 1.2vw, 16px);
-  padding-inline: clamp(2px, 1vw, 14px);
+  padding-inline: 0;
 }
 
 .command-stat {
@@ -418,7 +418,7 @@ button {
   border-color: rgba(255, 255, 255, .76);
   background:
     linear-gradient(145deg, rgba(255, 255, 255, .78), rgba(248, 250, 252, .58));
-  box-shadow: 0 18px 60px rgba(15, 23, 42, .07);
+  box-shadow: 0 18px 52px rgba(15, 23, 42, .06);
   backdrop-filter: blur(18px);
 }
 
@@ -435,7 +435,7 @@ button {
 .tool-grid {
   display: grid;
   gap: clamp(14px, 1.4vw, 22px);
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  grid-template-columns: 1fr;
 }
 
 .tool-description {
@@ -447,12 +447,6 @@ button {
 
 .tool-description-compact {
   -webkit-line-clamp: 1;
-}
-
-@media (min-width: 1680px) {
-  .tool-grid {
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  }
 }
 
 .tag-badge {
@@ -535,7 +529,7 @@ button {
 
 .hero-panel {
   position: relative;
-  min-height: 510px;
+  min-height: 500px;
   border-color: rgba(255, 255, 255, .8);
 }
 
@@ -562,8 +556,9 @@ button {
   pointer-events: none;
   z-index: 0;
   mix-blend-mode: multiply;
-  filter: blur(.2px) saturate(.72);
-  mask-image: radial-gradient(ellipse at 50% 82%, #000 0 24%, rgba(0, 0, 0, .65) 44%, transparent 78%);
+  filter: blur(.6px) saturate(.42);
+  opacity: .7;
+  mask-image: radial-gradient(ellipse at 50% 86%, #000 0 16%, rgba(0, 0, 0, .42) 36%, transparent 72%);
 }
 
 .hero-neural canvas {
@@ -850,6 +845,91 @@ button {
   padding-top: 10px;
 }
 
+.category-overview-grid,
+.why-grid {
+  display: grid;
+  gap: clamp(14px, 1.4vw, 22px);
+  grid-template-columns: 1fr;
+}
+
+.category-card,
+.why-card,
+.tool-form-status {
+  border: 1px solid rgba(255, 255, 255, .78);
+  background: linear-gradient(145deg, rgba(255, 255, 255, .82), rgba(248, 250, 252, .66));
+  box-shadow: 0 18px 52px rgba(15, 23, 42, .055);
+  backdrop-filter: blur(18px);
+}
+
+.category-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  min-height: 132px;
+  border-radius: var(--radius);
+  color: var(--ink);
+  padding: 18px;
+  text-decoration: none;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.category-card:hover,
+.category-card:focus-visible,
+.why-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(15, 23, 42, .16);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .09);
+}
+
+.why-card {
+  min-height: 130px;
+  border-radius: var(--radius);
+  padding: 22px;
+}
+
+.tool-page-panel {
+  max-width: none;
+}
+
+.tool-form-grid {
+  display: grid;
+  gap: clamp(16px, 2vw, 26px);
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.tool-form-actions {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.tool-form-status {
+  display: grid;
+  gap: 14px;
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.related-tools-section {
+  display: grid;
+  gap: 18px;
+}
+
+.site-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid rgba(15, 23, 42, .06);
+  padding: 24px 4px 0;
+  color: var(--stone);
+  font-size: 14px;
+  font-weight: 800;
+}
+
 :where(.rounded-full, .rounded-3xl, .rounded-2xl, .rounded-xl) {
   border-radius: var(--radius);
 }
@@ -893,17 +973,66 @@ button {
 }
 
 @media (max-width: 1024px) {
-  .command-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .hero-panel {
+    min-height: 450px;
   }
 }
 
 @media (max-width: 640px) {
-  .command-strip {
-    grid-template-columns: 1fr;
-  }
-
   .command-stat {
     min-height: 76px;
+  }
+
+  .spotlight-search {
+    min-height: 64px;
+    padding: 10px;
+  }
+
+  .search-submit-button {
+    width: 42px;
+    height: 42px;
+    border-radius: 1rem;
+  }
+
+  .spotlight-search input {
+    font-size: 16px;
+  }
+}
+
+@media (min-width: 640px) {
+  .tool-grid,
+  .category-overview-grid,
+  .why-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .tool-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .category-overview-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tool-form-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  }
+}
+
+@media (min-width: 1280px) {
+  .tool-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1536px) {
+  .tool-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .category-overview-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }

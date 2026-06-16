@@ -4,7 +4,7 @@ MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, si
 
 ## Version
 
-Current app version: `3.0.6`
+Current app version: `3.0.7`
 
 Use the version scripts for future changes:
 
@@ -31,15 +31,15 @@ Only working tools are shown in the dashboard. Planned tools stay out of the pro
 ## UX
 
 - Dashboard-first command center layout that keeps the landing page focused.
-- Centered Spotlight-style dashboard search with inline results.
-- Compact product trust strip for speed, organization, privacy, and search-first workflow.
-- Category rail for fast movement across PDF, image, business, signature, privacy, text/data, and developer tools.
-- Featured workflows and recently used tools for faster repeat work.
+- Centered Spotlight-style dashboard search with inline results and quick action chips.
+- Popular tools and recently used tools for faster repeat work.
+- Category overview cards for PDF, image, business, signature, privacy, text/data, and developer tools.
+- Privacy and trust strip for local-first processing, no unnecessary uploads, organized tools, and search-first workflow.
 - Dedicated Browse Tools page for the full searchable tool library.
 - Searchable category pages for narrowing tools inside one workflow family.
 - Tool pages include Back, Forward, Dashboard, category navigation, and related tools.
 - Clean text-only MyFileKit wordmark in the product shell.
-- Premium utility visual system with a light cinematic background, glass surfaces, softer depth, refined typography, and fewer hard divider lines.
+- Premium utility visual system with a warm light background, clean cards, subtle borders, refined typography, and fewer hard divider lines.
 
 ## Privacy Model
 
@@ -158,8 +158,6 @@ npm run preflight
 ## Dashboard Search
 
 The dashboard search filters tools by name, category, description, badge, and keyword.
-
-The header also includes a compact expanding search dock on desktop. Submitting a query from that dock returns to the dashboard and applies the same tool filter.
 
 Use `Cmd+K` on macOS or `Ctrl+K` on Windows/Linux to focus the dashboard search. Opening a tool adds it to the Recently Used section stored in browser `localStorage`.
 
