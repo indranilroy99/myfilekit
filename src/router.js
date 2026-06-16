@@ -11,6 +11,7 @@ export function categoryRoute(category) {
 export function routeForHash(hash) {
   const id = String(hash || "#dashboard").replace(/^#/, "") || "dashboard";
   if (id === "dashboard") return { type: "dashboard" };
+  if (id === "browse-tools") return { type: "browse" };
   if (id.startsWith("category-")) {
     const category = [...new Set(tools.map((tool) => tool.category))].find((item) => categorySlug(item) === id.replace("category-", ""));
     return category ? { type: "category", category } : { type: "missing", hash };

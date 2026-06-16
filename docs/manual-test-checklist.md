@@ -18,7 +18,8 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Confirm the main dashboard search is centered inside the hero and search results appear directly below it.
 - Confirm the compact product trust strip appears below the hero.
 - Confirm the category rail links to each tool category.
-- Confirm Featured Workflows appears above the full tool library.
+- Confirm Featured Workflows appears on the dashboard, but the full tool library is not dumped on the landing page.
+- Click Browse tools and confirm the full searchable tool library opens.
 - Open one tool, return to the dashboard, and confirm Recently Used appears.
 - Search `merge pdf` and confirm Merge PDF is shown.
 - Search `compress image` and confirm Compress Image is shown.
@@ -31,6 +32,7 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Search a nonsense query and confirm the empty state appears with suggested searches.
 - Click every visible card and confirm it opens a real tool route.
 - Open a category page, use the category search field, and confirm the visible cards filter within that category.
+- Open Browse Tools, search `metadata`, and confirm the tool library filters across categories.
 
 ## Navigation
 
