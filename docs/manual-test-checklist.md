@@ -50,12 +50,16 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Extract pages from one PDF using `1` or `1-2`.
 - Delete one page from a multi-page PDF.
 - Rotate a PDF and download the result.
+- Add page numbers to a PDF and download the result.
+- Add a text watermark to a PDF and download the result.
 - Convert two images into a PDF.
 
 ## Image Tools
 
 - Compress a JPG or PNG and confirm a new image downloads.
+- Batch compress two images and confirm both outputs download.
 - Resize an image with aspect ratio enabled.
+- Batch resize two images and confirm both outputs download.
 - Convert one image to another supported format.
 - Crop an image with numeric controls.
 - Rotate and flip an image.
@@ -70,6 +74,7 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Click Clean metadata and confirm before/after file size appears.
 - Download the cleaned image and confirm the filename ends with `-cleaned`.
 - Upload an unsupported file such as PDF or TXT and confirm it is rejected clearly.
+- Open PDF Metadata Cleaner, upload a PDF, clean it, and confirm a `-metadata-cleaned.pdf` file downloads.
 - Check Metadata Cleaner on mobile and confirm upload, file info, result, and action buttons do not overlap.
 
 ## Business And Signature Tools
@@ -86,8 +91,16 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Format and minify valid JSON.
 - Convert CSV to JSON.
 - Convert JSON array data to CSV.
+- Convert JSON to YAML and download the YAML output.
+- Encode and decode URL text.
+- Compare two text blocks and download the diff.
+- Count words, characters, lines, and reading time.
 - Encode and decode Base64 text.
 - Generate a SHA-256 hash for a local file.
+- Compare a file SHA-256 hash against an expected value.
+- Generate a local password and copy it.
+- Generate a QR code and download PNG.
+- Clean unsafe filenames and download the list.
 
 ## Responsive Checks
 

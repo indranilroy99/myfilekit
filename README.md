@@ -4,7 +4,7 @@ MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, si
 
 ## Version
 
-Current app version: `3.0.19`
+Current app version: `3.0.20`
 
 Use the version scripts for future changes:
 
@@ -18,13 +18,13 @@ Use patch versions such as `2.0.1` and `2.0.2` for small fixes. Use a major vers
 
 ## Working Tools
 
-- PDF: Merge PDF, Split / Extract PDF Pages, Delete PDF Pages, Rotate PDF Pages, Images to PDF.
-- Image: Compress Image, Resize Image, Convert Image, Crop Image, Rotate / Flip Image.
+- PDF: Merge PDF, Split / Extract PDF Pages, Delete PDF Pages, Rotate PDF Pages, Add PDF Page Numbers, Watermark PDF, Images to PDF.
+- Image: Compress Image, Batch Compress Images, Resize Image, Batch Resize Images, Convert Image, Crop Image, Rotate / Flip Image.
 - Business: Invoice Generator with premium templates, payment details, tax/TDS fields, signatures, logo controls, and customizable invoice-style document wording.
 - Signature: Draw Signature, Type Signature.
-- Text & Data: Text to PDF, Markdown Preview, JSON Formatter, CSV to JSON, JSON to CSV.
-- Privacy: EXIF & Metadata Cleaner inspects EXIF, XMP, ICC, GPS, and container metadata in supported image files, exports a local JSON report, and re-encodes a cleaned copy in your browser.
-- Developer Utilities: Base64 Encode / Decode, File Hash Generator.
+- Text & Data: Text to PDF, Markdown Preview, JSON Formatter, CSV to JSON, JSON to CSV, JSON to YAML, URL Encode / Decode, Text Diff Checker, Word Counter.
+- Privacy: EXIF & Metadata Cleaner inspects EXIF, XMP, ICC, GPS, and container metadata in supported image files, exports a local JSON report, and re-encodes a cleaned copy in your browser. PDF Metadata Cleaner removes common PDF document metadata fields.
+- Developer Utilities: Base64 Encode / Decode, File Hash Generator, Hash Compare, Password Generator, QR Code Generator, Filename Cleaner.
 
 Only working tools are shown in the dashboard. Planned tools stay out of the product UI until they have real implementations.
 
@@ -151,7 +151,7 @@ npm run preflight
 - `dev` starts the Vite development server.
 - `build` creates a production Vite build.
 - `check` validates required files, JavaScript syntax, TypeScript, Vite build, and invoice inline script syntax.
-- `test` runs Node.js tests for registry, routing helpers, CSV/JSON helpers, filename helpers, file validation, and PDF services.
+- `test` runs Node.js tests for registry, routing helpers, CSV/JSON helpers, text utilities, filename helpers, file validation, metadata parsing, and PDF services.
 - `security:audit` validates local security assumptions and runs `npm audit`.
 - `preflight` runs the release gate.
 
@@ -176,12 +176,26 @@ Try:
 - `metadata`
 - `exif`
 - `privacy`
+- `page numbers`
+- `watermark`
+- `yaml`
+- `url encode`
+- `diff`
+- `word count`
+- `password`
+- `qr`
+- `filename`
 
 ## Roadmap
 
 These items are planned for future releases and are not shown as working tools until implemented:
 
-- PDF metadata viewer and cleaner
+- Visual PDF page thumbnails and drag-and-drop page reordering
+- True PDF compression with measurable output controls
+- Password protect/unlock PDF support with a reliable encryption engine
+- PDF form filler and visual PDF signer
+- Background removal with a transparent local or explicitly disclosed service path
+- Word/PDF and Office document conversion
 - Office document metadata cleaner
 - Batch metadata cleaner
 - Metadata editing where format support is reliable

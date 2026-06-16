@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { tools, categories } from "../src/registry/tools.registry.js";
 import { csvToJson, jsonToCsv } from "../src/services/csv.service.js";
-import { deletePdfPages, extractPdfPages, mergePdfs, rotatePdfPages, textToPdf } from "../src/services/pdf.service.js";
+import { addPdfPageNumbers, cleanPdfMetadata, deletePdfPages, extractPdfPages, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "../src/services/pdf.service.js";
 import { validateFiles } from "../src/services/file-validator.js";
 import { inspectImageMetadataBuffer } from "../src/services/metadata.service.js";
+import { cleanFilenameList, diffToText, generatePassword, jsonToYaml, lineDiff, textStats, urlDecode, urlEncode } from "../src/services/text-tools.service.js";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "../src/utils/format.js";
 import { safeFilename, withExtension } from "../src/utils/safe-filename.js";
 import { routeForHash } from "../src/router.js";
@@ -155,6 +156,24 @@ test("PDF services create valid local outputs", async () => {
 
   const rotated = await window.PDFLib.PDFDocument.load(await rotatePdfPages(mergedFile, [0], 90));
   assert.equal(rotated.getPage(0).getRotation().angle, 90);
+
+  const numbered = await window.PDFLib.PDFDocument.load(await addPdfPageNumbers(mergedFile, { prefix: "Page " }));
+  assert.equal(numbered.getPageCount(), 2);
+
+  const watermarked = await window.PDFLib.PDFDocument.load(await watermarkPdf(mergedFile, "DRAFT"));
+  assert.equal(watermarked.getPageCount(), 2);
+
+  const cleaned = await window.PDFLib.PDFDocument.load(await cleanPdfMetadata(mergedFile));
+  assert.equal(cleaned.getPageCount(), 2);
+});
+
+test("text and utility tools transform data locally", () => {
+  assert.match(jsonToYaml('{"name":"MyFileKit","tools":["pdf","image"],"local":true}'), /name: MyFileKit/);
+  assert.equal(urlDecode(urlEncode("a b+c")), "a b+c");
+  assert.deepEqual(textStats("one two\nthree"), { words: 3, characters: 13, charactersNoSpaces: 11, lines: 2, readingMinutes: 1 });
+  assert.equal(diffToText(lineDiff("same\nold", "same\nnew")), "  same\n- old\n+ new");
+  assert.equal(cleanFilenameList("bad file?.pdf"), "bad-file.pdf");
+  assert.equal(generatePassword({ length: 24, symbols: true }).length, 24);
 });
 
 function makePngWithText(keyword, value) {
