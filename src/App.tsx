@@ -230,7 +230,7 @@ function Dashboard() {
               </div>
             )}
             <p className="text-sm font-bold text-neutral-500">
-              {query ? `${matches.length} matching tool${matches.length === 1 ? "" : "s"}` : `${tools.length} tools across ${categories.length} categories`}
+              {query ? `${matches.length} matching tool${matches.length === 1 ? "" : "s"}` : "Choose a task below or search by what you need to do."}
             </p>
             {isSearching && (
               <div className="hero-search-results" aria-live="polite">
@@ -291,10 +291,10 @@ function Dashboard() {
 
 function ProductCommandStrip() {
   const stats = [
-    { icon: Zap, label: `${tools.length} working tools`, note: "No placeholder cards" },
-    { icon: Layers3, label: `${categories.length} focused categories`, note: "PDF, image, business, privacy, data" },
-    { icon: ShieldCheck, label: "Local-first processing", note: "No server upload path" },
-    { icon: FolderSearch, label: "Search-first workflow", note: "Find tools by task or file type" },
+    { icon: Zap, label: "Fast everyday workflows", note: "Handle common file tasks in seconds" },
+    { icon: Layers3, label: "Everything organized", note: "PDF, image, business, privacy, and data" },
+    { icon: ShieldCheck, label: "Private by design", note: "Supported files stay in your browser" },
+    { icon: FolderSearch, label: "Search-first workspace", note: "Find the right tool by task or file type" },
   ];
   return (
     <section className="command-strip" aria-label="Product highlights">
