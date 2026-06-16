@@ -759,11 +759,11 @@ button {
 
 .brand-mark-aura {
   position: absolute;
-  inset: 7px;
-  border-radius: 1.2rem;
-  background: linear-gradient(135deg, #101828, #475467);
-  opacity: .1;
-  filter: blur(8px);
+  inset: 9px;
+  border-radius: 1.35rem;
+  background: linear-gradient(135deg, #0f7fbd, #12975b);
+  opacity: .16;
+  filter: blur(10px);
   animation: none;
 }
 
@@ -777,59 +777,56 @@ button {
   animation: brand-float 5.6s ease-in-out infinite;
 }
 
-.brand-logo-ring,
-.brand-logo-ring-gap {
-  fill: none;
-  stroke: url("#mfk-earth");
-  stroke-width: 4.4;
-  stroke-linecap: round;
+.brand-logo-tile {
+  stroke: rgba(255, 255, 255, .22);
+  stroke-width: 1.4;
 }
 
-.brand-logo-ring-gap {
-  opacity: .76;
-}
-
-.brand-logo-sheet {
+.brand-logo-paper,
+.brand-logo-back-file,
+.brand-logo-folder,
+.brand-logo-folder-tab {
   stroke-linejoin: round;
 }
 
-.brand-logo-sheet-back {
-  fill: var(--muted);
-  stroke: var(--border);
+.brand-logo-back-file {
+  opacity: .72;
+}
+
+.brand-logo-paper {
+  stroke: rgba(16, 24, 40, .18);
   stroke-width: 1.6;
 }
 
-.brand-logo-sheet-front {
-  fill: url("#mfk-paper");
-  stroke: url("#mfk-earth");
-  stroke-width: 2.8;
+.brand-logo-folder,
+.brand-logo-folder-tab {
+  stroke: rgba(255, 255, 255, .18);
+  stroke-width: 1.5;
 }
 
-.brand-logo-fold {
-  fill: var(--muted);
-  stroke: url("#mfk-earth");
-  stroke-width: 2.8;
-  stroke-linejoin: round;
-}
-
-.brand-logo-mark,
-.brand-logo-line {
+.brand-logo-folder-lip,
+.brand-logo-paper-line {
   fill: none;
-  stroke: url("#mfk-ink");
+  stroke-linecap: round;
+}
+
+.brand-logo-folder-lip {
+  stroke: rgba(255, 255, 255, .42);
+  stroke-width: 2.5;
+}
+
+.brand-logo-paper-line {
+  stroke: rgba(16, 24, 40, .28);
+  stroke-width: 3;
+}
+
+.brand-logo-check {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 7;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-
-.brand-logo-mark {
-  stroke-width: 7;
-}
-
-.brand-logo-line {
-  stroke-width: 5;
-}
-
-.brand-logo-dot {
-  fill: var(--primary);
+  filter: drop-shadow(0 3px 5px rgba(15, 23, 42, .22));
 }
 
 .field-input {
