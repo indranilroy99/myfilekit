@@ -848,8 +848,35 @@ button {
   line-height: 1;
 }
 
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: clamp(18px, 3vw, 44px);
+  border: 1px solid rgba(255, 255, 255, .72);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, .78), rgba(248, 250, 252, .56));
+  box-shadow: 0 18px 52px rgba(15, 23, 42, .055);
+  padding: clamp(20px, 2.4vw, 34px);
+  backdrop-filter: blur(18px);
+}
+
+.page-header-icon {
+  width: clamp(48px, 4vw, 62px);
+  height: clamp(48px, 4vw, 62px);
+  flex: 0 0 auto;
+}
+
+.page-title {
+  font-size: clamp(2.25rem, 4vw, 4.75rem);
+  line-height: .94;
+  letter-spacing: 0;
+}
+
 .page-toolbar {
   min-height: 44px;
+  flex: 0 0 auto;
 }
 
 .primary-button,
@@ -1062,6 +1089,15 @@ button {
 }
 
 @media (max-width: 640px) {
+  .page-header {
+    flex-direction: column;
+  }
+
+  .page-toolbar {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .command-stat {
     min-height: 76px;
   }

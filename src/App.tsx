@@ -469,21 +469,14 @@ function BrowseToolsPage() {
 
   return (
     <div className="grid gap-6">
-      <Toolbar />
+      <PageHeader
+        eyebrow="Tool library"
+        title="Browse tools"
+        subtitle="Browse by category or search by task, file type, or outcome."
+        icon={FolderSearch}
+        badges={["Local-first", `${visibleTools.length} tools`]}
+      />
       <section className="surface-panel wabi-edge p-6">
-        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="moss-text text-xs font-black uppercase">Tool library</p>
-            <h1 className="font-display text-4xl font-black">Browse tools</h1>
-            <p className="mt-1 max-w-2xl font-semibold text-neutral-500">
-              Browse by category or search by task, file type, or outcome.
-            </p>
-          </div>
-          <span className="local-badge inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-black">
-            <ShieldCheck size={16} />
-            Local-first
-          </span>
-        </div>
         <div className="category-filter mb-5 flex items-center gap-3">
           <Search size={18} />
           <input
@@ -523,16 +516,14 @@ function CategoryPage({ category }: { category: string }) {
   const details = categoryDetails[category];
   return (
     <div className="grid gap-6">
-      <Toolbar />
+      <PageHeader
+        eyebrow={details?.accent || "Tools"}
+        title={category}
+        subtitle={details?.description || "Choose any working tool below."}
+        icon={Icon}
+        badges={[`${categoryTools.length} workflows`, "Local processing"]}
+      />
       <section className="surface-panel wabi-edge p-6">
-        <div className="mb-6 flex items-start gap-3">
-          <span className="icon-tile grid h-14 w-14 place-items-center rounded-2xl"><Icon size={24} /></span>
-          <div>
-            {details && <p className="moss-text text-xs font-black uppercase">{details.accent}</p>}
-            <h1 className="font-display text-4xl font-black">{category}</h1>
-            <p className="mt-1 max-w-2xl font-semibold text-neutral-500">{details?.description || "Choose any working tool below."}</p>
-          </div>
-        </div>
         <div className="category-filter mb-5 flex items-center gap-3">
           <Search size={18} />
           <input
@@ -561,24 +552,15 @@ function ToolPage({ tool }: { tool: Tool }) {
 
   return (
     <div className="grid gap-6">
-      <Toolbar />
+      <PageHeader
+        eyebrow={tool.category}
+        title={tool.name}
+        subtitle={tool.description}
+        icon={Icon}
+        badges={["Local processing", fileTypeLabel(tool), multiFileLabel(tool), tool.category].filter(Boolean)}
+      />
       <section className="grid gap-6">
         <div className="surface-panel wabi-edge tool-page-panel p-5 md:p-7">
-          <div className="mb-6 flex items-start gap-4">
-            <span className="icon-tile grid h-14 w-14 place-items-center rounded-2xl"><Icon size={24} /></span>
-            <div>
-              <p className="moss-text text-xs font-black uppercase">Dashboard / {tool.category}</p>
-              <h1 className="font-display text-4xl font-black">{tool.name}</h1>
-              <p className="mt-2 max-w-2xl font-semibold leading-7 text-neutral-600">{tool.description}</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span className="local-badge rounded-full px-3 py-1 text-xs font-black uppercase">Local processing</span>
-                {fileTypeLabel(tool) && <span className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{fileTypeLabel(tool)}</span>}
-                {multiFileLabel(tool) && <span className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{multiFileLabel(tool)}</span>}
-                <span className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{tool.category}</span>
-              </div>
-              <p className="mt-3 text-sm font-semibold text-neutral-500">For supported tools, selected files stay in your browser session.</p>
-            </div>
-          </div>
           <div className="tool-action-panel">
             <ToolRenderer tool={tool} />
           </div>
@@ -707,6 +689,29 @@ function EmptyState({ query, onPick }: { query: string; onPick?: (term: string) 
         ))}
       </div>
     </div>
+  );
+}
+
+function PageHeader({ eyebrow, title, subtitle, icon: Icon, badges = [] }: { eyebrow: string; title: string; subtitle: string; icon: any; badges?: string[] }) {
+  return (
+    <header className="page-header">
+      <div className="flex min-w-0 items-start gap-4">
+        <span className="icon-tile page-header-icon grid place-items-center rounded-2xl"><Icon size={24} /></span>
+        <div className="min-w-0">
+          <p className="moss-text text-xs font-black uppercase">{eyebrow}</p>
+          <h1 className="font-display page-title font-black">{title}</h1>
+          <p className="mt-2 max-w-3xl font-semibold leading-7 text-neutral-600">{subtitle}</p>
+          {badges.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {badges.map((badge) => (
+                <span key={badge} className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{badge}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <Toolbar />
+    </header>
   );
 }
 
