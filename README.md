@@ -4,7 +4,7 @@ MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, si
 
 ## Version
 
-Current app version: `3.0.8`
+Current app version: `3.0.9`
 
 Use the version scripts for future changes:
 

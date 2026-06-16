@@ -1,6 +1,6 @@
 {
   "name": "myfilekit",
-  "version": "3.0.8",
+  "version": "3.0.9",
   "type": "module",
   "private": true,
   "description": "Privacy-first browser-based toolkit for PDF, image, business, signature, text, data, and developer utilities.",

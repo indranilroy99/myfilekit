@@ -21,6 +21,7 @@ import {
   Upload,
   Zap,
 } from "lucide-react";
+import { FlowButton } from "@/components/ui/flow-button";
 import { LimelightNav, type NavItem } from "@/components/ui/limelight-nav";
 import { NeuralNoise } from "@/components/ui/neural-noise";
 import { categories, tools } from "./registry/tools.registry.js";
@@ -118,9 +119,7 @@ function Shell({ children, hash }: { children: React.ReactNode; hash: string }) 
             limelightClassName="bg-[var(--primary)]"
           />
           <div className="flex items-center gap-2">
-            <a className="ink-button rounded-full px-4 py-2 text-sm font-black no-underline" href="#browse-tools">
-              Browse tools
-            </a>
+            <FlowButton text="Browse tools" onClick={() => { window.location.hash = "#browse-tools"; }} />
           </div>
         </div>
       </header>
