@@ -14,6 +14,7 @@ if (!allowed.has(bump)) {
 
 const packagePath = path.join(root, "package.json");
 const lockPath = path.join(root, "package-lock.json");
+const readmePath = path.join(root, "README.md");
 const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
 const [major, minor, patch] = packageJson.version.split(".").map(Number);
 
@@ -31,6 +32,14 @@ if (fs.existsSync(lockPath)) {
   lockJson.version = nextVersion;
   if (lockJson.packages?.[""]) lockJson.packages[""].version = nextVersion;
   fs.writeFileSync(lockPath, `${JSON.stringify(lockJson, null, 2)}\n`);
+}
+
+if (fs.existsSync(readmePath)) {
+  const readme = fs.readFileSync(readmePath, "utf8");
+  fs.writeFileSync(
+    readmePath,
+    readme.replace(/Current app version: `[^`]+`/, `Current app version: \`${nextVersion}\``)
+  );
 }
 
 process.stdout.write(`MyFileKit version bumped to ${nextVersion}\n`);
