@@ -50,6 +50,8 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Extract pages from one PDF using `1` or `1-2`.
 - Delete one page from a multi-page PDF.
 - Rotate a PDF and download the result.
+- Add new text to a PDF and download the result.
+- Add a signature image to a PDF and download the result.
 - Add page numbers to a PDF and download the result.
 - Add a text watermark to a PDF and download the result.
 - Convert two images into a PDF.
@@ -63,6 +65,8 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Convert one image to another supported format.
 - Crop an image with numeric controls.
 - Rotate and flip an image.
+- Add new text to an image and confirm a PNG downloads.
+- Confirm Add Text to Image explains that it overlays text and does not OCR/replace existing baked-in text.
 
 ## Privacy Tools
 
@@ -83,6 +87,7 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 - Confirm the invoice launcher mentions templates, tax/TDS, payment details, logo controls, signatures, and show/hide customization.
 - Draw a signature and download PNG.
 - Type a signature and download PNG.
+- Add a signature image to a photo and confirm a PNG downloads.
 
 ## Text, Data, And Developer Tools
 

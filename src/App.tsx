@@ -39,9 +39,9 @@ import { safeFilename, withExtension } from "./utils/safe-filename.js";
 import { validateFiles } from "./services/file-validator.js";
 import { downloadBlob, downloadBytes, downloadText } from "./services/download.service.js";
 import { csvToJson, jsonToCsv } from "./services/csv.service.js";
-import { cleanImageMetadata, compressImage, cropImage, exportCanvas, imageDimensions, imageToCanvas, resizeImage, rotateFlipImage } from "./services/image.service.js";
+import { addSignatureToImage, addTextToImage, cleanImageMetadata, compressImage, cropImage, exportCanvas, imageDimensions, imageToCanvas, resizeImage, rotateFlipImage } from "./services/image.service.js";
 import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.service.js";
-import { addPdfPageNumbers, cleanPdfMetadata, deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
+import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
 import { cleanFilenameList, diffToText, generatePassword, jsonToYaml, lineDiff, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 
 type Tool = (typeof tools)[number];
@@ -775,6 +775,8 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "split-pdf-tool") return <PageRangeTool tool={tool} action="Extract pages" suffix="extracted" run={extractPdfPages} />;
   if (tool.id === "delete-pdf-pages-tool") return <PageRangeTool tool={tool} action="Delete pages" suffix="pages-deleted" run={deletePdfPages} />;
   if (tool.id === "rotate-pdf-tool") return <RotatePdfTool tool={tool} />;
+  if (tool.id === "add-text-to-pdf-tool") return <AddTextToPdfTool tool={tool} />;
+  if (tool.id === "add-signature-to-pdf-tool") return <AddSignatureToPdfTool tool={tool} />;
   if (tool.id === "pdf-page-numbers-tool") return <PdfPageNumbersTool tool={tool} />;
   if (tool.id === "watermark-pdf-tool") return <WatermarkPdfTool tool={tool} />;
   if (tool.id === "pdf-metadata-cleaner-tool") return <PdfMetadataCleanerTool tool={tool} />;
@@ -785,6 +787,8 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "resize-image-tool") return <ResizeImageTool tool={tool} />;
   if (tool.id === "crop-image-tool") return <CropImageTool tool={tool} />;
   if (tool.id === "rotate-flip-image-tool") return <RotateFlipImageTool tool={tool} />;
+  if (tool.id === "add-text-to-image-tool") return <AddTextToImageTool tool={tool} />;
+  if (tool.id === "add-signature-to-image-tool") return <AddSignatureToImageTool tool={tool} />;
   if (tool.id === "draw-signature-tool") return <DrawSignatureTool />;
   if (tool.id === "type-signature-tool") return <TypeSignatureTool />;
   if (tool.id === "text-to-pdf-tool") return <TextToPdfTool />;
@@ -918,6 +922,53 @@ function RotatePdfTool({ tool }: { tool: Tool }) {
       const pages = ranges.trim() ? parsePageRanges(ranges, pdf.getPageCount()) : pdf.getPageIndices();
       downloadBytes(await rotatePdfPages(file, pages, Number(degrees)), withExtension(`${safeFilename(file.name)}-rotated`, "pdf"), "application/pdf");
       return `Rotated ${pages.length} page${pages.length === 1 ? "" : "s"}.`;
+    })} />
+  </ToolForm>;
+}
+
+function AddTextToPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [text, setText] = useState("Approved");
+  const [page, setPage] = useState("1");
+  const [x, setX] = useState("72");
+  const [y, setY] = useState("720");
+  const [size, setSize] = useState("18");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setText(""); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      This places new text on top of the PDF. It does not rewrite existing embedded PDF text.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Input label="Text" value={text} onChange={setText} />
+    <div className="grid gap-3 sm:grid-cols-4"><Input label="Page" value={page} onChange={setPage} type="number" /><Input label="X" value={x} onChange={setX} type="number" /><Input label="Y" value={y} onChange={setY} type="number" /><Input label="Size" value={size} onChange={setSize} type="number" /></div>
+    <PrimaryButton label="Add text to PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = await addTextToPdf(file, text, { page: Number(page), x: Number(x), y: Number(y), size: Number(size) });
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-text-added`, "pdf"), "application/pdf");
+      return `Text added to page ${page}.`;
+    })} />
+  </ToolForm>;
+}
+
+function AddSignatureToPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [signatures, setSignatures] = useState<File[]>([]);
+  const [page, setPage] = useState("1");
+  const [x, setX] = useState("72");
+  const [y, setY] = useState("96");
+  const [width, setWidth] = useState("180");
+  const [status, setStatus] = useState(initialStatus);
+  const imageOptions = { maxFiles: 1, types: ["image/jpeg", "image/png", "image/webp"], extensions: ["jpg", "jpeg", "png", "webp"] };
+  return <ToolForm status={status} onReset={() => { setFiles([]); setSignatures([]); setStatus(initialStatus); }}>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <FileControl accept="image/jpeg,image/png,image/webp" files={signatures} setFiles={setSignatures} />
+    <div className="grid gap-3 sm:grid-cols-4"><Input label="Page" value={page} onChange={setPage} type="number" /><Input label="X" value={x} onChange={setX} type="number" /><Input label="Y" value={y} onChange={setY} type="number" /><Input label="Width" value={width} onChange={setWidth} type="number" /></div>
+    <PrimaryButton label="Add signature to PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const [signature] = validateFiles(signatures, imageOptions);
+      const bytes = await addSignatureImageToPdf(file, signature, { page: Number(page), x: Number(x), y: Number(y), width: Number(width) });
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-signed`, "pdf"), "application/pdf");
+      return `Signature added to page ${page}.`;
     })} />
   </ToolForm>;
 }
@@ -1076,6 +1127,55 @@ function RotateFlipImageTool({ tool }: { tool: Tool }) {
       const blob = await exportCanvas(canvas, "image/png");
       downloadBlob(blob, withExtension(`${safeFilename(file.name)}-rotated`, "png"));
       return `Output: ${canvas.width}×${canvas.height}.`;
+    })} />
+  </ToolForm>;
+}
+
+function AddTextToImageTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [text, setText] = useState("MyFileKit");
+  const [x, setX] = useState("40");
+  const [y, setY] = useState("80");
+  const [size, setSize] = useState("48");
+  const [color, setColor] = useState("#111827");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setText(""); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      This overlays new text onto the image pixels. It does not OCR or replace existing text already baked into a PNG.
+    </div>
+    <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
+    <Input label="Text" value={text} onChange={setText} />
+    <div className="grid gap-3 sm:grid-cols-4"><Input label="X" value={x} onChange={setX} type="number" /><Input label="Y" value={y} onChange={setY} type="number" /><Input label="Size" value={size} onChange={setSize} type="number" /><Input label="Color" value={color} onChange={setColor} type="color" /></div>
+    <PrimaryButton label="Add text to image" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const canvas = await addTextToImage(file, { text, x: Number(x), y: Number(y), size: Number(size), color });
+      const blob = await exportCanvas(canvas, "image/png");
+      downloadBlob(blob, withExtension(`${safeFilename(file.name)}-text-added`, "png"));
+      return `Text added to ${file.name}.`;
+    })} />
+  </ToolForm>;
+}
+
+function AddSignatureToImageTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [signatures, setSignatures] = useState<File[]>([]);
+  const [x, setX] = useState("40");
+  const [y, setY] = useState("40");
+  const [width, setWidth] = useState("280");
+  const [opacity, setOpacity] = useState("1");
+  const [status, setStatus] = useState(initialStatus);
+  const imageOptions = { maxFiles: 1, types: ["image/jpeg", "image/png", "image/webp"], extensions: ["jpg", "jpeg", "png", "webp"] };
+  return <ToolForm status={status} onReset={() => { setFiles([]); setSignatures([]); setStatus(initialStatus); }}>
+    <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
+    <FileControl accept="image/jpeg,image/png,image/webp" files={signatures} setFiles={setSignatures} />
+    <div className="grid gap-3 sm:grid-cols-4"><Input label="X" value={x} onChange={setX} type="number" /><Input label="Y" value={y} onChange={setY} type="number" /><Input label="Width" value={width} onChange={setWidth} type="number" /><Input label="Opacity" value={opacity} onChange={setOpacity} type="number" /></div>
+    <PrimaryButton label="Add signature to image" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const [signature] = validateFiles(signatures, imageOptions);
+      const canvas = await addSignatureToImage(file, signature, { x: Number(x), y: Number(y), width: Number(width), opacity: Number(opacity) });
+      const blob = await exportCanvas(canvas, "image/png");
+      downloadBlob(blob, withExtension(`${safeFilename(file.name)}-signed`, "png"));
+      return `Signature added to ${file.name}.`;
     })} />
   </ToolForm>;
 }
