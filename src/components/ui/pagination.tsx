@@ -13,13 +13,13 @@ type MyFileKitPaginationProps = {
 };
 
 const navButtonClass =
-  "inline-flex h-10 items-center justify-center gap-2 rounded-full border border-slate-200/80 bg-white/80 px-4 text-sm font-black text-slate-700 shadow-sm transition-colors hover:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/20 data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-40";
+  "pagination-nav-button inline-flex h-10 items-center justify-center gap-2 rounded-full px-4 text-sm font-black shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--ring)]/30 data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-40";
 
 const iconButtonClass =
-  "inline-flex h-10 w-10 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-white/80 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/20 data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-40";
+  "pagination-icon-button inline-flex h-10 w-10 items-center justify-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--ring)]/30 data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-40";
 
 const pageItemClass =
-  "inline-flex h-10 min-w-10 items-center justify-center rounded-full px-3 text-sm font-black text-slate-600 transition-colors hover:bg-white/80 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-slate-900/20 data-selected:bg-slate-950 data-selected:text-white data-selected:shadow-sm";
+  "pagination-page-button inline-flex h-10 min-w-10 items-center justify-center rounded-full px-3 text-sm font-black transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--ring)]/30 data-selected:shadow-sm";
 
 export default function Basic({
   count = 100,
@@ -81,7 +81,7 @@ export function NumberedPagination({
                 {item.value}
               </Pagination.Item>
             ) : (
-              <Pagination.Ellipsis key={`ellipsis-${index}`} index={index} className="inline-flex h-10 w-10 items-center justify-center text-slate-400">
+              <Pagination.Ellipsis key={`ellipsis-${index}`} index={index} className="pagination-ellipsis inline-flex h-10 w-10 items-center justify-center">
                 &#8230;
               </Pagination.Ellipsis>
             )

@@ -85,14 +85,14 @@ export function LimelightNav({
   };
 
   return (
-    <nav className={`relative inline-flex h-14 items-center rounded-full border border-white/80 bg-white/70 px-1.5 text-foreground shadow-sm backdrop-blur-xl ${className}`} aria-label="Primary navigation">
+    <nav className={`limelight-nav relative inline-flex h-14 items-center rounded-full px-1.5 text-foreground shadow-sm backdrop-blur-xl ${className}`} aria-label="Primary navigation">
       {items.map(({ id, icon, label, onClick }, index) => (
         <button
           key={id}
           ref={(element) => {
             navItemRefs.current[index] = element;
           }}
-          className={`relative z-20 flex h-full cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-sm font-black text-[var(--ink)] transition-colors hover:bg-white/60 focus-visible:bg-white/70 ${iconContainerClassName}`}
+          className={`limelight-nav-item relative z-20 flex h-full cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-sm font-black text-[var(--ink)] transition-colors ${iconContainerClassName}`}
           onClick={() => handleItemClick(index, onClick)}
           type="button"
           aria-label={label}

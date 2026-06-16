@@ -11,6 +11,7 @@ import {
   Image,
   Layers3,
   LayoutDashboard,
+  Moon,
   PenLine,
   ReceiptText,
   RotateCw,
@@ -18,6 +19,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Sun,
   Upload,
   Zap,
 } from "lucide-react";
@@ -41,6 +43,7 @@ import { deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotat
 
 type Tool = (typeof tools)[number];
 type Status = { tone: "idle" | "success" | "error"; message: string };
+type ThemeMode = "light" | "dark";
 
 const initialStatus: Status = { tone: "idle", message: "Ready." };
 const categoryIcons: Record<string, any> = {
@@ -65,11 +68,13 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
 
 const quickSearches = ["Merge PDF", "Compress Image", "Invoice", "Signature", "JSON", "File Hash"];
 const recentToolsStorageKey = "myfilekit:recentTools";
+const themeStorageKey = "myfilekit:theme";
 const popularToolIds = ["merge-pdf-tool", "compress-image-tool", "resize-image-tool", "invoice-generator-tool", "json-formatter-tool", "file-hash-tool"];
 const browseToolsPageSize = 10;
 
 export default function App() {
   const [hash, setHash] = useState(window.location.hash || "#dashboard");
+  const [theme, setTheme] = useState<ThemeMode>(() => readThemePreference());
 
   useEffect(() => {
     const syncHash = () => setHash(window.location.hash || "#dashboard");
@@ -77,11 +82,22 @@ export default function App() {
     return () => window.removeEventListener("hashchange", syncHash);
   }, []);
 
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    try {
+      localStorage.setItem(themeStorageKey, theme);
+    } catch {
+      // Theme persistence is optional when storage is unavailable.
+    }
+  }, [theme]);
+
   const route = routeForHash(hash);
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-[var(--ink)]">
-      <Shell hash={hash}>
+      <Shell hash={hash} theme={theme} onToggleTheme={() => setTheme((current) => current === "dark" ? "light" : "dark")}>
         {route.type === "dashboard" && <Dashboard />}
         {route.type === "browse" && <BrowseToolsPage />}
         {route.type === "category" && <CategoryPage category={route.category} />}
@@ -92,7 +108,7 @@ export default function App() {
   );
 }
 
-function Shell({ children, hash }: { children: React.ReactNode; hash: string }) {
+function Shell({ children, hash, theme, onToggleTheme }: { children: React.ReactNode; hash: string; theme: ThemeMode; onToggleTheme: () => void }) {
   const primaryNavItems = useMemo<NavItem[]>(() => [
     { id: "dashboard", icon: <LayoutDashboard />, label: "Dashboard", onClick: () => { window.location.hash = "#dashboard"; } },
     ...categories.slice(0, 4).map((category) => {
@@ -124,6 +140,7 @@ function Shell({ children, hash }: { children: React.ReactNode; hash: string }) 
             limelightClassName="bg-[var(--primary)]"
           />
           <div className="flex items-center gap-2">
+            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
             <FlowButton text="Browse tools" onClick={() => { window.location.hash = "#browse-tools"; }} />
           </div>
         </div>
@@ -132,6 +149,25 @@ function Shell({ children, hash }: { children: React.ReactNode; hash: string }) 
         {children}
       </main>
     </>
+  );
+}
+
+function ThemeToggle({ theme, onToggle }: { theme: ThemeMode; onToggle: () => void }) {
+  const isDark = theme === "dark";
+  return (
+    <button
+      className="theme-toggle"
+      type="button"
+      onClick={onToggle}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-pressed={isDark}
+      title={isDark ? "Light mode" : "Dark mode"}
+    >
+      <span className="theme-toggle-icon" aria-hidden="true">
+        {isDark ? <Sun size={17} /> : <Moon size={17} />}
+      </span>
+      <span className="hidden text-sm font-black xl:inline">{isDark ? "Light" : "Dark"}</span>
+    </button>
   );
 }
 
@@ -493,7 +529,7 @@ function BrowseToolsPage() {
           ))}
         </div>
         {visibleTools.length > browseToolsPageSize && (
-          <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-[2rem] bg-white/55 p-4 shadow-[0_18px_48px_rgba(15,23,42,.055)] sm:flex-row">
+          <div className="pagination-shell mt-8 flex flex-col items-center justify-between gap-4 p-4 sm:flex-row">
             <p className="text-sm font-black text-neutral-500">
               Showing {rangeStart}-{rangeEnd} of {visibleTools.length} tools
             </p>
@@ -1308,6 +1344,16 @@ function writeSessionValue(key: string, value: string) {
   } catch {
     // Storage may be unavailable in private or locked-down browser contexts.
   }
+}
+
+function readThemePreference(): ThemeMode {
+  try {
+    const stored = localStorage.getItem(themeStorageKey);
+    if (stored === "light" || stored === "dark") return stored;
+  } catch {
+    // Storage may be unavailable in private or locked-down browser contexts.
+  }
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 function loadRecentToolIds() {
