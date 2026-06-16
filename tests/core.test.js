@@ -5,6 +5,7 @@ import { tools, categories } from "../src/registry/tools.registry.js";
 import { csvToJson, jsonToCsv } from "../src/services/csv.service.js";
 import { deletePdfPages, extractPdfPages, mergePdfs, rotatePdfPages, textToPdf } from "../src/services/pdf.service.js";
 import { validateFiles } from "../src/services/file-validator.js";
+import { inspectImageMetadataBuffer } from "../src/services/metadata.service.js";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "../src/utils/format.js";
 import { safeFilename, withExtension } from "../src/utils/safe-filename.js";
 import { routeForHash } from "../src/router.js";
@@ -100,6 +101,42 @@ test("metadata cleaner validates supported image types and safe output names", (
   assert.equal(withExtension(`${safeFilename("../private photo?.jpg")}-cleaned`, "jpg"), "private-photo-cleaned.jpg");
 });
 
+test("metadata inspector reads PNG text and WebP XMP metadata locally", () => {
+  const pngReport = inspectImageMetadataBuffer(makePngWithText("Author", "MyFileKit"), {
+    name: "sample.png",
+    type: "image/png",
+    size: 1
+  });
+  assert.equal(pngReport.format, "PNG");
+  assert.equal(pngReport.privacy.hasPngText, true);
+  assert.equal(pngReport.groups.some((group) => group.items.some((item) => item.label === "Author" && item.value === "MyFileKit")), true);
+
+  const webpReport = inspectImageMetadataBuffer(makeWebpXmp('<x:xmpmeta xmp:CreatorTool="CameraApp" xmp:CreateDate="2026-06-16T10:00:00Z"></x:xmpmeta>'), {
+    name: "sample.webp",
+    type: "image/webp",
+    size: 1
+  });
+  assert.equal(webpReport.format, "WebP");
+  assert.equal(webpReport.privacy.hasXmp, true);
+  assert.equal(webpReport.privacy.hasWebpMetadata, true);
+  assert.equal(webpReport.groups.some((group) => group.items.some((item) => item.label === "Creator tool" && item.value === "CameraApp")), true);
+});
+
+test("metadata inspector reads JPEG EXIF camera and GPS fields locally", () => {
+  const report = inspectImageMetadataBuffer(makeJpegWithExifGps(), {
+    name: "photo.jpg",
+    type: "image/jpeg",
+    size: 1
+  });
+
+  assert.equal(report.format, "JPEG");
+  assert.equal(report.privacy.hasExif, true);
+  assert.equal(report.privacy.hasCamera, true);
+  assert.equal(report.privacy.hasGps, true);
+  assert.equal(report.warnings.some((warning) => /GPS\/location metadata detected/i.test(warning)), true);
+  assert.equal(report.groups.some((group) => group.title.includes("GPS") && group.items.some((item) => item.label === "Decimal coordinates")), true);
+});
+
 test("PDF services create valid local outputs", async () => {
   const first = new File([await textToPdf("First page")], "first.pdf", { type: "application/pdf" });
   const second = new File([await textToPdf("Second page")], "second.pdf", { type: "application/pdf" });
@@ -118,3 +155,123 @@ test("PDF services create valid local outputs", async () => {
   const rotated = await window.PDFLib.PDFDocument.load(await rotatePdfPages(mergedFile, [0], 90));
   assert.equal(rotated.getPage(0).getRotation().angle, 90);
 });
+
+function makePngWithText(keyword, value) {
+  const text = encode(`${keyword}\u0000${value}`);
+  return concatBytes([
+    Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("tEXt", text),
+    pngChunk("IEND", new Uint8Array())
+  ]).buffer;
+}
+
+function pngChunk(type, data) {
+  const chunk = new Uint8Array(12 + data.length);
+  writeU32be(chunk, 0, data.length);
+  chunk.set(encode(type), 4);
+  chunk.set(data, 8);
+  return chunk;
+}
+
+function makeWebpXmp(xmp) {
+  const data = encode(xmp);
+  const padding = data.length % 2;
+  const riffSize = 4 + 8 + data.length + padding;
+  const bytes = new Uint8Array(8 + riffSize);
+  bytes.set(encode("RIFF"), 0);
+  writeU32le(bytes, 4, riffSize);
+  bytes.set(encode("WEBP"), 8);
+  bytes.set(encode("XMP "), 12);
+  writeU32le(bytes, 16, data.length);
+  bytes.set(data, 20);
+  return bytes.buffer;
+}
+
+function makeJpegWithExifGps() {
+  const tiff = makeExifTiff();
+  const payload = concatBytes([encode("Exif\u0000\u0000"), tiff]);
+  const segmentLength = payload.length + 2;
+  const bytes = new Uint8Array(2 + 2 + 2 + payload.length + 2);
+  bytes.set([0xff, 0xd8], 0);
+  bytes.set([0xff, 0xe1], 2);
+  writeU16be(bytes, 4, segmentLength);
+  bytes.set(payload, 6);
+  bytes.set([0xff, 0xd9], 6 + payload.length);
+  return bytes.buffer;
+}
+
+function makeExifTiff() {
+  const bytes = new Uint8Array(188);
+  bytes.set(encode("II"), 0);
+  writeU16le(bytes, 2, 42);
+  writeU32le(bytes, 4, 8);
+  writeU16le(bytes, 8, 4);
+  writeIfdEntry(bytes, 10, 0x010f, 2, 6, 62);
+  writeIfdEntry(bytes, 22, 0x0110, 2, 8, 68);
+  writeIfdEntry(bytes, 34, 0x0131, 2, 10, 76);
+  writeIfdEntry(bytes, 46, 0x8825, 4, 1, 86);
+  writeU32le(bytes, 58, 0);
+  bytes.set(encode("Canon\u0000"), 62);
+  bytes.set(encode("TestCam\u0000"), 68);
+  bytes.set(encode("MyFileKit\u0000"), 76);
+
+  writeU16le(bytes, 86, 4);
+  writeIfdEntry(bytes, 88, 0x0001, 2, 2, "N\u0000");
+  writeIfdEntry(bytes, 100, 0x0002, 5, 3, 140);
+  writeIfdEntry(bytes, 112, 0x0003, 2, 2, "E\u0000");
+  writeIfdEntry(bytes, 124, 0x0004, 5, 3, 164);
+  writeU32le(bytes, 136, 0);
+  writeRationals(bytes, 140, [[12, 1], [34, 1], [0, 1]]);
+  writeRationals(bytes, 164, [[56, 1], [7, 1], [0, 1]]);
+  return bytes;
+}
+
+function writeIfdEntry(bytes, offset, tag, type, count, value) {
+  writeU16le(bytes, offset, tag);
+  writeU16le(bytes, offset + 2, type);
+  writeU32le(bytes, offset + 4, count);
+  if (typeof value === "string") {
+    bytes.set(encode(value).slice(0, 4), offset + 8);
+  } else {
+    writeU32le(bytes, offset + 8, value);
+  }
+}
+
+function writeRationals(bytes, offset, values) {
+  values.forEach(([numerator, denominator], index) => {
+    const next = offset + index * 8;
+    writeU32le(bytes, next, numerator);
+    writeU32le(bytes, next + 4, denominator);
+  });
+}
+
+function encode(value) {
+  return new TextEncoder().encode(value);
+}
+
+function concatBytes(parts) {
+  const length = parts.reduce((total, part) => total + part.length, 0);
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.length;
+  }
+  return bytes;
+}
+
+function writeU16be(bytes, offset, value) {
+  new DataView(bytes.buffer).setUint16(offset, value, false);
+}
+
+function writeU16le(bytes, offset, value) {
+  new DataView(bytes.buffer).setUint16(offset, value, true);
+}
+
+function writeU32be(bytes, offset, value) {
+  new DataView(bytes.buffer).setUint32(offset, value, false);
+}
+
+function writeU32le(bytes, offset, value) {
+  new DataView(bytes.buffer).setUint32(offset, value, true);
+}

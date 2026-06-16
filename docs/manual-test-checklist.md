@@ -55,9 +55,11 @@ Open the local URL printed by Vite, usually `http://localhost:4173`.
 
 ## Privacy Tools
 
-- Search `metadata`, `exif`, and `privacy`; confirm Metadata Cleaner appears.
+- Search `metadata`, `exif`, `gps`, and `privacy`; confirm EXIF & Metadata Cleaner appears.
 - Open Metadata Cleaner and confirm the local-processing privacy note is visible.
-- Upload a JPG with metadata and confirm file name, type, size, dimensions, and last modified date appear.
+- Upload a JPG with EXIF/GPS metadata and confirm file name, type, size, dimensions, last modified date, privacy scan, and detected metadata sections appear.
+- Upload a PNG or WebP with metadata and confirm detected containers such as PNG text, XMP, or ICC appear when present.
+- Download the JSON report and confirm it contains the detected metadata summary.
 - Click Clean metadata and confirm before/after file size appears.
 - Download the cleaned image and confirm the filename ends with `-cleaned`.
 - Upload an unsupported file such as PDF or TXT and confirm it is rejected clearly.

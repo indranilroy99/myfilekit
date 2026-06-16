@@ -4,7 +4,7 @@ MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, si
 
 ## Version
 
-Current app version: `2.0.20`
+Current app version: `2.0.21`
 
 Use the version scripts for future changes:
 
@@ -23,7 +23,7 @@ Use patch versions such as `2.0.1` and `2.0.2` for small fixes. Use a major vers
 - Business: Invoice Generator with premium templates, payment details, tax/TDS fields, signatures, logo controls, and customizable invoice-style document wording.
 - Signature: Draw Signature, Type Signature.
 - Text & Data: Text to PDF, Markdown Preview, JSON Formatter, CSV to JSON, JSON to CSV.
-- Privacy: Metadata Cleaner removes embedded metadata from supported image files locally in your browser.
+- Privacy: EXIF & Metadata Cleaner inspects EXIF, XMP, ICC, GPS, and container metadata in supported image files, exports a local JSON report, and re-encodes a cleaned copy in your browser.
 - Developer Utilities: Base64 Encode / Decode, File Hash Generator.
 
 Only working tools are shown in the dashboard. Planned tools stay out of the product UI until they have real implementations.

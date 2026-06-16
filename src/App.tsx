@@ -29,6 +29,7 @@ import { validateFiles } from "./services/file-validator.js";
 import { downloadBlob, downloadBytes, downloadText } from "./services/download.service.js";
 import { csvToJson, jsonToCsv } from "./services/csv.service.js";
 import { cleanImageMetadata, compressImage, cropImage, exportCanvas, imageDimensions, imageToCanvas, resizeImage, rotateFlipImage } from "./services/image.service.js";
+import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.service.js";
 import { deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf } from "./services/pdf.service.js";
 
 type Tool = (typeof tools)[number];
@@ -605,15 +606,26 @@ type MetadataImageInfo = {
   lastModified: number;
 };
 
+type MetadataReport = {
+  format: string;
+  metadataCount: number;
+  containers: Array<{ type: string; detail: string; removable: boolean }>;
+  groups: Array<{ title: string; items: Array<{ label: string; value: string; sensitive?: boolean }> }>;
+  privacy: Record<string, boolean>;
+  warnings: string[];
+};
+
 function MetadataCleanerTool({ tool }: { tool: Tool }) {
   const [files, setFiles] = useState<File[]>([]);
   const [info, setInfo] = useState<MetadataImageInfo | null>(null);
+  const [report, setReport] = useState<MetadataReport | null>(null);
   const [cleaned, setCleaned] = useState<{ blob: Blob; filename: string } | null>(null);
   const [status, setStatus] = useState(initialStatus);
 
   const reset = () => {
     setFiles([]);
     setInfo(null);
+    setReport(null);
     setCleaned(null);
     setStatus(initialStatus);
   };
@@ -622,11 +634,12 @@ function MetadataCleanerTool({ tool }: { tool: Tool }) {
     let cancelled = false;
     setCleaned(null);
     setInfo(null);
+    setReport(null);
     if (!files.length) return undefined;
 
     runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
-      const dimensions = await imageDimensions(file);
+      const [dimensions, metadata] = await Promise.all([imageDimensions(file), inspectImageMetadata(file)]);
       if (cancelled) return "Ready.";
       setInfo({
         name: file.name,
@@ -636,7 +649,10 @@ function MetadataCleanerTool({ tool }: { tool: Tool }) {
         height: dimensions.height,
         lastModified: file.lastModified,
       });
-      return "Image validated locally. Ready to clean metadata.";
+      setReport(metadata);
+      return metadata.metadataCount
+        ? `Found ${metadata.metadataCount} metadata detail${metadata.metadataCount === 1 ? "" : "s"} locally. Review and clean when ready.`
+        : "Image validated locally. No embedded metadata was detected by the local parser.";
     });
 
     return () => {
@@ -656,7 +672,7 @@ function MetadataCleanerTool({ tool }: { tool: Tool }) {
   return (
     <ToolForm status={status} onReset={reset}>
       <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-        Supports JPG/JPEG, PNG, and WebP images only. EXIF usually applies to photos, while PNG and WebP may contain other embedded metadata.
+        Full local image metadata workflow for JPG/JPEG, PNG, and WebP: inspect EXIF/XMP/ICC/IPTC-style containers where present, review sensitive fields like GPS, then re-encode a cleaned copy in your browser.
       </div>
       <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
       <div className="grid gap-4 lg:grid-cols-2">
@@ -675,23 +691,77 @@ function MetadataCleanerTool({ tool }: { tool: Tool }) {
           )}
         </div>
         <div className="surface-card wabi-card-edge p-4">
-          <p className="font-black">Result</p>
-          {cleaned && info ? (
+          <p className="font-black">Privacy scan</p>
+          {report ? (
+            <div className="mt-3 grid gap-3 text-sm font-semibold text-neutral-600">
+              <InfoRow label="Container" value={report.format} />
+              <InfoRow label="Metadata details" value={String(report.metadataCount)} />
+              <InfoRow label="GPS/location" value={report.privacy.hasGps ? "Detected" : "Not detected"} />
+              <InfoRow label="Camera/device" value={report.privacy.hasCamera ? "Detected" : "Not detected"} />
+              <InfoRow label="XMP" value={report.privacy.hasXmp ? "Detected" : "Not detected"} />
+              <InfoRow label="ICC profile" value={report.privacy.hasIccProfile ? "Detected" : "Not detected"} />
+            </div>
+          ) : (
+            <p className="mt-3 text-sm font-semibold text-neutral-500">Metadata scan results will appear here after upload.</p>
+          )}
+        </div>
+      </div>
+      {report && (
+        <div className="surface-card wabi-card-edge grid gap-4 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="font-black">Detected metadata</p>
+            <SecondaryButton label="Download JSON report" onClick={() => downloadText(metadataReportToJson(report), "metadata-report", "json", "application/json;charset=utf-8")} />
+          </div>
+          {report.warnings.length > 0 && (
+            <div className="surface-muted wabi-card-edge p-3 text-sm font-semibold leading-6 text-neutral-600">
+              {report.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+            </div>
+          )}
+          {report.containers.length > 0 && (
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {report.containers.map((container, index) => (
+                <div key={`${container.type}-${index}`} className="surface-muted wabi-card-edge p-3 text-sm font-semibold text-neutral-600">
+                  <p className="font-black text-[var(--ink)]">{container.type}</p>
+                  <p className="mt-1">{container.detail}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          {report.groups.length ? (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {report.groups.map((group) => (
+                <div key={group.title} className="surface-muted wabi-card-edge p-4">
+                  <p className="font-black capitalize">{group.title}</p>
+                  <dl className="mt-3 grid gap-2 text-sm font-semibold text-neutral-600">
+                    {group.items.map((item, index) => (
+                      <InfoRow key={`${item.label}-${index}`} label={item.sensitive ? `${item.label} ⚠` : item.label} value={String(item.value)} />
+                    ))}
+                  </dl>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm font-semibold text-neutral-500">No readable embedded metadata fields were detected.</p>
+          )}
+        </div>
+      )}
+      <div className="surface-card wabi-card-edge p-4">
+        <p className="font-black">Cleaned result</p>
+        {cleaned && info ? (
             <div className="mt-3 grid gap-3 text-sm font-semibold text-neutral-600">
               <InfoRow label="Before" value={formatBytes(info.size)} />
               <InfoRow label="After" value={formatBytes(cleaned.blob.size)} />
               <InfoRow label="Output" value={cleaned.filename} />
               <SecondaryButton label="Download cleaned image" onClick={() => downloadBlob(cleaned.blob, cleaned.filename)} />
             </div>
-          ) : (
-            <p className="mt-3 text-sm font-semibold text-neutral-500">Cleaned image details will appear here after processing.</p>
-          )}
-        </div>
+        ) : (
+          <p className="mt-3 text-sm font-semibold text-neutral-500">Cleaned image details will appear here after processing.</p>
+        )}
       </div>
       <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-        Privacy note: the selected image is processed locally in this browser session. MyFileKit does not upload it, store it, track it, or log metadata contents.
+        Privacy note: the selected image and metadata report are processed locally in this browser session. MyFileKit does not upload it, store it, track it, or log metadata contents.
       </div>
-      <PrimaryButton label="Clean metadata" onClick={clean} />
+      <PrimaryButton label="Clean metadata and re-encode image" onClick={clean} />
     </ToolForm>
   );
 }
@@ -1056,7 +1126,7 @@ function saveRecentTool(id: string) {
 function fileTypeLabel(tool: Tool) {
   const file = tool.file as { extensions?: string[]; types?: string[] };
   const extensions = file.extensions || [];
-  if (extensions.length) return extensions.slice(0, 3).join("/").toUpperCase();
+  if (extensions.length) return extensions.slice(0, 4).join("/").toUpperCase();
   if (file.types?.includes("application/pdf")) return "PDF";
   if (file.types?.some((type) => type.startsWith("image/"))) return "Image";
   return "";
