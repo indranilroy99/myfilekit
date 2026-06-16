@@ -554,19 +554,20 @@ button {
   background-size: auto;
 }
 
-.hero-hills {
+.hero-neural {
   position: absolute !important;
-  inset: auto 0 0 0;
-  height: min(420px, 62%) !important;
+  inset: auto 0 -20% 0;
+  height: min(470px, 70%) !important;
   width: 100% !important;
-  opacity: .28;
   pointer-events: none;
   z-index: 0;
-  mask-image: linear-gradient(to top, #000 12%, transparent 92%);
+  mix-blend-mode: multiply;
+  filter: blur(.2px) saturate(.72);
+  mask-image: radial-gradient(ellipse at 50% 82%, #000 0 24%, rgba(0, 0, 0, .65) 44%, transparent 78%);
 }
 
-.hero-hills canvas {
-  mix-blend-mode: multiply;
+.hero-neural canvas {
+  display: block;
 }
 
 .hero-search-results {
