@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { tools, categories } from "../src/registry/tools.registry.js";
 import { csvToJson, jsonToCsv } from "../src/services/csv.service.js";
-import { addPdfPageNumbers, cleanPdfMetadata, deletePdfPages, extractPdfPages, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "../src/services/pdf.service.js";
+import { addPdfPageNumbers, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "../src/services/pdf.service.js";
 import { validateFiles } from "../src/services/file-validator.js";
 import { inspectImageMetadataBuffer } from "../src/services/metadata.service.js";
 import { cleanFilenameList, diffToText, generatePassword, jsonToYaml, lineDiff, textStats, urlDecode, urlEncode } from "../src/services/text-tools.service.js";
@@ -162,6 +162,9 @@ test("PDF services create valid local outputs", async () => {
 
   const watermarked = await window.PDFLib.PDFDocument.load(await watermarkPdf(mergedFile, "DRAFT"));
   assert.equal(watermarked.getPageCount(), 2);
+
+  const annotated = await window.PDFLib.PDFDocument.load(await addTextToPdf(mergedFile, "Approved", { page: 1, x: 72, y: 720 }));
+  assert.equal(annotated.getPageCount(), 2);
 
   const cleaned = await window.PDFLib.PDFDocument.load(await cleanPdfMetadata(mergedFile));
   assert.equal(cleaned.getPageCount(), 2);

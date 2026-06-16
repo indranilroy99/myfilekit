@@ -75,6 +75,35 @@ export async function rotateFlipImage(file, rotation, flipX, flipY) {
   return canvas;
 }
 
+export async function addTextToImage(file, options = {}) {
+  const canvas = await imageToCanvas(file);
+  const context = canvas.getContext("2d");
+  const text = String(options.text || "").trim();
+  if (!text) throw new Error("Enter text to add.");
+  const size = Number(options.size || 48);
+  context.font = `700 ${size}px system-ui, -apple-system, Segoe UI, sans-serif`;
+  context.fillStyle = String(options.color || "#111827");
+  context.strokeStyle = String(options.outline || "rgba(255,255,255,.78)");
+  context.lineWidth = Math.max(2, size * 0.08);
+  const x = Number(options.x || 40);
+  const y = Number(options.y || Math.min(canvas.height - 40, 80));
+  context.strokeText(text, x, y);
+  context.fillText(text, x, y);
+  return canvas;
+}
+
+export async function addSignatureToImage(imageFile, signatureFile, options = {}) {
+  const canvas = await imageToCanvas(imageFile);
+  const signature = await imageToCanvas(signatureFile);
+  const context = canvas.getContext("2d");
+  const width = Number(options.width || Math.min(280, canvas.width * 0.36));
+  const height = Math.max(1, width * (signature.height / signature.width));
+  context.globalAlpha = clamp(Number(options.opacity || 1), 0.1, 1);
+  context.drawImage(signature, Number(options.x || 40), Number(options.y || canvas.height - height - 40), width, height);
+  context.globalAlpha = 1;
+  return canvas;
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
 }

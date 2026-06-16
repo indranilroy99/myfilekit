@@ -49,6 +49,45 @@ export async function rotatePdfPages(file, pageIndexes, degrees) {
   return output.save();
 }
 
+export async function addTextToPdf(file, text, options = {}) {
+  const { StandardFonts, rgb } = getPdfLib();
+  const pdf = await loadPdf(file);
+  const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const pages = pdf.getPages();
+  const pageIndex = clamp(Number(options.page || 1), 1, pages.length) - 1;
+  const page = pages[pageIndex];
+  const label = String(text || "").trim();
+  if (!label) throw new Error("Enter text to add.");
+  page.drawText(label, {
+    x: Number(options.x || 72),
+    y: Number(options.y || 720),
+    size: Number(options.size || 18),
+    font,
+    color: rgb(0.05, 0.09, 0.16),
+  });
+  return pdf.save();
+}
+
+export async function addSignatureImageToPdf(pdfFile, imageFile, options = {}) {
+  const pdf = await loadPdf(pdfFile);
+  const pages = pdf.getPages();
+  const pageIndex = clamp(Number(options.page || 1), 1, pages.length) - 1;
+  const page = pages[pageIndex];
+  const imageBytes = new Uint8Array(await imageFile.arrayBuffer());
+  const image = imageFile.type === "image/png"
+    ? await pdf.embedPng(imageBytes)
+    : await pdf.embedJpg(await canvasJpegBytes(imageFile));
+  const width = Number(options.width || 180);
+  const height = Math.max(1, width * (image.height / image.width));
+  page.drawImage(image, {
+    x: Number(options.x || 72),
+    y: Number(options.y || 96),
+    width,
+    height,
+  });
+  return pdf.save();
+}
+
 export async function addPdfPageNumbers(file, options = {}) {
   const { StandardFonts, rgb } = getPdfLib();
   const pdf = await loadPdf(file);

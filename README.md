@@ -4,7 +4,7 @@ MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, si
 
 ## Version
 
-Current app version: `3.0.20`
+Current app version: `3.0.21`
 
 Use the version scripts for future changes:
 
@@ -18,10 +18,10 @@ Use patch versions such as `2.0.1` and `2.0.2` for small fixes. Use a major vers
 
 ## Working Tools
 
-- PDF: Merge PDF, Split / Extract PDF Pages, Delete PDF Pages, Rotate PDF Pages, Add PDF Page Numbers, Watermark PDF, Images to PDF.
-- Image: Compress Image, Batch Compress Images, Resize Image, Batch Resize Images, Convert Image, Crop Image, Rotate / Flip Image.
+- PDF: Merge PDF, Split / Extract PDF Pages, Delete PDF Pages, Rotate PDF Pages, Add Text to PDF, Add Signature to PDF, Add PDF Page Numbers, Watermark PDF, Images to PDF.
+- Image: Compress Image, Batch Compress Images, Resize Image, Batch Resize Images, Convert Image, Crop Image, Rotate / Flip Image, Add Text to Image.
 - Business: Invoice Generator with premium templates, payment details, tax/TDS fields, signatures, logo controls, and customizable invoice-style document wording.
-- Signature: Draw Signature, Type Signature.
+- Signature: Draw Signature, Type Signature, Add Signature to Image.
 - Text & Data: Text to PDF, Markdown Preview, JSON Formatter, CSV to JSON, JSON to CSV, JSON to YAML, URL Encode / Decode, Text Diff Checker, Word Counter.
 - Privacy: EXIF & Metadata Cleaner inspects EXIF, XMP, ICC, GPS, and container metadata in supported image files, exports a local JSON report, and re-encodes a cleaned copy in your browser. PDF Metadata Cleaner removes common PDF document metadata fields.
 - Developer Utilities: Base64 Encode / Decode, File Hash Generator, Hash Compare, Password Generator, QR Code Generator, Filename Cleaner.
@@ -194,6 +194,8 @@ These items are planned for future releases and are not shown as working tools u
 - True PDF compression with measurable output controls
 - Password protect/unlock PDF support with a reliable encryption engine
 - PDF form filler and visual PDF signer
+- Full existing-PDF text editing where embedded text can be safely detected and rewritten
+- OCR/inpainting-style image text replacement for PNG/JPG screenshots
 - Background removal with a transparent local or explicitly disclosed service path
 - Word/PDF and Office document conversion
 - Office document metadata cleaner
