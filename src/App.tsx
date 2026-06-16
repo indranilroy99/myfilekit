@@ -21,6 +21,7 @@ import {
   Upload,
   Zap,
 } from "lucide-react";
+import { LimelightNav, type NavItem } from "@/components/ui/limelight-nav";
 import { NeuralNoise } from "@/components/ui/neural-noise";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
@@ -74,7 +75,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-[var(--ink)]">
-      <Shell>
+      <Shell hash={hash}>
         {route.type === "dashboard" && <Dashboard />}
         {route.type === "browse" && <BrowseToolsPage />}
         {route.type === "category" && <CategoryPage category={route.category} />}
@@ -85,7 +86,21 @@ export default function App() {
   );
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children, hash }: { children: React.ReactNode; hash: string }) {
+  const primaryNavItems = useMemo<NavItem[]>(() => [
+    { id: "dashboard", icon: <LayoutDashboard />, label: "Dashboard", onClick: () => { window.location.hash = "#dashboard"; } },
+    ...categories.slice(0, 4).map((category) => {
+      const Icon = categoryIcons[category];
+      return {
+        id: category,
+        icon: <Icon />,
+        label: category.replace(" Tools", ""),
+        onClick: () => { window.location.hash = categoryRoute(category); },
+      };
+    }),
+  ], []);
+  const activeNavIndex = activePrimaryNavIndex(hash);
+
   return (
     <>
       <header className="site-header sticky top-0 z-30 backdrop-blur-xl">
@@ -96,12 +111,12 @@ function Shell({ children }: { children: React.ReactNode }) {
               <span className="block text-xs font-bold uppercase text-neutral-500">Local-first tools</span>
             </span>
           </a>
-          <nav className="hidden items-center gap-2 lg:flex" aria-label="Primary navigation">
-            <NavPill href="#dashboard" icon={LayoutDashboard} label="Dashboard" />
-            {categories.slice(0, 4).map((category) => (
-              <NavPill key={category} href={categoryRoute(category)} icon={categoryIcons[category]} label={category.replace(" Tools", "")} />
-            ))}
-          </nav>
+          <LimelightNav
+            className="hidden lg:inline-flex"
+            items={primaryNavItems}
+            activeIndex={activeNavIndex}
+            limelightClassName="bg-[var(--primary)]"
+          />
           <div className="flex items-center gap-2">
             <a className="ink-button rounded-full px-4 py-2 text-sm font-black no-underline" href="#browse-tools">
               Browse tools
@@ -113,15 +128,6 @@ function Shell({ children }: { children: React.ReactNode }) {
         {children}
       </main>
     </>
-  );
-}
-
-function NavPill({ href, icon: Icon, label }: { href: string; icon: any; label: string }) {
-  return (
-    <a className="nav-pill inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-sm font-extrabold no-underline shadow-sm transition hover:-translate-y-0.5" href={href}>
-      <Icon size={16} />
-      {label}
-    </a>
   );
 }
 
@@ -1245,6 +1251,14 @@ function searchableText(tool: Tool) {
 
 function findToolById(id: string) {
   return tools.find((tool: Tool) => tool.id === id);
+}
+
+function activePrimaryNavIndex(hash: string) {
+  if (!hash || hash === "#dashboard" || hash === "#browse-tools") return 0;
+  const route = routeForHash(hash);
+  const category = route.type === "category" ? route.category : route.type === "tool" ? route.tool.category : "";
+  const navCategoryIndex = categories.slice(0, 4).findIndex((item) => item === category);
+  return navCategoryIndex >= 0 ? navCategoryIndex + 1 : 0;
 }
 
 function readSessionValue(key: string) {
