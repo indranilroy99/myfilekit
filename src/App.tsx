@@ -24,6 +24,7 @@ import {
 import { FlowButton } from "@/components/ui/flow-button";
 import { LimelightNav, type NavItem } from "@/components/ui/limelight-nav";
 import { NeuralNoise } from "@/components/ui/neural-noise";
+import { GlowCard, type GlowColor } from "@/components/ui/spotlight-card";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "./utils/format.js";
@@ -415,25 +416,27 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
   const visibleBadges = (tool.badges || []).filter((badge: string) => !["Local", "Local processing", categoryDetails[tool.category]?.accent].includes(badge)).slice(0, 2);
   const multiFile = multiFileLabel(tool);
   return (
-    <a href={tool.route} className={`tool-card group grid gap-4 rounded-3xl p-5 text-[var(--ink)] no-underline transition hover:-translate-y-1 focus-visible:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
-      <div className="flex items-start justify-between gap-3">
-        <span className="icon-tile grid h-12 w-12 place-items-center rounded-2xl transition group-hover:rotate-3">
-          <Icon size={21} />
-        </span>
-        <span className="tool-arrow" aria-hidden="true">Open <ChevronRight size={15} /></span>
-      </div>
-      <div>
-        <h4 className="text-lg font-black">{tool.name}</h4>
-        <p className={`tool-description mt-1 text-sm font-semibold leading-6 text-neutral-600 ${compact ? "tool-description-compact" : ""}`}>{tool.description}</p>
-      </div>
-      <div className="mt-auto flex flex-wrap gap-2">
-        <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{categoryDetails[tool.category]?.accent || tool.category}</span>
-        {visibleBadges.map((badge: string) => <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>)}
-        {tool.localProcessing && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">Local processing</span>}
-        {multiFile && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{multiFile}</span>}
-        {fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
-      </div>
-    </a>
+    <GlowCard customSize glowColor={glowColorForTool(tool)} className={`tool-card group p-0 transition hover:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
+      <a href={tool.route} className={`tool-card-link gap-4 rounded-3xl p-5 transition focus-visible:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
+        <div className="flex items-start justify-between gap-3">
+          <span className="icon-tile grid h-12 w-12 place-items-center rounded-2xl transition group-hover:rotate-3">
+            <Icon size={21} />
+          </span>
+          <span className="tool-arrow" aria-hidden="true">Open <ChevronRight size={15} /></span>
+        </div>
+        <div>
+          <h4 className="text-lg font-black">{tool.name}</h4>
+          <p className={`tool-description mt-1 text-sm font-semibold leading-6 text-neutral-600 ${compact ? "tool-description-compact" : ""}`}>{tool.description}</p>
+        </div>
+        <div className="mt-auto flex flex-wrap gap-2">
+          <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{categoryDetails[tool.category]?.accent || tool.category}</span>
+          {visibleBadges.map((badge: string) => <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>)}
+          {tool.localProcessing && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">Local processing</span>}
+          {multiFile && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{multiFile}</span>}
+          {fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
+        </div>
+      </a>
+    </GlowCard>
   );
 }
 
@@ -1311,6 +1314,15 @@ function fileTypeLabel(tool: Tool) {
 function multiFileLabel(tool: Tool) {
   const file = tool.file as { maxFiles?: number };
   return file.maxFiles && file.maxFiles > 1 ? "Multiple files" : "";
+}
+
+function glowColorForTool(tool: Tool): GlowColor {
+  if (tool.category === "Image Tools") return "green";
+  if (tool.category === "Business Tools") return "orange";
+  if (tool.category === "Signature Tools") return "purple";
+  if (tool.category === "Privacy Tools") return "green";
+  if (tool.category === "Developer Utilities") return "purple";
+  return "blue";
 }
 
 function iconForTool(tool: Tool) {

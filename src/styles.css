@@ -406,12 +406,77 @@ button {
   scroll-snap-align: start;
 }
 
+[data-glow-card]::before,
+[data-glow-card]::after {
+  content: "";
+  position: absolute;
+  inset: calc(var(--border-size) * -1);
+  pointer-events: none;
+  border: var(--border-size) solid transparent;
+  border-radius: calc(var(--radius) * 1px);
+  background-attachment: fixed;
+  background-position: 50% 50%;
+  background-repeat: no-repeat;
+  background-size: calc(100% + (2 * var(--border-size))) calc(100% + (2 * var(--border-size)));
+  mask: linear-gradient(transparent, transparent), linear-gradient(white, white);
+  mask-clip: padding-box, border-box;
+  mask-composite: intersect;
+}
+
+[data-glow-card]::before {
+  background-image: radial-gradient(
+    calc(var(--spotlight-size) * .72) calc(var(--spotlight-size) * .72) at
+    calc(var(--x, 0) * 1px)
+    calc(var(--y, 0) * 1px),
+    hsl(var(--hue, 210) 92% 52% / .38),
+    transparent 100%
+  );
+  filter: brightness(1.25);
+}
+
+[data-glow-card]::after {
+  background-image: radial-gradient(
+    calc(var(--spotlight-size) * .42) calc(var(--spotlight-size) * .42) at
+    calc(var(--x, 0) * 1px)
+    calc(var(--y, 0) * 1px),
+    hsl(0 0% 100% / .52),
+    transparent 100%
+  );
+}
+
+[data-glow-card] .glow-card-inner {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: calc(var(--radius) * 1px);
+  opacity: var(--outer, 1);
+  filter: blur(calc(var(--border-size) * 8));
+  will-change: filter;
+}
+
+[data-glow-card] .glow-card-inner::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border: 10px solid transparent;
+  border-radius: inherit;
+}
+
 .tool-card {
   border-color: rgba(255, 255, 255, .76);
   background:
     linear-gradient(145deg, rgba(255, 255, 255, .78), rgba(248, 250, 252, .58));
   box-shadow: 0 18px 52px rgba(15, 23, 42, .06);
   backdrop-filter: blur(18px);
+}
+
+.tool-card-link {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  height: 100%;
+  color: var(--ink);
+  text-decoration: none;
 }
 
 .tool-card:hover {
