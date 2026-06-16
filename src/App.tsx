@@ -419,7 +419,7 @@ function ToolPage({ tool }: { tool: Tool }) {
   return (
     <div className="grid gap-6">
       <Toolbar title={tool.name} subtitle={tool.category} />
-      <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_330px]">
+      <section className={`grid gap-5 ${related.length ? "lg:grid-cols-[minmax(0,1fr)_330px]" : ""}`}>
         <div className="surface-panel wabi-edge p-5 md:p-7">
           <div className="mb-6 flex items-start gap-4">
             <span className="icon-tile grid h-14 w-14 place-items-center rounded-2xl"><Icon size={24} /></span>
@@ -439,24 +439,16 @@ function ToolPage({ tool }: { tool: Tool }) {
             <ToolRenderer tool={tool} />
           </div>
         </div>
-        <aside className="grid content-start gap-4">
-          <div className="surface-muted wabi-card-edge p-5">
-            <p className="flex items-center gap-2 font-black"><BadgeCheck size={18} /> Navigation</p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button className="nav-action nav-action-icon" type="button" aria-label="Go back" title="Back" onClick={() => history.back()}><ArrowLeft size={18} /></button>
-              <a className="nav-action nav-action-icon" aria-label="Dashboard" title="Dashboard" href="#dashboard"><LayoutDashboard size={18} /></a>
-              <a className="nav-action" href={categoryRoute(tool.category)}>All {tool.category}</a>
-            </div>
-          </div>
-          {related.length > 0 && (
+        {related.length > 0 && (
+          <aside className="grid content-start gap-4">
             <div className="surface-card wabi-card-edge p-5">
               <p className="font-black">More in {tool.category}</p>
               <div className="mt-3 grid gap-2">
                 {related.map((item: Tool) => <a key={item.id} className="side-link" href={item.route}>{item.name}</a>)}
               </div>
             </div>
-          )}
-        </aside>
+          </aside>
+        )}
       </section>
     </div>
   );
