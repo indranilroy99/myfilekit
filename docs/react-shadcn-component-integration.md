@@ -1,6 +1,6 @@
 # React / shadcn Component Integration Notes
 
-MyFileKit v2 now uses React, TypeScript, Tailwind, and Vite. It is shadcn-compatible, but it does not depend on the shadcn CLI yet.
+MyFileKit uses React, TypeScript, Tailwind, and Vite. It is shadcn-compatible, but it does not depend on the shadcn CLI yet.
 
 ## Current Stack
 
@@ -20,17 +20,11 @@ This project uses the conventional source-based folder:
 src/components/ui
 ```
 
-The Vite and TypeScript configs map `@` to `src`, so imports such as `@/components/ui/expanding-search-dock-shadcnui` work cleanly. Keeping this folder matters because shadcn examples and registry components commonly expect the `@/components/ui/...` convention.
+The Vite and TypeScript configs map `@` to `src`, so imports such as `@/components/ui/example-component` work cleanly. Keeping this folder matters because shadcn examples and registry components commonly expect the `@/components/ui/...` convention.
 
-## Integrated Component
+## Component Notes
 
-The expanding search dock lives at:
-
-```text
-src/components/ui/expanding-search-dock-shadcnui.tsx
-```
-
-It is used in the app header as a compact desktop search control. Submitted searches route users back to the dashboard and apply the dashboard filter.
+The app header intentionally does not include a secondary search dock. The dashboard Spotlight search is the primary search experience, which keeps navigation cleaner and avoids duplicate controls.
 
 The local shadow experiment lives at:
 
