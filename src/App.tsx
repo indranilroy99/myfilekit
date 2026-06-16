@@ -25,6 +25,7 @@ import { FlowButton } from "@/components/ui/flow-button";
 import { LimelightNav, type NavItem } from "@/components/ui/limelight-nav";
 import { NeuralNoise } from "@/components/ui/neural-noise";
 import { GlowCard, type GlowColor } from "@/components/ui/spotlight-card";
+import AnimatedDownloadButton from "@/components/ui/download-hover-button";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "./utils/format.js";
@@ -647,6 +648,10 @@ function Checkbox({ label, checked, onChange }: { label: string; checked: boolea
 }
 
 function PrimaryButton({ label, onClick }: { label: string; onClick: () => void }) {
+  if (label.toLowerCase().startsWith("download")) {
+    return <AnimatedDownloadButton label={label} onClick={onClick} />;
+  }
+
   return <button className="primary-button" type="button" onClick={onClick}><Download size={17} />{label}</button>;
 }
 
