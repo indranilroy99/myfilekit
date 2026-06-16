@@ -8,6 +8,7 @@ import {
   FileText,
   FolderSearch,
   Hash,
+  Eye,
   Image,
   Layers3,
   LayoutDashboard,
@@ -44,6 +45,7 @@ import { deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotat
 type Tool = (typeof tools)[number];
 type Status = { tone: "idle" | "success" | "error"; message: string };
 type ThemeMode = "light" | "dark";
+type PdfOutput = { url: string; blob: Blob; filename: string; pages: number; sourceName: string };
 
 const initialStatus: Status = { tone: "idle", message: "Ready." };
 const categoryIcons: Record<string, any> = {
@@ -617,13 +619,14 @@ function ToolPage({ tool }: { tool: Tool }) {
   );
 }
 
-function ToolMetaPanel({ status, onReset }: { status: Status; onReset: () => void }) {
+function ToolMetaPanel({ status, onReset, children }: { status: Status; onReset: () => void; children?: React.ReactNode }) {
   return (
     <aside className="tool-form-status">
       <div>
         <p className="text-xs font-black uppercase text-neutral-500">Status</p>
         <StatusBox status={status} />
       </div>
+      {children}
       <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
         Supported files are processed locally in this browser session. Reset clears the current form state.
       </div>
@@ -804,18 +807,84 @@ function PageRangeTool({ tool, action, run, suffix }: { tool: Tool; action: stri
   const [files, setFiles] = useState<File[]>([]);
   const [ranges, setRanges] = useState("");
   const [status, setStatus] = useState(initialStatus);
-  return <ToolForm status={status} onReset={() => { setFiles([]); setRanges(""); setStatus(initialStatus); }}>
-    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
-    <Input label="Pages" value={ranges} onChange={setRanges} placeholder="Example: 1-3,5,8" helper="Use comma-separated pages or ranges." />
-    <PrimaryButton label={action} onClick={() => runSafely(setStatus, async () => {
-      const [file] = validateFiles(files, tool.file);
-      const pdf = await loadPdf(file);
-      const pages = parsePageRanges(ranges, pdf.getPageCount());
-      const bytes = await run(file, pages);
-      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-${suffix}`, "pdf"), "application/pdf");
-      return `Processed ${pages.length} selected page${pages.length === 1 ? "" : "s"}.`;
-    })} />
-  </ToolForm>;
+  const [result, setResult] = useState<PdfOutput | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (result) URL.revokeObjectURL(result.url);
+    };
+  }, [result]);
+
+  const reset = () => {
+    if (result) URL.revokeObjectURL(result.url);
+    setResult(null);
+    setFiles([]);
+    setRanges("");
+    setStatus(initialStatus);
+  };
+
+  return (
+    <div className="tool-form-grid">
+      <div className="tool-form-actions">
+        <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+        <Input label="Pages" value={ranges} onChange={setRanges} placeholder="Example: 1-3,5,8" helper="Use comma-separated pages or ranges." />
+        <PrimaryButton label={action} onClick={() => runSafely(setStatus, async () => {
+          const [file] = validateFiles(files, tool.file);
+          const pdf = await loadPdf(file);
+          const pages = parsePageRanges(ranges, pdf.getPageCount());
+          const bytes = await run(file, pages);
+          const buffer = new ArrayBuffer(bytes.byteLength);
+          new Uint8Array(buffer).set(bytes);
+          const blob = new Blob([buffer], { type: "application/pdf" });
+          const output: PdfOutput = {
+            url: URL.createObjectURL(blob),
+            blob,
+            filename: withExtension(`${safeFilename(file.name)}-${suffix}`, "pdf"),
+            pages: pages.length,
+            sourceName: file.name,
+          };
+          setResult((previous) => {
+            if (previous) URL.revokeObjectURL(previous.url);
+            return output;
+          });
+          return `Preview ready for ${pages.length} selected page${pages.length === 1 ? "" : "s"}.`;
+        })} />
+      </div>
+      <ToolMetaPanel status={status} onReset={reset}>
+        <PdfResultPanel result={result} />
+      </ToolMetaPanel>
+    </div>
+  );
+}
+
+function PdfResultPanel({ result }: { result: PdfOutput | null }) {
+  if (!result) {
+    return (
+      <div className="pdf-result-panel empty">
+        <Eye size={20} />
+        <p className="font-black">Preview will appear here</p>
+        <p className="text-sm font-semibold text-neutral-500">Extract or delete pages to create a downloadable PDF preview.</p>
+      </div>
+    );
+  }
+
+  return (
+    <section className="pdf-result-panel">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-neutral-500">Generated PDF</p>
+          <p className="mt-1 font-black text-[var(--foreground)]">{result.filename}</p>
+          <p className="mt-1 text-sm font-semibold text-neutral-500">{result.pages} page{result.pages === 1 ? "" : "s"} from {result.sourceName}</p>
+        </div>
+        <span className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{formatBytes(result.blob.size)}</span>
+      </div>
+      <iframe className="pdf-preview-frame" title={`Preview of ${result.filename}`} src={result.url} />
+      <div className="grid gap-2 sm:grid-cols-2">
+        <SecondaryButton label="Open preview" onClick={() => window.open(result.url, "_blank", "noopener,noreferrer")} />
+        <PrimaryButton label="Download PDF" onClick={() => downloadBlob(result.blob, result.filename)} />
+      </div>
+    </section>
+  );
 }
 
 function RotatePdfTool({ tool }: { tool: Tool }) {

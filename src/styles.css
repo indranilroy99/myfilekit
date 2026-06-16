@@ -1026,6 +1026,31 @@ button {
   padding: 16px;
 }
 
+.pdf-result-panel {
+  display: grid;
+  gap: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, .08);
+  border-radius: calc(var(--radius) - 8px);
+  background: rgba(255, 255, 255, .56);
+  padding: 14px;
+}
+
+.pdf-result-panel.empty {
+  place-items: center;
+  min-height: 220px;
+  text-align: center;
+  color: var(--stone);
+}
+
+.pdf-preview-frame {
+  width: 100%;
+  min-height: 340px;
+  border: 1px solid rgba(15, 23, 42, .08);
+  border-radius: calc(var(--radius) - 12px);
+  background: #fff;
+}
+
 .related-tools-section {
   display: grid;
   gap: 18px;
@@ -1328,6 +1353,16 @@ html.dark .tool-card .tag-badge {
   background: rgba(226, 232, 240, .08);
   color: #dbeafe;
   box-shadow: none;
+}
+
+html.dark .pdf-result-panel {
+  border-color: rgba(148, 163, 184, .16);
+  background: rgba(8, 13, 24, .72);
+}
+
+html.dark .pdf-preview-frame {
+  border-color: rgba(148, 163, 184, .18);
+  background: rgba(15, 23, 42, .82);
 }
 
 html.dark .ink-button,
