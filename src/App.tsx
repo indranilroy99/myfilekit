@@ -145,6 +145,14 @@ function Dashboard() {
     setQuery(value);
     writeSessionValue("myfilekit:lastSearch", value);
   };
+  const openBestMatch = () => {
+    if (!query.trim()) {
+      searchRef.current?.focus();
+      return;
+    }
+    const [bestMatch] = matches;
+    if (bestMatch) window.location.hash = bestMatch.route;
+  };
 
   useEffect(() => {
     const handleGlobalSearch = (event: Event) => {
@@ -193,10 +201,10 @@ function Dashboard() {
             <p className="max-w-2xl text-sm font-bold text-neutral-500">
               Supported tools process files locally in your browser. No unnecessary uploads.
             </p>
-            <div className="spotlight-search surface-card wabi-card-edge flex w-full max-w-3xl items-center gap-3 p-3 text-left">
-              <span className="icon-tile grid h-11 w-11 place-items-center rounded-2xl">
+            <form className="spotlight-search surface-card wabi-card-edge flex w-full max-w-3xl items-center gap-3 p-3 text-left" role="search" onSubmit={(event) => { event.preventDefault(); openBestMatch(); }}>
+              <button className="search-submit-button icon-tile grid h-11 w-11 place-items-center rounded-2xl" type="submit" aria-label={query ? "Open best matching tool" : "Focus search"}>
                 <Search size={21} />
-              </span>
+              </button>
               <input
                 ref={searchRef}
                 aria-label="Search MyFileKit tools"
@@ -213,10 +221,8 @@ function Dashboard() {
                 <button className="search-clear-button" type="button" aria-label="Clear search" onClick={() => { updateQuery(""); searchRef.current?.focus(); }}>
                   ×
                 </button>
-              ) : (
-                <kbd className="hidden rounded-xl bg-[var(--paper-soft)] px-2.5 py-1.5 text-xs font-black text-[var(--stone)] sm:block">⌘/Ctrl K</kbd>
-              )}
-            </div>
+              ) : null}
+            </form>
             <div className="flex max-w-3xl flex-wrap justify-center gap-2">
               {quickSearches.map((term) => (
                 <button key={term} className="quick-chip" type="button" onClick={() => { updateQuery(term); searchRef.current?.focus(); }}>
