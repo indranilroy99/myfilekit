@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  BadgeCheck,
   ChevronRight,
   Download,
   FileArchive,
@@ -21,7 +20,6 @@ import {
 } from "lucide-react";
 import { AnimatedLogo } from "./components/AnimatedLogo";
 import { ExpandingSearchDock } from "@/components/ui/expanding-search-dock-shadcnui";
-import { FeatureCard } from "@/components/ui/grid-feature-cards";
 import { GLSLHills } from "@/components/ui/glsl-hills";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
@@ -56,48 +54,6 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
   "Privacy Tools": { description: "Clean supported image metadata locally in your browser.", accent: "Privacy" },
   "Developer Utilities": { description: "Handle hashes, Base64, and small file checks without leaving the page.", accent: "Utility" },
 };
-
-const featureHighlights = [
-  {
-    title: "Fast local tools",
-    icon: FileArchive,
-    description: "Run common PDF, image, and document tasks quickly from one dashboard.",
-  },
-  {
-    title: "Privacy-first",
-    icon: ShieldCheck,
-    description: "Process files in your browser wherever possible, without unnecessary uploads.",
-  },
-  {
-    title: "All-in-one workspace",
-    icon: LayoutDashboard,
-    description: "Access PDF, image, business, signature, privacy, text, data, and developer tools from one place.",
-  },
-  {
-    title: "Search-first dashboard",
-    icon: Search,
-    description: "Find the right tool quickly using a Spotlight-style search experience.",
-  },
-  {
-    title: "Cross-platform",
-    icon: BadgeCheck,
-    description: "Run the project on macOS, Windows, and Linux with clear setup instructions.",
-  },
-  {
-    title: "Built to grow",
-    icon: Sparkles,
-    description: "Add new tools through a central registry without duplicating dashboard code.",
-  },
-];
-
-const popularToolIds = [
-  "merge-pdf-tool",
-  "compress-image-tool",
-  "resize-image-tool",
-  "invoice-generator-tool",
-  "json-formatter-tool",
-  "file-hash-tool",
-];
 
 const quickSearches = ["Merge PDF", "Compress Image", "Invoice", "Signature", "JSON", "File Hash"];
 const recentToolsStorageKey = "myfilekit:recentTools";
@@ -182,7 +138,6 @@ function Dashboard() {
   const [query, setQuery] = useState(() => readSessionValue("myfilekit:lastSearch"));
   const [recentTools, setRecentTools] = useState<Tool[]>(() => loadRecentTools());
   const matches = useMemo(() => filterTools(query), [query]);
-  const popularTools = useMemo(() => popularToolIds.map(findToolById).filter(Boolean) as Tool[], []);
   const grouped = query
     ? [["Search results", matches] as const]
     : categories.map((category) => [category, tools.filter((tool: Tool) => tool.category === category)] as const);
@@ -251,10 +206,16 @@ function Dashboard() {
                 onKeyDown={(event) => {
                   if (event.key === "Escape") updateQuery("");
                 }}
-                placeholder="Search PDF, image, invoice, signature, JSON tools..."
+                placeholder="Search PDF, image, invoice, signature..."
                 type="search"
               />
-              <kbd className="hidden rounded-xl bg-[var(--paper-soft)] px-2.5 py-1.5 text-xs font-black text-[var(--stone)] sm:block">⌘/Ctrl K</kbd>
+              {query ? (
+                <button className="search-clear-button" type="button" aria-label="Clear search" onClick={() => { updateQuery(""); searchRef.current?.focus(); }}>
+                  ×
+                </button>
+              ) : (
+                <kbd className="hidden rounded-xl bg-[var(--paper-soft)] px-2.5 py-1.5 text-xs font-black text-[var(--stone)] sm:block">⌘/Ctrl K</kbd>
+              )}
             </div>
             <div className="flex max-w-3xl flex-wrap justify-center gap-2">
               {quickSearches.map((term) => (
@@ -279,20 +240,10 @@ function Dashboard() {
         </section>
       )}
 
-      {!query && (
-        <section className="surface-panel wabi-edge grid gap-5 p-5 md:p-7">
-          <SectionHeader title="Popular Tools" subtitle="The tools people usually reach for first." />
-          <div className="tool-grid">
-            {popularTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
-          </div>
-        </section>
-      )}
-
       <section className="surface-panel wabi-edge grid gap-6 p-5 md:p-7">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h2 className="font-display text-3xl font-black">{query ? "Search Results" : "Tool Library"}</h2>
-            <p className="mt-1 font-semibold text-neutral-500">{query ? "Filtered by name, task, category, badge, and keyword." : "Every visible card opens a working tool page."}</p>
+            <h2 className="font-display text-3xl font-black">{query ? "Results" : "Tools"}</h2>
           </div>
           <span className="local-badge inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-black">
             <ShieldCheck size={16} />
@@ -308,18 +259,6 @@ function Dashboard() {
             ))}
           </div>
         )}
-      </section>
-
-      <section className="surface-panel wabi-edge grid gap-5 p-5 md:p-7">
-        <div>
-          <h2 className="font-display text-3xl font-black">Why MyFileKit</h2>
-          <p className="mt-1 font-semibold text-neutral-500">Quiet, practical details that keep the toolkit reliable.</p>
-        </div>
-        <div className="feature-card-grid">
-          {featureHighlights.map((feature) => (
-            <FeatureCard key={feature.title} feature={feature} />
-          ))}
-        </div>
       </section>
     </div>
   );
@@ -354,7 +293,7 @@ function ToolSection({ title, tools: sectionTools, searchMode = false }: { title
         )}
       </div>
       <div className="tool-grid">
-        {sectionTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} />)}
+        {sectionTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} compact />)}
       </div>
     </section>
   );
@@ -373,7 +312,7 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
       </div>
       <div>
         <h4 className="text-lg font-black">{tool.name}</h4>
-        <p className="mt-1 text-sm font-semibold leading-6 text-neutral-600">{tool.description}</p>
+        <p className={`tool-description mt-1 text-sm font-semibold leading-6 text-neutral-600 ${compact ? "tool-description-compact" : ""}`}>{tool.description}</p>
       </div>
       <div className="mt-auto flex flex-wrap gap-2">
         <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{categoryDetails[tool.category]?.accent || tool.category}</span>
