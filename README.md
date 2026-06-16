@@ -4,7 +4,7 @@ MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, si
 
 ## Version
 
-Current app version: `3.0.5`
+Current app version: `3.0.6`
 
 Use the version scripts for future changes:
 
@@ -38,7 +38,7 @@ Only working tools are shown in the dashboard. Planned tools stay out of the pro
 - Dedicated Browse Tools page for the full searchable tool library.
 - Searchable category pages for narrowing tools inside one workflow family.
 - Tool pages include Back, Forward, Dashboard, category navigation, and related tools.
-- Custom professional logo in the React shell and favicon.
+- Clean text-only MyFileKit wordmark in the product shell.
 - Premium utility visual system with a light cinematic background, glass surfaces, softer depth, refined typography, and fewer hard divider lines.
 
 ## Privacy Model

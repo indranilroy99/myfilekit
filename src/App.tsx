@@ -21,7 +21,6 @@ import {
   Upload,
   Zap,
 } from "lucide-react";
-import { AnimatedLogo } from "./components/AnimatedLogo";
 import { NeuralNoise } from "@/components/ui/neural-noise";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
@@ -91,8 +90,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <>
       <header className="site-header sticky top-0 z-30 backdrop-blur-xl">
         <div className="mx-auto flex w-[min(1760px,calc(100vw-clamp(28px,5vw,96px)))] items-center justify-between gap-4 py-4">
-          <a href="#dashboard" className="flex items-center gap-3 text-[var(--ink)] no-underline">
-            <AnimatedLogo compact />
+          <a href="#dashboard" className="flex items-center text-[var(--ink)] no-underline">
             <span className="leading-tight">
               <span className="block font-display text-xl font-black">MyFileKit</span>
               <span className="block text-xs font-bold uppercase text-neutral-500">Local-first tools</span>
@@ -183,12 +181,9 @@ function Dashboard() {
           <div className="grid w-full justify-items-center gap-5">
             {!isSearching && (
               <div className="grid justify-items-center gap-5">
-                <div className="grid justify-items-center gap-4 sm:flex sm:items-center">
-                  <AnimatedLogo />
-                  <div>
-                    <p className="app-badge mx-auto w-fit text-xs font-black uppercase sm:mx-0">Local-first file toolkit</p>
-                    <h1 className="font-display text-5xl font-black md:text-7xl">MyFileKit</h1>
-                  </div>
+                <div className="grid justify-items-center gap-3">
+                  <p className="app-badge mx-auto w-fit text-xs font-black uppercase">Local-first file toolkit</p>
+                  <h1 className="font-display text-5xl font-black md:text-7xl">MyFileKit</h1>
                 </div>
                 <p className="max-w-3xl text-xl font-semibold leading-snug text-neutral-700 md:text-2xl">
                   PDF, image, business, signature, and data tools — fast, private, and ready when you are.
