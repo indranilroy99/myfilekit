@@ -77,6 +77,7 @@ export default function App() {
     <div className="min-h-screen bg-[var(--app-bg)] text-[var(--ink)]">
       <Shell>
         {route.type === "dashboard" && <Dashboard />}
+        {route.type === "browse" && <BrowseToolsPage />}
         {route.type === "category" && <CategoryPage category={route.category} />}
         {route.type === "tool" && <ToolPage tool={route.tool} />}
         {route.type === "missing" && <MissingPage />}
@@ -104,7 +105,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
           <div className="flex items-center gap-2">
-            <a className="ink-button rounded-full px-4 py-2 text-sm font-black no-underline" href="#category-pdf-tools">
+            <a className="ink-button rounded-full px-4 py-2 text-sm font-black no-underline" href="#browse-tools">
               Browse tools
             </a>
           </div>
@@ -132,7 +133,6 @@ function Dashboard() {
   const [recentTools, setRecentTools] = useState<Tool[]>(() => loadRecentTools());
   const matches = useMemo(() => filterTools(query), [query]);
   const isSearching = Boolean(query.trim());
-  const grouped = categories.map((category) => [category, tools.filter((tool: Tool) => tool.category === category)] as const);
   const featuredTools = featuredToolIds.map(findToolById).filter(Boolean) as Tool[];
   const updateQuery = (value: string) => {
     setQuery(value);
@@ -257,6 +257,7 @@ function Dashboard() {
           <div className="dashboard-tool-row">
             {featuredTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
           </div>
+          <a className="secondary-button w-fit" href="#browse-tools">Browse all tools</a>
         </section>
       )}
 
@@ -269,22 +270,6 @@ function Dashboard() {
         </section>
       )}
 
-      {!isSearching && <section className="dashboard-tools-shell">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h2 className="font-display text-3xl font-black">Tool Library</h2>
-          </div>
-          <span className="local-badge inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-black">
-            <ShieldCheck size={16} />
-            Local-first
-          </span>
-        </div>
-        <div className="grid gap-10">
-          {grouped.filter(([, items]) => items.length).map(([category, items]) => (
-            <ToolSection key={category} title={category} tools={items} />
-          ))}
-        </div>
-      </section>}
     </div>
   );
 }
@@ -400,6 +385,52 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
         {fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
       </div>
     </a>
+  );
+}
+
+function BrowseToolsPage() {
+  const [query, setQuery] = useState("");
+  const isSearching = Boolean(query.trim());
+  const visibleTools = useMemo(() => filterTools(query), [query]);
+  const grouped = categories
+    .map((category) => [category, visibleTools.filter((tool: Tool) => tool.category === category)] as const)
+    .filter(([, items]) => items.length);
+
+  return (
+    <div className="grid gap-6">
+      <Toolbar title="Browse Tools" subtitle="All MyFileKit workflows in one searchable library" />
+      <section className="surface-panel wabi-edge p-6">
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="moss-text text-xs font-black uppercase">Tool library</p>
+            <h1 className="font-display text-4xl font-black">Find the right workflow</h1>
+            <p className="mt-1 max-w-2xl font-semibold text-neutral-500">
+              Browse by category or search by task, file type, or outcome.
+            </p>
+          </div>
+          <span className="local-badge inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-black">
+            <ShieldCheck size={16} />
+            Local-first
+          </span>
+        </div>
+        <div className="category-filter mb-5 flex items-center gap-3">
+          <Search size={18} />
+          <input
+            aria-label="Search all tools"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search all tools..."
+          />
+          {query && <button type="button" aria-label="Clear tools search" onClick={() => setQuery("")}>×</button>}
+        </div>
+        <div className="grid gap-10">
+          {grouped.map(([category, items]) => (
+            <ToolSection key={category} title={category} tools={items} searchMode={isSearching} />
+          ))}
+        </div>
+        {!visibleTools.length && <EmptyState query={query} onPick={setQuery} />}
+      </section>
+    </div>
   );
 }
 

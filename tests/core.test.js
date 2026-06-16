@@ -31,6 +31,7 @@ test("registered tool routes resolve", () => {
   assert.equal(metadataRoute.type, "tool");
   assert.equal(metadataRoute.tool.id, "metadata-cleaner");
   assert.equal(routeForHash("#dashboard").type, "dashboard");
+  assert.equal(routeForHash("#browse-tools").type, "browse");
   assert.equal(routeForHash("#missing-tool").type, "missing");
 });
 
