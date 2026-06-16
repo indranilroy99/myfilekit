@@ -318,9 +318,63 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
 }
 
+.feature-card-grid {
+  display: grid;
+  gap: clamp(14px, 1.4vw, 22px);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+}
+
+.feature-pattern-card {
+  min-height: 190px;
+  border: 1px solid rgba(255, 255, 255, .78);
+  border-radius: 1.45rem;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, .8), rgba(248, 250, 252, .58)),
+    radial-gradient(circle at 12% 0%, rgba(148, 163, 184, .18), transparent 34%);
+  box-shadow: 0 18px 58px rgba(15, 23, 42, .06);
+  backdrop-filter: blur(18px);
+  padding: 22px;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.feature-pattern-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(139, 149, 167, .44);
+  box-shadow: 0 28px 80px rgba(15, 23, 42, .1);
+}
+
+.feature-pattern-glow {
+  position: absolute;
+  inset: auto -20% -42% 28%;
+  height: 110px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(37, 99, 235, .09), transparent 68%);
+  opacity: 0;
+  transition: opacity .18s ease;
+}
+
+.feature-pattern-card:hover .feature-pattern-glow {
+  opacity: 1;
+}
+
+.feature-pattern-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 1.05rem;
+  background: linear-gradient(135deg, #101828, #1d2939);
+  color: #fff;
+  box-shadow: 0 16px 34px rgba(16, 24, 40, .18);
+}
+
 @media (min-width: 1680px) {
   .tool-grid {
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+
+  .feature-card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

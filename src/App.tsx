@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { AnimatedLogo } from "./components/AnimatedLogo";
 import { ExpandingSearchDock } from "@/components/ui/expanding-search-dock-shadcnui";
+import { FeatureCard } from "@/components/ui/grid-feature-cards";
 import { GLSLHills } from "@/components/ui/glsl-hills";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
@@ -57,12 +58,36 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
 };
 
 const featureHighlights = [
-  ["Local-first processing", "Supported tools run in your browser without unnecessary uploads."],
-  ["Search-first workspace", "Find PDF, image, business, signature, and data tools by name or task."],
-  ["Essential tools in one place", "Keep common file work close without installing separate utilities."],
-  ["Built for everyday files", "Clean controls, clear status messages, and practical export actions."],
-  ["Works on your computer", "Use the toolkit in a modern browser on macOS, Windows, and Linux."],
-  ["Working tools only", "Every visible card opens a real tool, so the dashboard stays clear and useful."],
+  {
+    title: "Fast local tools",
+    icon: FileArchive,
+    description: "Run common PDF, image, and document tasks quickly from one dashboard.",
+  },
+  {
+    title: "Privacy-first",
+    icon: ShieldCheck,
+    description: "Process files in your browser wherever possible, without unnecessary uploads.",
+  },
+  {
+    title: "All-in-one workspace",
+    icon: LayoutDashboard,
+    description: "Access PDF, image, business, signature, privacy, text, data, and developer tools from one place.",
+  },
+  {
+    title: "Search-first dashboard",
+    icon: Search,
+    description: "Find the right tool quickly using a Spotlight-style search experience.",
+  },
+  {
+    title: "Cross-platform",
+    icon: BadgeCheck,
+    description: "Run the project on macOS, Windows, and Linux with clear setup instructions.",
+  },
+  {
+    title: "Built to grow",
+    icon: Sparkles,
+    description: "Add new tools through a central registry without duplicating dashboard code.",
+  },
 ];
 
 const popularToolIds = [
@@ -290,12 +315,9 @@ function Dashboard() {
           <h2 className="font-display text-3xl font-black">Why MyFileKit</h2>
           <p className="mt-1 font-semibold text-neutral-500">Quiet, practical details that keep the toolkit reliable.</p>
         </div>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {featureHighlights.map(([title, copy]) => (
-            <div key={title} className="surface-card wabi-card-edge p-4">
-              <p className="font-black">{title}</p>
-              <p className="mt-1 text-sm font-medium leading-6 text-neutral-600">{copy}</p>
-            </div>
+        <div className="feature-card-grid">
+          {featureHighlights.map((feature) => (
+            <FeatureCard key={feature.title} feature={feature} />
           ))}
         </div>
       </section>
