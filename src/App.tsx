@@ -25,6 +25,7 @@ import { FlowButton } from "@/components/ui/flow-button";
 import { Icons } from "@/components/ui/icons";
 import { LimelightNav, type NavItem } from "@/components/ui/limelight-nav";
 import { NeuralNoise } from "@/components/ui/neural-noise";
+import { NumberedPagination } from "@/components/ui/pagination";
 import { GlowCard, type GlowColor } from "@/components/ui/spotlight-card";
 import AnimatedDownloadButton from "@/components/ui/download-hover-button";
 import { categories, tools } from "./registry/tools.registry.js";
@@ -65,6 +66,7 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
 const quickSearches = ["Merge PDF", "Compress Image", "Invoice", "Signature", "JSON", "File Hash"];
 const recentToolsStorageKey = "myfilekit:recentTools";
 const popularToolIds = ["merge-pdf-tool", "compress-image-tool", "resize-image-tool", "invoice-generator-tool", "json-formatter-tool", "file-hash-tool"];
+const browseToolsPageSize = 10;
 
 export default function App() {
   const [hash, setHash] = useState(window.location.hash || "#dashboard");
@@ -448,11 +450,22 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
 
 function BrowseToolsPage() {
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const isSearching = Boolean(query.trim());
   const visibleTools = useMemo(() => filterTools(query), [query]);
+  const totalPages = Math.max(1, Math.ceil(visibleTools.length / browseToolsPageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * browseToolsPageSize;
+  const pageTools = visibleTools.slice(pageStart, pageStart + browseToolsPageSize);
   const grouped = categories
-    .map((category) => [category, visibleTools.filter((tool: Tool) => tool.category === category)] as const)
+    .map((category) => [category, pageTools.filter((tool: Tool) => tool.category === category)] as const)
     .filter(([, items]) => items.length);
+  const rangeStart = visibleTools.length ? pageStart + 1 : 0;
+  const rangeEnd = Math.min(pageStart + pageTools.length, visibleTools.length);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query]);
 
   return (
     <div className="grid gap-6">
@@ -486,6 +499,14 @@ function BrowseToolsPage() {
             <ToolSection key={category} title={category} tools={items} searchMode={isSearching} layout="grid" />
           ))}
         </div>
+        {visibleTools.length > browseToolsPageSize && (
+          <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-[2rem] bg-white/55 p-4 shadow-[0_18px_48px_rgba(15,23,42,.055)] sm:flex-row">
+            <p className="text-sm font-black text-neutral-500">
+              Showing {rangeStart}-{rangeEnd} of {visibleTools.length} tools
+            </p>
+            <NumberedPagination count={visibleTools.length} page={currentPage} pageSize={browseToolsPageSize} onPageChange={setPage} />
+          </div>
+        )}
         {!visibleTools.length && <EmptyState query={query} onPick={setQuery} />}
       </section>
     </div>
