@@ -13,7 +13,6 @@ const requiredFiles = [
   "src/main.tsx",
   "src/App.tsx",
   "src/styles.css",
-  "src/components/AnimatedLogo.tsx",
   "src/lib/routing.ts",
   "src/router.js",
   "src/registry/tools.registry.js",
