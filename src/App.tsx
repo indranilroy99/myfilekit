@@ -113,6 +113,7 @@ export default function App() {
 }
 
 function Shell({ children, hash, theme, onToggleTheme }: { children: React.ReactNode; hash: string; theme: ThemeMode; onToggleTheme: () => void }) {
+  const [isScrolled, setIsScrolled] = useState(() => window.scrollY > 4);
   const primaryNavItems = useMemo<NavItem[]>(() => [
     { id: "dashboard", icon: <LayoutDashboard />, label: "Dashboard", onClick: () => { window.location.hash = "#dashboard"; } },
     ...categories.slice(0, 4).map((category) => {
@@ -127,9 +128,16 @@ function Shell({ children, hash, theme, onToggleTheme }: { children: React.React
   ], []);
   const activeNavIndex = activePrimaryNavIndex(hash);
 
+  useEffect(() => {
+    const syncScroll = () => setIsScrolled(window.scrollY > 4);
+    syncScroll();
+    window.addEventListener("scroll", syncScroll, { passive: true });
+    return () => window.removeEventListener("scroll", syncScroll);
+  }, []);
+
   return (
     <>
-      <header className="site-header sticky top-0 z-30 backdrop-blur-xl">
+      <header className={`site-header sticky top-0 z-30 ${isScrolled ? "site-header-scrolled" : ""}`}>
         <div className="mx-auto flex w-full max-w-screen-2xl items-center justify-between gap-4 px-5 py-4 sm:px-6 lg:px-10 2xl:max-w-[1680px] 2xl:px-0">
           <a href="#dashboard" className="flex items-center text-[var(--ink)] no-underline">
             <span className="leading-tight">
@@ -464,8 +472,9 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
   const visibleBadges = (tool.badges || []).filter((badge: string) => !["Local", "Local processing", categoryDetails[tool.category]?.accent].includes(badge)).slice(0, 2);
   const multiFile = multiFileLabel(tool);
   const primaryBadge = categoryDetails[tool.category]?.accent || tool.category.replace(" Tools", "");
+  const categoryClass = `category-${tool.category.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
   return (
-    <GlowCard customSize glowColor={glowColorForTool(tool)} className={`tool-card group p-0 transition hover:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
+    <GlowCard customSize glowColor={glowColorForTool(tool)} className={`tool-card ${categoryClass} group p-0 transition hover:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
       <a href={tool.route} className={`tool-card-link gap-4 rounded-3xl p-5 transition focus-visible:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
         <div className="flex items-start justify-between gap-3">
           <span className="icon-tile grid h-12 w-12 place-items-center rounded-2xl transition group-hover:rotate-3">
