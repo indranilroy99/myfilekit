@@ -1,6 +1,6 @@
 # Contributing
 
-MyFileKit v2 is a Vite, React, TypeScript, and Tailwind app. Contributions should keep the project easy to run on macOS, Windows, and Linux.
+MyFileKit is a Vite, React, TypeScript, and Tailwind app. Contributions should keep the project easy to run on macOS, Windows, and Linux.
 
 ## Local Setup
 

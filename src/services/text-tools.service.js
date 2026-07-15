@@ -21,7 +21,7 @@ export function textStats(text) {
   const characters = value.length;
   const charactersNoSpaces = value.replace(/\s/g, "").length;
   const lines = value ? value.split(/\r?\n/).length : 0;
-  const readingMinutes = Math.max(1, Math.ceil(words / 225));
+  const readingMinutes = words ? Math.max(1, Math.ceil(words / 225)) : 0;
   return { words, characters, charactersNoSpaces, lines, readingMinutes };
 }
 
@@ -49,7 +49,9 @@ export function diffToText(rows) {
 }
 
 export function generatePassword(options = {}) {
-  const length = clamp(Number(options.length || 20), 8, 128);
+  const requestedLength = Number(options.length ?? 20);
+  if (!Number.isFinite(requestedLength)) throw new Error("Password length must be a valid number.");
+  const length = clamp(Math.trunc(requestedLength), 8, 128);
   const pools = [
     options.lower !== false ? "abcdefghijkmnopqrstuvwxyz" : "",
     options.upper !== false ? "ABCDEFGHJKLMNPQRSTUVWXYZ" : "",
@@ -58,8 +60,37 @@ export function generatePassword(options = {}) {
   ].filter(Boolean);
   if (!pools.length) throw new Error("Choose at least one character set.");
   const alphabet = pools.join("");
-  const bytes = crypto.getRandomValues(new Uint32Array(length));
-  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+  const characters = pools.map((pool) => pool[randomIndex(pool.length)]);
+  while (characters.length < length) characters.push(alphabet[randomIndex(alphabet.length)]);
+  for (let index = characters.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomIndex(index + 1);
+    [characters[index], characters[swapIndex]] = [characters[swapIndex], characters[index]];
+  }
+  return characters.join("");
+}
+
+export function base64Encode(value) {
+  const bytes = new TextEncoder().encode(String(value ?? ""));
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
+
+export function base64Decode(value) {
+  let binary;
+  try {
+    binary = atob(String(value ?? "").replace(/\s+/g, ""));
+  } catch {
+    throw new Error("This is not valid Base64 text.");
+  }
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error("The decoded Base64 value is not valid UTF-8 text.");
+  }
 }
 
 export function cleanFilenameList(input) {
@@ -121,4 +152,14 @@ function isPlainObject(value) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
+}
+
+function randomIndex(length) {
+  const range = 0x100000000;
+  const limit = range - (range % length);
+  const value = new Uint32Array(1);
+  do {
+    crypto.getRandomValues(value);
+  } while (value[0] >= limit);
+  return value[0] % length;
 }

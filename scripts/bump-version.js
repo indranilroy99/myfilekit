@@ -36,9 +36,13 @@ if (fs.existsSync(lockPath)) {
 
 if (fs.existsSync(readmePath)) {
   const readme = fs.readFileSync(readmePath, "utf8");
+  const nextReadme = readme
+    .replace(/Current app version: `[^`]+`/, `Current app version: \`${nextVersion}\``)
+    .replace(/The current version is `[^`]+`/, `The current version is \`${nextVersion}\``)
+    .replace(/(shields\.io\/badge\/version-)[^-\s)]+/, `$1${nextVersion}`);
   fs.writeFileSync(
     readmePath,
-    readme.replace(/Current app version: `[^`]+`/, `Current app version: \`${nextVersion}\``)
+    nextReadme
   );
 }
 

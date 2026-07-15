@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
 @theme inline {
   --color-card: var(--card);
@@ -1590,7 +1591,6 @@ html.dark .site-footer {
 }
 
 /* Production-grade dark utility redesign. Copy and tool data remain unchanged. */
-:root,
 .dark {
   --card: #111113;
   --ring: #3b82f6;
@@ -1625,15 +1625,13 @@ html.dark .site-footer {
   --font-sans: "Geist", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-html,
-body,
+html.dark,
 html.dark body {
   background: #09090b !important;
   color: #fafafa;
   font-family: var(--font-sans);
 }
 
-body::before,
 html.dark body::before,
 .hero-neural,
 .wabi-noise,
@@ -2225,4 +2223,189 @@ html.dark .primary-button {
   .why-grid {
     grid-template-columns: 1fr !important;
   }
+}
+
+/* Light mode keeps the same restrained utility layout without inheriting dark-only values. */
+html:not(.dark) {
+  --card: #ffffff;
+  --ring: #2563eb;
+  --input: #ffffff;
+  --muted: #f7f7f8;
+  --accent: #f7f7f8;
+  --border: #e4e4e7;
+  --popover: #ffffff;
+  --primary: #2563eb;
+  --secondary: #f7f7f8;
+  --background: #fafafa;
+  --foreground: #18181b;
+  --card-foreground: #18181b;
+  --muted-foreground: #71717a;
+  --accent-foreground: #18181b;
+  --popover-foreground: #18181b;
+  --primary-foreground: #ffffff;
+  --secondary-foreground: #18181b;
+  --app-bg: #fafafa;
+  --ink: #18181b;
+  --paper: #ffffff;
+  --paper-soft: #f7f7f8;
+  --stone: #71717a;
+  --line: #e4e4e7;
+  --moss: #2563eb;
+  --indigo: #18181b;
+  --clay: #2563eb;
+  --ochre: #a1a1aa;
+  --shadow-soft: 0 10px 28px rgba(24, 24, 27, .05);
+  --shadow-lift: 0 14px 36px rgba(24, 24, 27, .08);
+}
+
+html:not(.dark),
+html:not(.dark) body {
+  background: #fafafa !important;
+  color: #18181b;
+}
+
+html:not(.dark) .site-header-scrolled {
+  border-bottom-color: #e4e4e7 !important;
+  background: rgba(250, 250, 250, .9) !important;
+}
+
+html:not(.dark) .limelight-nav-item,
+html:not(.dark) .theme-toggle,
+html:not(.dark) .secondary-button,
+html:not(.dark) .nav-action,
+html:not(.dark) .side-link,
+html:not(.dark) .pagination-nav-button,
+html:not(.dark) .pagination-icon-button,
+html:not(.dark) .pagination-page-button,
+html:not(.dark) .quick-chip {
+  border-color: #e4e4e7 !important;
+  color: #52525b !important;
+}
+
+html:not(.dark) .limelight-nav-item:hover,
+html:not(.dark) .limelight-nav-item:focus-visible,
+html:not(.dark) .limelight-nav-item[aria-current="page"],
+html:not(.dark) .theme-toggle:hover,
+html:not(.dark) .theme-toggle:focus-visible,
+html:not(.dark) .secondary-button:hover,
+html:not(.dark) .nav-action:hover,
+html:not(.dark) .side-link:hover,
+html:not(.dark) .pagination-nav-button:hover,
+html:not(.dark) .pagination-icon-button:hover,
+html:not(.dark) .pagination-page-button:hover,
+html:not(.dark) .quick-chip:hover,
+html:not(.dark) .quick-chip:focus-visible {
+  border-color: #a1a1aa !important;
+  color: #18181b !important;
+}
+
+html:not(.dark) .flow-button {
+  border-color: #d4d4d8 !important;
+  color: #18181b !important;
+}
+
+html:not(.dark) .flow-button:hover,
+html:not(.dark) .flow-button:focus-visible {
+  border-color: #2563eb !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
+}
+
+html:not(.dark) .hero-panel h1,
+html:not(.dark) .tool-card h4,
+html:not(.dark) .category-card .font-black,
+html:not(.dark) .why-card .font-black,
+html:not(.dark) .command-stat .font-black {
+  color: #18181b !important;
+}
+
+html:not(.dark) .hero-panel p,
+html:not(.dark) .tool-description,
+html:not(.dark) .category-card .text-neutral-500,
+html:not(.dark) .why-card .text-neutral-600,
+html:not(.dark) .command-stat .text-neutral-500 {
+  color: #71717a !important;
+}
+
+html:not(.dark) .hero-panel p.max-w-2xl,
+html:not(.dark) .hero-panel > div > div > p.text-sm,
+html:not(.dark) .site-header .text-neutral-500,
+html:not(.dark) .dashboard-shelf h2,
+html:not(.dark) .category-heading h3,
+html:not(.dark) .related-tools-section h2,
+html:not(.dark) .tool-card .tag-badge:first-child,
+html:not(.dark) .category-count,
+html:not(.dark) .site-footer {
+  color: #71717a !important;
+}
+
+html:not(.dark) .spotlight-search,
+html:not(.dark) .spotlight-search:focus-within,
+html:not(.dark) .field-input,
+html:not(.dark) .category-filter {
+  border-color: #d4d4d8 !important;
+  background: #ffffff !important;
+  color: #18181b !important;
+}
+
+html:not(.dark) .spotlight-search:focus-within,
+html:not(.dark) .field-input:focus,
+html:not(.dark) .category-filter:focus-within {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .12) !important;
+}
+
+html:not(.dark) .spotlight-search input {
+  color: #18181b !important;
+}
+
+html:not(.dark) .spotlight-search input::placeholder {
+  color: #a1a1aa !important;
+}
+
+html:not(.dark) .search-submit-button,
+html:not(.dark) .icon-tile,
+html:not(.dark) .command-stat-icon,
+html:not(.dark) .search-result-icon,
+html:not(.dark) .category-icon,
+html:not(.dark) .tool-arrow,
+html:not(.dark) .search-clear-button {
+  color: #52525b !important;
+}
+
+html:not(.dark) .dashboard-shelf > div:first-child,
+html:not(.dark) .category-heading {
+  border-bottom-color: #e4e4e7 !important;
+}
+
+html:not(.dark) .tool-card,
+html:not(.dark) .tool-card:hover,
+html:not(.dark) .surface-panel,
+html:not(.dark) .surface-card,
+html:not(.dark) .surface-muted,
+html:not(.dark) .page-header,
+html:not(.dark) .command-stat,
+html:not(.dark) .category-card,
+html:not(.dark) .why-card,
+html:not(.dark) .tool-form-status,
+html:not(.dark) .search-result-card,
+html:not(.dark) .hero-empty-result {
+  border-color: #e4e4e7 !important;
+  background: #ffffff !important;
+}
+
+html:not(.dark) .tool-card:hover,
+html:not(.dark) .category-card:hover,
+html:not(.dark) .category-card:focus-visible,
+html:not(.dark) .why-card:hover,
+html:not(.dark) .command-stat:hover,
+html:not(.dark) .search-result-card:hover,
+html:not(.dark) .search-result-card:focus-visible {
+  border-color: #a1a1aa !important;
+}
+
+html:not(.dark) .primary-button {
+  border-color: #2563eb !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
 }

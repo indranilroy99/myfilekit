@@ -6,7 +6,7 @@ import { csvToJson, jsonToCsv } from "../src/services/csv.service.js";
 import { addPdfPageNumbers, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "../src/services/pdf.service.js";
 import { validateFiles } from "../src/services/file-validator.js";
 import { inspectImageMetadataBuffer } from "../src/services/metadata.service.js";
-import { cleanFilenameList, diffToText, generatePassword, jsonToYaml, lineDiff, textStats, urlDecode, urlEncode } from "../src/services/text-tools.service.js";
+import { base64Decode, base64Encode, cleanFilenameList, diffToText, generatePassword, jsonToYaml, lineDiff, textStats, urlDecode, urlEncode } from "../src/services/text-tools.service.js";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "../src/utils/format.js";
 import { safeFilename, withExtension } from "../src/utils/safe-filename.js";
 import { routeForHash } from "../src/router.js";
@@ -78,6 +78,13 @@ test("markdown preview escapes user HTML", () => {
 test("React shell does not use dangerous user-controlled HTML injection", () => {
   const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(appSource, /dangerouslySetInnerHTML|\\.innerHTML\\s*=/);
+});
+
+test("every visible tool has a concrete renderer", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  for (const tool of tools) {
+    assert.equal(appSource.includes(`"${tool.id}"`), true, `${tool.name} is missing from ToolRenderer`);
+  }
 });
 
 test("file validation checks count, type, extension, and size", () => {
@@ -165,18 +172,34 @@ test("PDF services create valid local outputs", async () => {
 
   const annotated = await window.PDFLib.PDFDocument.load(await addTextToPdf(mergedFile, "Approved", { page: 1, x: 72, y: 720 }));
   assert.equal(annotated.getPageCount(), 2);
+  await assert.rejects(() => addTextToPdf(mergedFile, "Approved", { page: 99 }), /between 1 and 2/);
 
-  const cleaned = await window.PDFLib.PDFDocument.load(await cleanPdfMetadata(mergedFile));
+  merged.setTitle("Private project");
+  merged.setAuthor("Private author");
+  const metadataFile = new File([await merged.save()], "metadata.pdf", { type: "application/pdf" });
+  const cleanedBytes = await cleanPdfMetadata(metadataFile);
+  const cleaned = await window.PDFLib.PDFDocument.load(cleanedBytes, { updateMetadata: false });
   assert.equal(cleaned.getPageCount(), 2);
+  assert.equal(cleaned.getTitle(), undefined);
+  assert.equal(cleaned.getAuthor(), undefined);
+  assert.equal(cleaned.getProducer(), undefined);
+  assert.equal(new TextDecoder().decode(cleanedBytes).includes("Private project"), false);
 });
 
 test("text and utility tools transform data locally", () => {
   assert.match(jsonToYaml('{"name":"MyFileKit","tools":["pdf","image"],"local":true}'), /name: MyFileKit/);
   assert.equal(urlDecode(urlEncode("a b+c")), "a b+c");
   assert.deepEqual(textStats("one two\nthree"), { words: 3, characters: 13, charactersNoSpaces: 11, lines: 2, readingMinutes: 1 });
+  assert.equal(textStats("").readingMinutes, 0);
   assert.equal(diffToText(lineDiff("same\nold", "same\nnew")), "  same\n- old\n+ new");
   assert.equal(cleanFilenameList("bad file?.pdf"), "bad-file.pdf");
-  assert.equal(generatePassword({ length: 24, symbols: true }).length, 24);
+  assert.equal(base64Decode(base64Encode("Hello, 世界")), "Hello, 世界");
+  const password = generatePassword({ length: 24, symbols: true });
+  assert.equal(password.length, 24);
+  assert.match(password, /[a-z]/);
+  assert.match(password, /[A-Z]/);
+  assert.match(password, /[0-9]/);
+  assert.match(password, /[^a-zA-Z0-9]/);
 });
 
 function makePngWithText(keyword, value) {

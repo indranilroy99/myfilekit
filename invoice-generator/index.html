@@ -3,14 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' 'unsafe-inline' file:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: file:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' 'unsafe-inline' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), magnetometer=(), gyroscope=()">
-  <meta http-equiv="X-Content-Type-Options" content="nosniff">
   <title>Invoice Studio - MyFileKit</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,600;6..72,700&display=swap" rel="stylesheet">
   <style>
     :root {
       --ink: #15120e;
@@ -20,6 +15,16 @@
       --line: #ddd4c5;
       --accent: #0f5b55;
       --accent-2: #b48a3b;
+      --accent-05: rgba(15, 91, 85, .05);
+      --accent-07: rgba(15, 91, 85, .07);
+      --accent-09: rgba(15, 91, 85, .09);
+      --accent-10: rgba(15, 91, 85, .1);
+      --accent-12: rgba(15, 91, 85, .12);
+      --accent-13: rgba(15, 91, 85, .13);
+      --accent-24: rgba(15, 91, 85, .24);
+      --accent-2-12: rgba(180, 138, 59, .12);
+      --accent-2-55: rgba(180, 138, 59, .55);
+      --title-badge-color: rgba(15, 91, 85, .22);
       --danger: #a83d32;
       --shadow: 0 24px 70px rgba(32, 26, 17, .16);
       --radius: 8px;
@@ -33,7 +38,7 @@
     body {
       margin: 0;
       color: var(--ink);
-      font-family: Manrope, ui-sans-serif, system-ui, sans-serif;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background:
         linear-gradient(120deg, rgba(15, 91, 85, .11), transparent 34%),
         linear-gradient(240deg, rgba(180, 138, 59, .13), transparent 36%),
@@ -126,6 +131,40 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
+    }
+
+    .export-ready {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid rgba(92, 76, 54, .13);
+      border-radius: 18px;
+      background: rgba(255, 253, 248, .72);
+    }
+
+    .export-ready[hidden] {
+      display: none;
+    }
+
+    .export-ready p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .export-ready strong {
+      display: block;
+      overflow-wrap: anywhere;
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .export-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
     }
 
     .btn {
@@ -249,13 +288,20 @@
 
     .item-row {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 76px 96px 36px;
+      grid-template-columns: minmax(0, 1fr) 76px 96px 58px 36px;
       gap: 8px;
       align-items: end;
       padding: 12px;
       border: 1px solid #ddd4c5;
       border-radius: var(--radius);
       background: rgba(255, 253, 248, .62);
+      transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+    }
+
+    .item-row.is-drag-over {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(15, 91, 85, .12);
+      transform: translateY(-1px);
     }
 
     .detail-row {
@@ -278,6 +324,20 @@
       color: var(--danger);
       background: #f6ebe8;
       font-weight: 900;
+    }
+
+    .drag-handle {
+      color: var(--muted);
+      background: #fffaf0;
+      border-style: dashed;
+      cursor: grab;
+      font-size: 11px;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+    }
+
+    .drag-handle:active {
+      cursor: grabbing;
     }
 
     .mini {
@@ -644,7 +704,7 @@
       position: absolute;
       inset: 0 auto 0 0;
       width: 292px;
-      background: color-mix(in srgb, var(--accent) 9%, transparent);
+      background: var(--accent-09);
       pointer-events: none;
     }
 
@@ -714,7 +774,7 @@
 
     .invoice.layout-luxe .meta-grid,
     .invoice.layout-luxe .totals {
-      border-color: color-mix(in srgb, var(--accent-2) 55%, #dfd5c4);
+      border-color: var(--accent-2-55);
     }
 
     .invoice.layout-stripe {
@@ -770,7 +830,7 @@
       font-weight: 900;
       text-transform: uppercase;
       transform: rotate(-11deg);
-      border: 3px double color-mix(in srgb, var(--accent) 55%, transparent);
+      border: 3px double var(--accent);
       opacity: .45;
     }
 
@@ -790,8 +850,8 @@
 
     .invoice.layout-blocks {
       background:
-        linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 42%),
-        linear-gradient(315deg, color-mix(in srgb, var(--accent-2) 12%, transparent), transparent 38%),
+        linear-gradient(135deg, var(--accent-10), transparent 42%),
+        linear-gradient(315deg, var(--accent-2-12), transparent 38%),
         var(--paper);
     }
 
@@ -844,7 +904,7 @@
       position: absolute;
       inset: auto 40px 92px auto;
       max-width: 360px;
-      color: color-mix(in srgb, var(--accent) 13%, transparent);
+      color: var(--accent-13);
       font-family: Newsreader, Georgia, serif;
       font-size: 82px;
       font-weight: 700;
@@ -879,7 +939,7 @@
       inset: var(--title-badge-offset, 24px) var(--title-badge-offset, 24px) auto auto;
       width: var(--title-badge-size, 150px);
       height: var(--title-badge-size, 150px);
-      border: 1px solid color-mix(in srgb, var(--accent) var(--title-badge-strength, 22%), transparent);
+      border: 1px solid var(--title-badge-color);
       border-radius: 50%;
       pointer-events: none;
     }
@@ -893,6 +953,29 @@
     }
 
     .invoice.title-badge-none::after {
+      display: none;
+    }
+
+    .invoice.sender-header-hidden .invoice-head {
+      grid-template-columns: minmax(0, 1fr);
+      margin-bottom: 34px;
+    }
+
+    .invoice.sender-header-hidden .invoice-title {
+      text-align: left;
+    }
+
+    .invoice.sender-header-hidden::after {
+      left: var(--title-badge-offset, 24px);
+      right: auto;
+    }
+
+    .invoice.sender-header-hidden .invoice-brand,
+    .invoice.document-title-hidden .invoice-title {
+      display: none;
+    }
+
+    .invoice.sender-header-hidden.document-title-hidden .invoice-head {
       display: none;
     }
 
@@ -1001,6 +1084,57 @@
       letter-spacing: 0;
     }
 
+    .invoice.header-reference .invoice-head {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+    }
+
+    .invoice.header-reference .invoice-title span {
+      font-size: calc(var(--title-font-size, 58px) * 1.12);
+    }
+
+    .invoice.header-title-left .invoice-head {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 20px;
+    }
+
+    .invoice.header-title-left .invoice-title {
+      order: -1;
+      text-align: left;
+    }
+
+    .invoice.header-title-left::after {
+      left: var(--title-badge-offset, 24px);
+      right: auto;
+    }
+
+    .invoice.header-simple .invoice-head {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 22px;
+    }
+
+    .invoice.header-simple .invoice-brand {
+      display: none;
+    }
+
+    .invoice.header-simple .invoice-title {
+      text-align: left;
+    }
+
+    .invoice.header-compact .invoice-head {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      margin-bottom: 30px;
+    }
+
+    .invoice.header-compact .company-name {
+      font-size: 27px;
+    }
+
+    .invoice.header-compact .invoice-title span {
+      font-size: calc(var(--title-font-size, 58px) * .72);
+    }
+
     [data-inline-bind] {
       border-radius: 6px;
       outline: 0;
@@ -1010,8 +1144,32 @@
 
     [data-inline-bind]:hover,
     [data-inline-bind]:focus {
-      background: color-mix(in srgb, var(--accent) 7%, transparent);
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+      background: var(--accent-07);
+      box-shadow: 0 0 0 3px var(--accent-12);
+    }
+
+    [data-edit-target] {
+      cursor: pointer;
+      transition: box-shadow .16s ease, background .16s ease;
+    }
+
+    [data-edit-target]:hover {
+      background: var(--accent-05);
+      box-shadow: 0 0 0 3px var(--accent-10);
+    }
+
+    .jump-focus {
+      animation: jumpFocus .9s ease;
+    }
+
+    @keyframes jumpFocus {
+      0%, 100% {
+        box-shadow: 0 0 0 0 transparent;
+      }
+
+      35% {
+        box-shadow: 0 0 0 4px var(--accent-24);
+      }
     }
 
     .meta-grid {
@@ -1066,6 +1224,7 @@
 
     table {
       width: 100%;
+      table-layout: fixed;
       border-collapse: collapse;
       margin-bottom: 28px;
     }
@@ -1088,6 +1247,25 @@
       text-align: right;
     }
 
+    th:nth-child(1),
+    td:nth-child(1) {
+      width: 56%;
+    }
+
+    th:nth-child(2),
+    td:nth-child(2) {
+      width: 10%;
+      text-align: center;
+    }
+
+    th:nth-child(3),
+    td:nth-child(3),
+    th:nth-child(4),
+    td:nth-child(4) {
+      width: 17%;
+      text-align: right;
+    }
+
     td {
       border-bottom: 1px solid #e5dccf;
       padding: 16px 14px;
@@ -1098,7 +1276,6 @@
     td:nth-child(2),
     td:nth-child(3),
     td:nth-child(4) {
-      text-align: right;
       white-space: nowrap;
     }
 
@@ -1180,18 +1357,34 @@
     }
 
     .total-row {
-      display: flex;
-      justify-content: space-between;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
       gap: 16px;
+      min-height: 44px;
       padding: 13px 16px;
       border-bottom: 1px solid #dfd5c4;
       color: var(--muted);
       font-size: 14px;
+      line-height: 1.25;
+    }
+
+    .total-row span,
+    .total-row strong {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .total-row.grand span {
+      white-space: nowrap;
+      overflow-wrap: normal;
     }
 
     .total-row strong {
       color: var(--ink);
       font-weight: 900;
+      text-align: right;
+      white-space: nowrap;
     }
 
     .total-row.grand {
@@ -1206,10 +1399,28 @@
       color: #fffdf8;
     }
 
+    .invoice.totals-plain .totals {
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      overflow: visible;
+    }
+
+    .invoice.totals-plain .total-row {
+      min-height: 38px;
+      padding: 8px 0;
+      border-bottom: 1px solid #dfd5c4;
+      background: transparent;
+    }
+
+    .invoice.totals-plain .total-row.grand,
+    .invoice.totals-plain .total-row.grand strong {
+      color: var(--ink);
+      background: transparent;
+    }
+
     .signature {
-      margin-top: 50px;
-      padding-top: 16px;
-      border-top: 1px solid #cfc5b4;
+      margin-top: 38px;
       width: 260px;
       color: var(--muted);
       font-size: 12px;
@@ -1223,7 +1434,7 @@
       max-height: 78px;
       object-fit: contain;
       object-position: left center;
-      margin-bottom: 8px;
+      margin: 0 0 8px;
     }
 
     .signature-text {
@@ -1239,6 +1450,8 @@
 
     .signature-caption {
       display: block;
+      padding-top: 8px;
+      border-top: 1px solid #cfc5b4;
     }
 
     .signature-pad-wrap {
@@ -1460,7 +1673,21 @@
         <div class="actions">
           <a class="btn btn-ghost" href="../index.html">Dashboard</a>
           <button class="btn btn-primary" id="printBtn" type="button">Print / PDF</button>
+          <button class="btn btn-primary" id="downloadPdfBtn" type="button">Download PDF</button>
+          <button class="btn btn-ghost" id="downloadHtmlBtn" type="button">Download HTML</button>
+          <button class="btn btn-ghost" id="downloadJsonBtn" type="button">Download JSON</button>
           <button class="btn btn-ghost" id="resetBtn" type="button">Reset</button>
+        </div>
+        <div class="export-ready" id="exportReady" hidden>
+          <p>
+            Export ready
+            <strong id="exportReadyName">invoice.html</strong>
+          </p>
+          <p>If your browser blocks the automatic save, use these direct actions.</p>
+          <div class="export-actions">
+            <a class="btn btn-ghost" id="exportReviewLink" href="#" target="_blank" rel="noopener noreferrer">Review</a>
+            <a class="btn btn-primary" id="exportDownloadLink" href="#" download>Download</a>
+          </div>
         </div>
       </div>
 
@@ -1565,6 +1792,23 @@
             <label for="logoPadding">Logo Padding</label>
             <input id="logoPadding" data-bind="logoPadding" type="number" min="0" max="24" step="1">
           </div>
+          <div class="field full">
+            <label for="headerStyle">Header Layout</label>
+            <select id="headerStyle" data-bind="headerStyle">
+              <option value="reference">Name left, invoice right</option>
+              <option value="title-left">Invoice title on left</option>
+              <option value="simple">Simple invoice title only</option>
+              <option value="compact">Compact header</option>
+            </select>
+          </div>
+          <label class="toggle-row" for="showSenderHeader">
+            <input id="showSenderHeader" type="checkbox" data-visible-key="senderHeader">
+            Show sender header
+          </label>
+          <label class="toggle-row" for="showDocumentTitle">
+            <input id="showDocumentTitle" type="checkbox" data-visible-key="documentTitle">
+            Show invoice title
+          </label>
           <div class="field">
             <label for="titleBadgeShape">Invoice Title Frame</label>
             <select id="titleBadgeShape" data-bind="titleBadgeShape">
@@ -1574,6 +1818,10 @@
               <option value="none">None</option>
             </select>
           </div>
+          <label class="toggle-row" for="showTitleFrame">
+            <input id="showTitleFrame" type="checkbox">
+            Show invoice title frame
+          </label>
           <div class="field">
             <label for="titleBadgeSize">Frame Size</label>
             <input id="titleBadgeSize" data-bind="titleBadgeSize" type="number" min="90" max="260" step="1">
@@ -1747,6 +1995,10 @@
             <label for="paymentInfo">Payment Details</label>
             <textarea id="paymentInfo" data-bind="paymentInfo"></textarea>
           </div>
+          <label class="toggle-row full" for="showPaymentNote">
+            <input id="showPaymentNote" type="checkbox" data-visible-key="paymentNote">
+            Show payment helper note
+          </label>
         </div>
       </section>
 
@@ -1771,6 +2023,14 @@
             <label for="clientContact">Client Contact</label>
             <input id="clientContact" data-bind="clientContact">
           </div>
+          <div class="field">
+            <label for="clientEmail">Client Email</label>
+            <input id="clientEmail" data-bind="clientEmail" type="email">
+          </div>
+          <div class="field">
+            <label for="clientPhone">Client Phone</label>
+            <input id="clientPhone" data-bind="clientPhone">
+          </div>
           <div class="field full">
             <label for="shipTo">Ship To / Delivery Address</label>
             <textarea id="shipTo" data-bind="shipTo"></textarea>
@@ -1783,6 +2043,10 @@
           <h2>Line Items</h2>
           <button class="btn btn-ghost mini" id="addItemBtn" type="button">Add Item</button>
         </div>
+        <label class="toggle-row full" for="showItemCode">
+          <input id="showItemCode" type="checkbox" data-visible-key="itemCode">
+          Show item code / HSN under services
+        </label>
         <div class="line-editor" id="lineEditor"></div>
       </section>
 
@@ -1799,6 +2063,10 @@
             <label for="discount">Discount</label>
             <input id="discount" data-bind="discount" type="number" min="0" step="0.01">
           </div>
+          <label class="toggle-row full" for="plainTotals">
+            <input id="plainTotals" type="checkbox" data-flag="plainTotals">
+            Plain total due style
+          </label>
           <div class="field">
             <label for="tdsMode">TDS Mode</label>
             <select id="tdsMode" data-bind="tdsMode">
@@ -1837,7 +2105,7 @@
               <input id="accountNumber" data-bind="accountNumber">
             </div>
             <div class="field">
-              <label for="ifscCode">IFSC / Routing Code</label>
+              <label for="ifscCode">IFSC Code</label>
               <input id="ifscCode" data-bind="ifscCode">
             </div>
             <div class="field">
@@ -2050,6 +2318,22 @@
             <input id="paymentLabel" data-bind="paymentLabel">
           </div>
           <div class="field">
+            <label for="bankNameLabel">Bank Name Label</label>
+            <input id="bankNameLabel" data-bind="bankNameLabel">
+          </div>
+          <div class="field">
+            <label for="accountNumberLabel">Account Number Label</label>
+            <input id="accountNumberLabel" data-bind="accountNumberLabel">
+          </div>
+          <div class="field">
+            <label for="accountHolderLabel">Account Holder Label</label>
+            <input id="accountHolderLabel" data-bind="accountHolderLabel">
+          </div>
+          <div class="field">
+            <label for="ifscCodeLabel">IFSC Code Label</label>
+            <input id="ifscCodeLabel" data-bind="ifscCodeLabel">
+          </div>
+          <div class="field">
             <label for="signatureLabel">Signature Label</label>
             <input id="signatureLabel" data-bind="signatureLabel">
           </div>
@@ -2082,74 +2366,75 @@
     <section class="workspace">
       <div class="top-strip">
         <span class="status-dot" id="saveState">Autosaved</span>
+        <span>Click any invoice section to edit it</span>
         <span id="topTotal">Total: ₹0.00</span>
       </div>
       <div class="paper-wrap">
         <article class="invoice" id="invoicePreview" aria-label="Invoice preview">
-          <header class="invoice-head">
-            <div class="invoice-brand">
-              <div class="invoice-logo" id="previewLogo" data-optional="logo">A</div>
+          <header class="invoice-head" data-edit-target="headerStyle">
+            <div class="invoice-brand" data-optional="senderHeader" data-edit-target="senderName">
+              <div class="invoice-logo" id="previewLogo" data-optional="logo" data-edit-target="logoUpload">A</div>
               <div>
-                <h2 class="company-name" id="previewCompanyName"></h2>
-                <div class="company-meta" id="previewSenderTitle" data-optional="senderTitle"></div>
-                <div class="company-meta" id="previewCompanyMeta"></div>
+                <h2 class="company-name" id="previewCompanyName" data-edit-target="senderName"></h2>
+                <div class="company-meta" id="previewSenderTitle" data-optional="senderTitle" data-edit-target="senderTitle"></div>
+                <div class="company-meta" id="previewCompanyMeta" data-edit-target="companyMeta"></div>
               </div>
             </div>
-            <div class="invoice-title">
+            <div class="invoice-title" data-optional="documentTitle" data-edit-target="documentTitle">
               <strong id="previewStatus" data-optional="status" data-inline-bind="statusBadgeText" data-inline-clear="statusBadgeLabel" contenteditable="true" spellcheck="false" tabindex="0" aria-label="Edit header badge text"></strong>
               <span id="previewDocumentTitle" data-inline-bind="documentTitle" contenteditable="true" spellcheck="false" tabindex="0" aria-label="Edit invoice title">Invoice</span>
             </div>
           </header>
 
           <section class="meta-grid" aria-label="Invoice metadata">
-            <div class="meta-cell" data-optional="invoiceNo">
+            <div class="meta-cell" data-optional="invoiceNo" data-edit-target="invoiceNo">
               <span class="kicker" id="previewInvoiceNoLabel">Invoice No.</span>
               <span class="value" id="previewInvoiceNo"></span>
             </div>
-            <div class="meta-cell" data-optional="issueDate">
+            <div class="meta-cell" data-optional="issueDate" data-edit-target="issueDate">
               <span class="kicker" id="previewIssueDateLabel">Issue Date</span>
               <span class="value" id="previewIssueDate"></span>
             </div>
-            <div class="meta-cell" data-optional="dueDate">
+            <div class="meta-cell" data-optional="dueDate" data-edit-target="dueDate">
               <span class="kicker" id="previewDueDateLabel">Due Date</span>
               <span class="value" id="previewDueDate"></span>
             </div>
-            <div class="meta-cell" data-optional="poNumber">
+            <div class="meta-cell" data-optional="poNumber" data-edit-target="poNumber">
               <span class="kicker" id="previewPoLabel">PO / Ref.</span>
               <span class="value" id="previewPoNumber"></span>
             </div>
-            <div class="meta-cell" data-optional="supplyType">
+            <div class="meta-cell" data-optional="supplyType" data-edit-target="supplyType">
               <span class="kicker" id="previewSupplyTypeLabel">Supply Type</span>
               <span class="value" id="previewSupplyType"></span>
             </div>
-            <div class="meta-cell" data-optional="placeOfSupply">
+            <div class="meta-cell" data-optional="placeOfSupply" data-edit-target="placeOfSupply">
               <span class="kicker" id="previewPlaceOfSupplyLabel">Place of Supply</span>
               <span class="value" id="previewPlaceOfSupply"></span>
             </div>
-            <div class="meta-cell" data-optional="hsnSac">
+            <div class="meta-cell" data-optional="hsnSac" data-edit-target="hsnSac">
               <span class="kicker" id="previewHsnSacLabel">HSN / SAC</span>
               <span class="value" id="previewHsnSac"></span>
             </div>
-            <div class="meta-cell" data-optional="reverseCharge">
+            <div class="meta-cell" data-optional="reverseCharge" data-edit-target="reverseCharge">
               <span class="kicker" id="previewReverseChargeLabel">Reverse Charge</span>
               <span class="value" id="previewReverseCharge"></span>
             </div>
           </section>
 
           <section class="billing">
-            <div class="billing-block" data-optional="fromBlock">
+            <div class="billing-block" data-optional="fromBlock" data-edit-target="senderName">
               <h3 id="previewFromLabel">From</h3>
               <div class="client-meta" id="previewFrom"></div>
             </div>
-            <div class="billing-block" data-optional="clientBlock">
+            <div class="billing-block" data-optional="clientBlock" data-edit-target="clientName">
               <h3 id="previewClientLabel">Bill To</h3>
               <div class="client-meta" id="previewClient"></div>
             </div>
           </section>
 
-          <section class="detail-list" id="previewCustomFields" data-optional="customDetails"></section>
+          <section class="detail-list" id="previewCustomFields" data-optional="customDetails" data-edit-target="customDetailsLabel"></section>
 
-          <table aria-label="Invoice items">
+          <table aria-label="Invoice items" data-edit-target="lineEditor">
             <thead>
               <tr>
                 <th id="previewServiceLabel">Service</th>
@@ -2163,54 +2448,56 @@
 
           <section class="bottom-grid">
             <div class="note-panel">
-              <div data-optional="notes">
+              <div data-optional="notes" data-edit-target="notes">
                 <h3 id="previewNotesLabel">Notes</h3>
                 <div class="notes" id="previewNotes"></div>
               </div>
-              <div data-optional="terms">
+              <div data-optional="terms" data-edit-target="terms">
                 <h3 id="previewTermsLabel">Terms</h3>
                 <div class="terms" id="previewTerms"></div>
               </div>
-              <div data-optional="paymentInfo">
+              <div data-optional="paymentInfo" data-edit-target="paymentInfo">
                 <h3 id="previewPaymentLabel">Payment</h3>
                 <div class="terms" id="previewPaymentInfo"></div>
               </div>
-              <div class="signature" data-optional="signature">
+              <div class="signature" data-optional="signature" data-edit-target="signatureText">
                 <img class="signature-image" id="previewSignatureImage" alt="Digital signature">
                 <span class="signature-text" id="previewSignatureText"></span>
                 <span class="signature-caption" id="previewSignatureLabel">Authorized Signature</span>
               </div>
             </div>
-            <div class="totals" aria-label="Invoice totals">
-              <div class="total-row">
+            <div class="totals" aria-label="Invoice totals" data-edit-target="discount">
+              <div class="total-row" data-edit-target="subtotalLabel">
                 <span id="previewSubtotalLabel">Subtotal</span>
                 <strong id="previewSubtotal"></strong>
               </div>
-              <div class="total-row" data-optional="discount">
+              <div class="total-row" data-optional="discount" data-edit-target="discount">
                 <span id="previewDiscountLabel">Discount</span>
                 <strong id="previewDiscount"></strong>
               </div>
-              <div class="total-row" data-optional="tax">
+              <div class="total-row" data-optional="tax" data-edit-target="taxRate">
                 <span id="previewTaxLabel">Tax</span>
                 <strong id="previewTax"></strong>
               </div>
-              <div class="total-row" data-optional="tds">
+              <div class="total-row" data-optional="tds" data-edit-target="tdsRate">
                 <span id="previewTdsLabel">TDS Deducted</span>
                 <strong id="previewTds"></strong>
               </div>
-              <div class="total-row grand">
+              <div class="total-row grand" data-edit-target="totalLabel">
                 <span id="previewTotalLabel">Total Due</span>
                 <strong id="previewTotal"></strong>
               </div>
             </div>
           </section>
-          <div class="watermark" id="previewWatermark" data-optional="watermark"></div>
-          <footer class="invoice-footer" id="previewFooter" data-optional="footerText"></footer>
+          <div class="watermark" id="previewWatermark" data-optional="watermark" data-edit-target="watermarkText"></div>
+          <footer class="invoice-footer" id="previewFooter" data-optional="footerText" data-edit-target="footerText"></footer>
         </article>
       </div>
     </section>
   </main>
 
+  <script src="../assets/vendor/pdf-lib.min.js"></script>
+  <script src="../assets/vendor/html2canvas.min.js"></script>
   <script>
     const STORAGE_KEY = "premium-invoice-generator-v2";
     const LEGACY_STORAGE_KEY = "premium-invoice-generator-v1";
@@ -2220,18 +2507,20 @@
     const MAX_DATA_URL_LENGTH = 1800000;
     const SAFE_IMAGE_DATA_URL = /^data:image\/(?:png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=\s]+$/i;
     const SAFE_URL_PROTOCOLS = new Set(["https:", "http:", "mailto:", "upi:", "bitcoin:", "ethereum:"]);
+    let currentExportUrl = "";
 
     const shortTextFields = [
       "documentTitle", "invoiceNo", "status", "statusBadgeText", "statusBadgeLabel", "logoText", "logoShape", "logoFit", "logoBackground", "titleBadgeShape", "titleAlign", "currency", "poNumber", "supplyType", "placeOfSupply",
+      "headerStyle",
       "hsnSac", "reverseCharge", "senderName", "senderTitle", "companyName", "companyEmail",
       "companyPhone", "senderGstin", "senderPan", "senderWebsite", "accountHolder", "bankName",
       "accountNumber", "ifscCode", "swiftCode", "ibanCode", "branchName", "upiId", "paypalEmail",
       "wiseEmail", "chequePayableTo", "paymentLink", "bitcoinAddress", "ethereumAddress", "signatureText", "clientName", "clientTaxId",
-      "clientContact", "fromLabel", "clientLabel", "invoiceNoLabel", "issueDateLabel", "dueDateLabel",
+      "clientContact", "clientEmail", "clientPhone", "fromLabel", "clientLabel", "invoiceNoLabel", "issueDateLabel", "dueDateLabel",
       "poLabel", "supplyTypeLabel", "placeOfSupplyLabel", "hsnSacLabel", "reverseChargeLabel",
       "serviceLabel", "qtyLabel", "rateLabel", "amountLabel", "totalLabel", "subtotalLabel",
       "discountLabel", "taxLabel", "tdsLabel", "tdsMode", "codeLabel", "notesLabel", "termsLabel", "paymentLabel",
-      "signatureLabel", "customDetailsLabel", "watermarkText"
+      "bankNameLabel", "accountNumberLabel", "accountHolderLabel", "ifscCodeLabel", "signatureLabel", "customDetailsLabel", "watermarkText"
     ];
 
     const longTextFields = [
@@ -2284,6 +2573,8 @@
 
     const fieldOptions = [
       ["logo", "Logo Mark"],
+      ["senderHeader", "Sender Header"],
+      ["documentTitle", "Invoice Title"],
       ["senderTitle", "Role / Tagline"],
       ["companyName", "Company Name"],
       ["companyMeta", "Address / Tax"],
@@ -2306,6 +2597,8 @@
       ["clientMeta", "Client Address"],
       ["clientTaxId", "Client Tax ID"],
       ["clientContact", "Client Contact"],
+      ["clientEmail", "Client Email"],
+      ["clientPhone", "Client Phone"],
       ["shipTo", "Ship To"],
       ["itemCode", "Item Code / HSN"],
       ["itemDescription", "Item Notes"],
@@ -2315,6 +2608,7 @@
       ["notes", "Notes"],
       ["terms", "Terms"],
       ["paymentInfo", "Payment Info"],
+      ["paymentNote", "Payment Helper Note"],
       ["customDetails", "Extra Details"],
       ["watermark", "Watermark"],
       ["footerText", "Footer"],
@@ -2335,7 +2629,8 @@
     ];
 
     const visibleDefaults = Object.fromEntries(fieldOptions.map(([key]) => [key, true]));
-    visibleDefaults.companyName = false;
+      visibleDefaults.companyName = false;
+    visibleDefaults.itemCode = false;
 
     const defaultState = {
       documentTitle: "Invoice",
@@ -2357,9 +2652,11 @@
       logoBackground: "paper",
       logoSize: 52,
       logoPadding: 5,
+      plainTotals: false,
       statusBadgeText: "Due",
       statusBadgeLabel: "",
       titleBadgeShape: "circle",
+      headerStyle: "reference",
       titleAlign: "right",
       titleBadgeSize: 150,
       titleBadgeStrength: 22,
@@ -2407,9 +2704,11 @@
       signatureText: "Your name",
       signatureData: "",
       clientName: "Client Company",
-      clientMeta: "Client Department\nClient City\nbilling@example.com",
+      clientMeta: "Client Department\nClient City",
       clientTaxId: "",
       clientContact: "Accounts Payable",
+      clientEmail: "billing@example.com",
+      clientPhone: "",
       shipTo: "",
       taxRate: 18,
       discount: 2500,
@@ -2441,6 +2740,10 @@
       notesLabel: "Notes",
       termsLabel: "Terms",
       paymentLabel: "Payment",
+      bankNameLabel: "Bank Name",
+      accountNumberLabel: "Account Number",
+      accountHolderLabel: "Account Holder",
+      ifscCodeLabel: "IFSC Code",
       signatureLabel: "Authorized Signature",
       customDetailsLabel: "Details",
       footerText: "This invoice was generated electronically. Please retain it for your records.",
@@ -2540,6 +2843,7 @@
       next.logoFit = ["contain", "cover"].includes(next.logoFit) ? next.logoFit : "contain";
       next.logoBackground = ["paper", "white", "transparent", "accent"].includes(next.logoBackground) ? next.logoBackground : "paper";
       next.titleBadgeShape = ["circle", "rounded", "square", "none"].includes(next.titleBadgeShape) ? next.titleBadgeShape : "circle";
+      next.headerStyle = ["reference", "title-left", "simple", "compact"].includes(next.headerStyle) ? next.headerStyle : "reference";
       next.titleAlign = ["left", "center", "right"].includes(next.titleAlign) ? next.titleAlign : "right";
       next.tdsMode = next.tdsMode === "amount" ? "amount" : "rate";
       next.fontScale = Math.min(1.2, Math.max(0.85, numeric(next.fontScale) || 1));
@@ -2651,6 +2955,83 @@
       return Number.isFinite(number) ? number : 0;
     }
 
+    function rgbaFromHex(value, opacity) {
+      const hex = String(value || "").replace("#", "");
+      const normalized = hex.length === 3 ? hex.split("").map((part) => part + part).join("") : hex;
+      if (!/^[0-9a-f]{6}$/i.test(normalized)) return `rgba(15, 91, 85, ${opacity})`;
+      const red = Number.parseInt(normalized.slice(0, 2), 16);
+      const green = Number.parseInt(normalized.slice(2, 4), 16);
+      const blue = Number.parseInt(normalized.slice(4, 6), 16);
+      return `rgba(${red}, ${green}, ${blue}, ${Math.max(0, Math.min(1, Number(opacity) || 0))})`;
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      return url;
+    }
+
+    function downloadText(text, filename, mimeType) {
+      const url = downloadBlob(new Blob([text], { type: mimeType }), filename);
+      window.setTimeout(() => {
+        if (currentExportUrl !== url) URL.revokeObjectURL(url);
+      }, 30000);
+      return url;
+    }
+
+    function showExportReady(url, filename) {
+      if (currentExportUrl && currentExportUrl !== url) {
+        URL.revokeObjectURL(currentExportUrl);
+      }
+      currentExportUrl = url;
+      const panel = document.getElementById("exportReady");
+      const name = document.getElementById("exportReadyName");
+      const review = document.getElementById("exportReviewLink");
+      const download = document.getElementById("exportDownloadLink");
+      if (!panel || !name || !review || !download) return;
+      name.textContent = filename;
+      review.href = url;
+      download.href = url;
+      download.download = filename;
+      panel.hidden = false;
+    }
+
+    window.addEventListener("pagehide", () => {
+      if (!currentExportUrl) return;
+      URL.revokeObjectURL(currentExportUrl);
+      currentExportUrl = "";
+    });
+
+    function exportText(text, filename, mimeType) {
+      const url = downloadText(text, filename, mimeType);
+      showExportReady(url, filename);
+    }
+
+    function buildInvoiceDocument() {
+      const styleTag = document.querySelector("style");
+      const invoice = document.getElementById("invoicePreview");
+      return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(state.documentTitle || state.invoiceNo || "invoice")}</title>
+  <style>${styleTag ? styleTag.textContent : ""}</style>
+</head>
+<body>
+  <main class="paper-wrap" style="padding:24px;min-height:100vh;">
+    ${invoice ? invoice.outerHTML : ""}
+  </main>
+</body>
+</html>`;
+    }
+
     function formatMoney(amount) {
       const code = state.currency || "INR";
       moneyFormatters[code] ||= new Intl.NumberFormat("en-IN", {
@@ -2678,6 +3059,85 @@
       return { subtotal, discount, taxable, tax, tds, total: beforeTds - tds };
     }
 
+    function pdfSafeText(value) {
+      return String(value ?? "")
+        .replace(/₹/g, "INR ")
+        .replace(/[–—]/g, "-")
+        .replace(/[^\n\r\t\x20-\x7E]/g, " ")
+        .replace(/[ \t]+/g, " ")
+        .trim();
+    }
+
+    async function buildInvoicePreviewPdfBytes() {
+      if (!window.PDFLib) throw new Error("PDF engine is not loaded.");
+      const canvas = await renderInvoicePreviewCanvas();
+
+      const { PDFDocument } = window.PDFLib;
+      const pdf = await PDFDocument.create();
+      pdf.setTitle(pdfSafeText(state.documentTitle || state.invoiceNo || "Invoice"));
+      pdf.setSubject("Invoice generated locally with MyFileKit");
+      pdf.setCreator("MyFileKit");
+      pdf.setProducer("MyFileKit");
+
+      const pageWidth = 595.28;
+      const pageHeight = pageWidth * (canvas.height / canvas.width);
+      const page = pdf.addPage([pageWidth, pageHeight]);
+      const pngBytes = Uint8Array.from(atob(canvas.toDataURL("image/png").split(",")[1]), (char) => char.charCodeAt(0));
+      const image = await pdf.embedPng(pngBytes);
+      const imageWidth = pageWidth;
+      const imageHeight = pageHeight;
+      page.drawImage(image, {
+        x: 0,
+        y: 0,
+        width: imageWidth,
+        height: imageHeight
+      });
+      return pdf.save();
+    }
+
+    async function renderInvoicePreviewCanvas() {
+      if (!window.html2canvas) throw new Error("Invoice capture engine is not loaded.");
+      const invoice = document.getElementById("invoicePreview");
+      if (!invoice) throw new Error("Invoice preview is not ready.");
+      if (document.fonts && document.fonts.ready) await document.fonts.ready;
+      return window.html2canvas(invoice, {
+        backgroundColor: null,
+        logging: false,
+        scale: Math.min(3, Math.max(2, window.devicePixelRatio || 1)),
+        useCORS: false,
+        onclone: (clonedDocument) => {
+          const clonedInvoice = clonedDocument.getElementById("invoicePreview");
+          if (!clonedInvoice) return;
+          clonedInvoice.querySelectorAll("[contenteditable]").forEach((node) => {
+            node.removeAttribute("contenteditable");
+            node.removeAttribute("tabindex");
+          });
+        }
+      });
+    }
+
+    async function exportInvoicePdf() {
+      const button = document.getElementById("downloadPdfBtn");
+      const original = button ? button.textContent : "";
+      try {
+        if (button) {
+          button.disabled = true;
+          button.textContent = "Creating PDF...";
+        }
+        const filename = `${safeName(state.documentTitle || state.invoiceNo || "invoice") || "invoice"}.pdf`;
+        const bytes = await buildInvoicePreviewPdfBytes();
+        const url = downloadBlob(new Blob([bytes], { type: "application/pdf" }), filename);
+        showExportReady(url, filename);
+      } catch (error) {
+        alert(error && error.message ? error.message : "Could not create the PDF.");
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = original || "Download PDF";
+        }
+      }
+    }
+
     function bindControls() {
       document.querySelectorAll("[data-bind]").forEach((input) => {
         const key = input.dataset.bind;
@@ -2691,8 +3151,15 @@
           }
           if (key === "tdsMode") syncTdsPanels();
           if (["serviceLabel", "qtyLabel", "rateLabel", "amountLabel", "codeLabel"].includes(key)) renderLineEditor();
+          if (key === "titleBadgeShape") syncTitleFrameControl();
           renderPreview();
           saveState();
+        });
+      });
+
+      document.querySelectorAll(".control-panel [data-visible-key]").forEach((input) => {
+        input.addEventListener("change", () => {
+          updateVisibleField(input.dataset.visibleKey, input.checked);
         });
       });
 
@@ -2748,6 +3215,13 @@
       document.getElementById("shuffleTemplatesBtn").addEventListener("click", () => {
         applyTemplate(Math.floor(Math.random() * templates.length));
         render(true);
+      });
+
+      document.getElementById("showTitleFrame").addEventListener("change", (event) => {
+        state.titleBadgeShape = event.target.checked ? "circle" : "none";
+        syncBoundInputs("titleBadgeShape");
+        renderPreview();
+        saveState();
       });
 
       document.getElementById("logoUpload").addEventListener("change", (event) => {
@@ -2811,13 +3285,50 @@
       });
 
       document.getElementById("printBtn").addEventListener("click", () => window.print());
+      document.getElementById("downloadPdfBtn").addEventListener("click", exportInvoicePdf);
+      document.getElementById("downloadHtmlBtn").addEventListener("click", () => {
+        const filename = `${safeName(state.documentTitle || state.invoiceNo || "invoice") || "invoice"}.html`;
+        exportText(buildInvoiceDocument(), filename, "text/html;charset=utf-8");
+      });
+      document.getElementById("downloadJsonBtn").addEventListener("click", () => {
+        const filename = `${safeName(state.documentTitle || state.invoiceNo || "invoice") || "invoice"}.json`;
+        exportText(JSON.stringify(normalizeState(structuredClone(state)), null, 2), filename, "application/json;charset=utf-8");
+      });
       document.getElementById("resetBtn").addEventListener("click", () => {
         if (!confirm("Reset this invoice to the freelancer sample?")) return;
         state = structuredClone(defaultState);
         render(true);
       });
 
+      setupPreviewJumpEditing();
       setupSignaturePad();
+    }
+
+    function setupPreviewJumpEditing() {
+      const preview = document.getElementById("invoicePreview");
+      preview.addEventListener("click", (event) => {
+        const editable = event.target.closest("[contenteditable='true']");
+        if (editable) return;
+        const target = event.target.closest("[data-edit-target]");
+        if (!target) return;
+        jumpToEditor(target.dataset.editTarget);
+      });
+    }
+
+    function jumpToEditor(fieldId) {
+      const editorTarget = document.getElementById(fieldId) || document.querySelector(`[data-bind="${fieldId}"]`);
+      if (!editorTarget) return;
+      const panel = document.querySelector(".control-panel");
+      const section = editorTarget.closest(".section");
+      if (panel && section) {
+        panel.scrollTo({ top: Math.max(section.offsetTop - 12, 0), behavior: "smooth" });
+      }
+      window.setTimeout(() => {
+        if (typeof editorTarget.focus === "function") editorTarget.focus({ preventScroll: true });
+        editorTarget.classList.remove("jump-focus");
+        void editorTarget.offsetWidth;
+        editorTarget.classList.add("jump-focus");
+      }, 260);
     }
 
     function syncBoundInputs(...keys) {
@@ -2825,6 +3336,25 @@
       document.querySelectorAll("[data-bind]").forEach((input) => {
         if (wanted.has(input.dataset.bind)) input.value = state[input.dataset.bind] ?? "";
       });
+    }
+
+    function syncTitleFrameControl() {
+      const checkbox = document.getElementById("showTitleFrame");
+      if (checkbox) checkbox.checked = state.titleBadgeShape !== "none";
+    }
+
+    function syncStaticVisibleControls() {
+      document.querySelectorAll(".control-panel [data-visible-key]").forEach((input) => {
+        input.checked = state.visible[input.dataset.visibleKey] !== false;
+      });
+    }
+
+    function updateVisibleField(key, checked) {
+      state.visible[key] = checked;
+      syncStaticVisibleControls();
+      renderFieldToggles();
+      renderPreview();
+      saveState();
     }
 
     function setupSignaturePad() {
@@ -2885,6 +3415,23 @@
         });
       });
       syncPaymentPanels();
+    }
+
+    function safeName(value) {
+      return String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 80);
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     }
 
     function syncPaymentPanels() {
@@ -3082,9 +3629,7 @@
 
       toggles.querySelectorAll("[data-visible-key]").forEach((input) => {
         input.addEventListener("change", () => {
-          state.visible[input.dataset.visibleKey] = input.checked;
-          renderPreview();
-          saveState();
+          updateVisibleField(input.dataset.visibleKey, input.checked);
         });
       });
     }
@@ -3096,6 +3641,7 @@
       state.items.forEach((item, index) => {
         const row = document.createElement("div");
         row.className = "item-row";
+        row.dataset.dropItem = String(index);
         row.innerHTML = `
           <div class="field">
             <label>${escapeText(state.serviceLabel || "Service")}</label>
@@ -3109,6 +3655,7 @@
             <label>${escapeText(state.rateLabel || "Rate")}</label>
             <input data-item="${index}" data-prop="rate" type="number" min="0" step="0.01" value="${escapeAttr(item.rate)}">
           </div>
+          <button class="icon-btn drag-handle" type="button" title="Drag to reorder item" aria-label="Drag to reorder item" draggable="true" data-drag-item="${index}">Drag</button>
           <button class="icon-btn" type="button" title="Remove item" aria-label="Remove item" data-remove="${index}">x</button>
           <div class="field full">
             <label>Code / HSN / SAC</label>
@@ -3142,6 +3689,33 @@
           render();
         });
       });
+
+      editor.querySelectorAll("[data-drag-item]").forEach((handle) => {
+        handle.addEventListener("dragstart", (event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", handle.dataset.dragItem);
+        });
+      });
+
+      editor.querySelectorAll("[data-drop-item]").forEach((row) => {
+        row.addEventListener("dragover", (event) => {
+          event.preventDefault();
+          row.classList.add("is-drag-over");
+        });
+        row.addEventListener("dragleave", () => {
+          row.classList.remove("is-drag-over");
+        });
+        row.addEventListener("drop", (event) => {
+          event.preventDefault();
+          row.classList.remove("is-drag-over");
+          const from = Number(event.dataTransfer.getData("text/plain"));
+          const to = Number(row.dataset.dropItem);
+          if (!Number.isInteger(from) || !Number.isInteger(to) || from === to || !state.items[from] || !state.items[to]) return;
+          const [moved] = state.items.splice(from, 1);
+          state.items.splice(to, 0, moved);
+          render();
+        });
+      });
     }
 
     function renderThemes() {
@@ -3169,19 +3743,31 @@
       const palette = palettes[state.paletteId] || palettes[0];
       const treatment = treatments.find((item) => item.id === state.treatmentId) || treatments[0];
       const invoice = document.getElementById("invoicePreview");
-      document.documentElement.style.setProperty("--accent", state.monoMode ? "#111111" : palette.accent);
-      document.documentElement.style.setProperty("--accent-2", state.monoMode ? "#666666" : palette.accent2);
+      const accent = state.monoMode ? "#111111" : palette.accent;
+      const accent2 = state.monoMode ? "#666666" : palette.accent2;
+      document.documentElement.style.setProperty("--accent", accent);
+      document.documentElement.style.setProperty("--accent-2", accent2);
+      [5, 7, 9, 10, 12, 13, 24].forEach((opacity) => {
+        document.documentElement.style.setProperty(`--accent-${String(opacity).padStart(2, "0")}`, rgbaFromHex(accent, opacity / 100));
+      });
+      document.documentElement.style.setProperty("--accent-2-12", rgbaFromHex(accent2, .12));
+      document.documentElement.style.setProperty("--accent-2-55", rgbaFromHex(accent2, .55));
+      document.documentElement.style.setProperty("--title-badge-color", rgbaFromHex(accent, (state.titleBadgeStrength ?? 22) / 100));
       document.documentElement.style.setProperty("--paper", state.paperMode === "white" || state.monoMode ? "#ffffff" : palette.paper);
 
       invoice.className = [
         "invoice",
         `layout-${state.layoutId}`,
+        `header-${state.headerStyle || "reference"}`,
         state.logoShape === "rounded" ? "logo-rounded" : "",
         state.logoShape === "square" ? "logo-square" : "",
         state.logoShape === "diamond" ? "logo-diamond" : "",
+        state.visible.senderHeader === false ? "sender-header-hidden" : "",
+        state.visible.documentTitle === false ? "document-title-hidden" : "",
         state.titleBadgeShape === "rounded" ? "title-badge-rounded" : "",
         state.titleBadgeShape === "square" ? "title-badge-square" : "",
         state.titleBadgeShape === "none" ? "title-badge-none" : "",
+        state.plainTotals ? "totals-plain" : "",
         state.paperMode === "white" ? "paper-white" : "paper-cream",
         state.tableStyle === "open" ? "table-open" : "",
         state.tableStyle === "boxed" ? "table-boxed" : "",
@@ -3227,6 +3813,8 @@
         state.visible.clientContact ? state.clientContact : "",
         state.visible.clientMeta ? state.clientMeta : "",
         state.visible.clientTaxId && state.clientTaxId ? `Tax ID: ${state.clientTaxId}` : "",
+        state.visible.clientEmail && state.clientEmail ? state.clientEmail : "",
+        state.visible.clientPhone && state.clientPhone ? state.clientPhone : "",
         state.visible.shipTo && state.shipTo ? `Ship To:\n${state.shipTo}` : ""
       ].filter(Boolean).join("\n");
       const summary = totals();
@@ -3336,6 +3924,8 @@
     function optionalHasContent(key) {
       const contentMap = {
         logo: true,
+        senderHeader: senderDisplayName() || state.senderTitle || state.companyMeta || state.companyEmail || state.companyPhone,
+        documentTitle: state.documentTitle,
         senderTitle: state.senderTitle,
         companyName: state.companyName,
         companyMeta: state.companyMeta,
@@ -3378,15 +3968,12 @@
       const lines = [];
       if (state.paymentMethods.bank) {
         const bankLines = [
-          state.accountHolder ? `Account holder: ${state.accountHolder}` : "",
-          state.bankName ? `Bank: ${state.bankName}` : "",
-          state.accountNumber ? `Account no: ${state.accountNumber}` : "",
-          state.ifscCode ? `IFSC/Routing: ${state.ifscCode}` : "",
-          state.swiftCode ? `SWIFT/BIC: ${state.swiftCode}` : "",
-          state.ibanCode ? `IBAN: ${state.ibanCode}` : "",
-          state.branchName ? `Branch: ${state.branchName}` : ""
+          state.bankName ? `${state.bankNameLabel || "Bank Name"}: ${state.bankName}` : "",
+          state.accountNumber ? `${state.accountNumberLabel || "Account Number"}: ${state.accountNumber}` : "",
+          state.accountHolder ? `${state.accountHolderLabel || "Account Holder"}: ${state.accountHolder}` : "",
+          state.ifscCode ? `${state.ifscCodeLabel || "IFSC Code"}: ${state.ifscCode}` : ""
         ].filter(Boolean);
-        if (bankLines.length) lines.push(["Bank Transfer", ...bankLines].join("\n"));
+        if (bankLines.length) lines.push(bankLines.join("\n"));
       }
       if (state.paymentMethods.upi && state.upiId) lines.push(`UPI: ${state.upiId}`);
       if (state.paymentMethods.paymentLink && state.paymentLink) lines.push(`Payment link: ${state.paymentLink}`);
@@ -3400,7 +3987,7 @@
         if (state.ethereumAddress) lines.push(`Ethereum/USDT: ${state.ethereumAddress}`);
       }
       if (state.paymentMethods.custom && state.customPayment) lines.push(state.customPayment);
-      if (state.paymentInfo) lines.push(state.paymentInfo);
+      if (state.visible.paymentNote !== false && state.paymentInfo) lines.push(state.paymentInfo);
       return lines.join("\n\n");
     }
 
@@ -3475,6 +4062,8 @@
           input.checked = Boolean(state[input.dataset.flag]);
         });
       }
+      syncTitleFrameControl();
+      syncStaticVisibleControls();
       renderTemplateSelect();
       renderTemplateCards();
       renderLineEditor();

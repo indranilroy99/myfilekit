@@ -1,214 +1,126 @@
 # MyFileKit
 
-MyFileKit is a privacy-first, browser-based toolkit for PDF, image, business, signature, text, data, and developer utilities. It brings everyday file workflows into one clean dashboard with fast search and local processing wherever possible.
+MyFileKit is a local-first browser toolkit for common PDF, image, invoice, signature, privacy, text, data, and developer workflows. It combines 38 working tools in one searchable interface and processes selected files in the browser wherever the underlying format allows it.
 
-## Version
+[![Version](https://img.shields.io/badge/version-3.0.23-2563eb)](./package.json)
+[![Tests](https://img.shields.io/badge/tests-15%20passing-16a34a)](./tests/core.test.js)
+[![Security](https://img.shields.io/badge/npm%20audit-0%20known%20vulnerabilities-16a34a)](./SECURITY.md)
 
-Current app version: `3.0.22`
+## Product Principles
 
-Use the version scripts for future changes:
+- **Local-first:** supported workflows run without a server upload path.
+- **Working tools only:** every visible tool card opens an implemented workflow.
+- **Clear exports:** processed files expose review, download, and print actions where the output format supports them.
+- **Honest scope:** the interface does not advertise unfinished converters, universal editing, or unsupported file formats.
+- **Portable:** the project runs with Node.js on macOS, Windows, and Linux.
 
-```bash
-npm run version:patch
-npm run version:minor
-npm run version:major
-```
+## Available Tools
 
-Use patch versions such as `2.0.1` and `2.0.2` for small fixes. Use a major version such as `3.0.0` for a major product upgrade.
+| Category | Tools |
+| --- | --- |
+| PDF (9) | Merge PDF, Split / Extract PDF Pages, Delete PDF Pages, Rotate PDF Pages, Add Text to PDF, Add Signature to PDF, Add PDF Page Numbers, Watermark PDF, Images to PDF |
+| Image (8) | Compress Image, Batch Compress Images, Resize Image, Batch Resize Images, Convert Image, Crop Image, Rotate / Flip Image, Add Text to Image |
+| Business (1) | Invoice Generator |
+| Signature (3) | Draw Signature, Type Signature, Add Signature to Image |
+| Text & Data (9) | Text to PDF, Markdown Preview, JSON Formatter, CSV to JSON, JSON to CSV, JSON to YAML, URL Encode / Decode, Text Diff Checker, Word Counter |
+| Privacy (2) | EXIF & Metadata Cleaner, PDF Metadata Cleaner |
+| Developer Utilities (6) | Base64 Encode / Decode, File Hash Generator, Hash Compare, Password Generator, QR Code Generator, Filename Cleaner |
 
-## Working Tools
+The image metadata cleaner inspects supported JPEG, PNG, and WebP files, exports a local report, and re-encodes pixels to remove most embedded metadata. Re-encoding may change file size or encoding details. The PDF metadata cleaner removes common document information fields; it does not sanitize visible content, attachments, or every possible custom PDF object.
 
-- PDF: Merge PDF, Split / Extract PDF Pages, Delete PDF Pages, Rotate PDF Pages, Add Text to PDF, Add Signature to PDF, Add PDF Page Numbers, Watermark PDF, Images to PDF.
-- Image: Compress Image, Batch Compress Images, Resize Image, Batch Resize Images, Convert Image, Crop Image, Rotate / Flip Image, Add Text to Image.
-- Business: Invoice Generator with premium templates, payment details, tax/TDS fields, signatures, logo controls, and customizable invoice-style document wording.
-- Signature: Draw Signature, Type Signature, Add Signature to Image.
-- Text & Data: Text to PDF, Markdown Preview, JSON Formatter, CSV to JSON, JSON to CSV, JSON to YAML, URL Encode / Decode, Text Diff Checker, Word Counter.
-- Privacy: EXIF & Metadata Cleaner inspects EXIF, XMP, ICC, GPS, and container metadata in supported image files, exports a local JSON report, and re-encodes a cleaned copy in your browser. PDF Metadata Cleaner removes common PDF document metadata fields.
-- Developer Utilities: Base64 Encode / Decode, File Hash Generator, Hash Compare, Password Generator, QR Code Generator, Filename Cleaner.
+## Quick Start
 
-Only working tools are shown in the dashboard. Planned tools stay out of the product UI until they have real implementations.
+Requirements:
 
-## UX
-
-- Dashboard-first command center layout that keeps the landing page focused.
-- Centered Spotlight-style dashboard search with inline results and quick action chips.
-- Popular tools and recently used tools for faster repeat work.
-- Category overview cards for PDF, image, business, signature, privacy, text/data, and developer tools.
-- Privacy and trust strip for local-first processing, no unnecessary uploads, organized tools, and search-first workflow.
-- Dedicated Browse Tools page for the full searchable tool library.
-- Searchable category pages for narrowing tools inside one workflow family.
-- Tool pages include Back, Forward, Dashboard, category navigation, and related tools.
-- Clean text-only MyFileKit wordmark in the product shell.
-- Premium utility visual system with a warm light background, clean cards, subtle borders, refined typography, and fewer hard divider lines.
-
-## Privacy Model
-
-Supported tools run in the browser using local files selected by the user. MyFileKit does not include a server upload path, tracking code, authentication flow, or remote file storage.
-
-## Tech Stack
-
-- React
-- TypeScript
-- Tailwind CSS
-- Vite
-- lucide-react
-- framer-motion
-- Local vendored `pdf-lib` for browser-side PDF operations
-- Node.js tests and release checks
-
-## Project Structure
-
-```text
-.
-├── assets/
-│   ├── myfilekit-logo.svg
-│   └── vendor/pdf-lib.min.js
-├── docs/
-│   ├── manual-test-checklist.md
-│   └── react-shadcn-component-integration.md
-├── invoice-generator/
-│   └── index.html
-├── scripts/
-│   ├── build-check.js
-│   ├── bump-version.js
-│   ├── security-audit.js
-│   └── setup.js
-├── src/
-│   ├── components/
-│   │   └── ui/
-│   ├── lib/
-│   ├── registry/
-│   ├── services/
-│   ├── utils/
-│   ├── App.tsx
-│   ├── main.tsx
-│   └── styles.css
-├── tests/
-├── index.html
-├── package.json
-├── tsconfig.json
-└── vite.config.ts
-```
-
-## Run Locally
-
-Clone the repository:
+- Node.js 18 or newer
+- npm
+- A current version of Chrome, Edge, Firefox, or Safari
 
 ```bash
 git clone https://github.com/indranilroy99/myfilekit.git
 cd myfilekit
-```
-
-Node.js 18 or later is required.
-
-### macOS
-
-```bash
-chmod +x setup.sh
-./setup.sh
 npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite, usually `http://localhost:4173`.
+Open the URL printed by Vite, normally [http://localhost:4173](http://localhost:4173).
 
-### Windows
+The commands are the same on macOS, Windows PowerShell, and Linux. Optional setup helpers are also included:
 
-From PowerShell:
+```bash
+# macOS or Linux
+./setup.sh
 
-```powershell
+# Windows PowerShell
 .\setup.ps1
-npm install
-npm run dev
 ```
 
-Open the local URL printed by Vite, usually `http://localhost:4173`.
-
-### Linux
+## Production Build
 
 ```bash
-chmod +x setup.sh
-./setup.sh
-npm install
-npm run dev
+npm run build
+npm run preview
 ```
 
-Open the local URL printed by Vite, usually `http://localhost:4173`.
+Deploy the generated `dist/` directory to any static host. The build includes the React dashboard, the invoice editor, and the local PDF and invoice-capture engines. Navigation uses URL hashes, so static hosts do not need route rewrites for tool pages.
 
-## npm Scripts
+For production hosting, configure the response headers documented in [SECURITY.md](./SECURITY.md).
+
+## Release Checks
 
 ```bash
 npm run setup
-npm run dev
-npm run build
 npm run check
 npm run test
 npm run security:audit
 npm run preflight
 ```
 
-- `setup` checks OS, Node.js, npm, installed dependencies, and important files.
-- `dev` starts the Vite development server.
-- `build` creates a production Vite build.
-- `check` validates required files, JavaScript syntax, TypeScript, Vite build, and invoice inline script syntax.
-- `test` runs Node.js tests for registry, routing helpers, CSV/JSON helpers, text utilities, filename helpers, file validation, metadata parsing, and PDF services.
-- `security:audit` validates local security assumptions and runs `npm audit`.
-- `preflight` runs the release gate.
+| Script | Purpose |
+| --- | --- |
+| `npm run setup` | Checks the runtime, installed dependencies, and required local assets. |
+| `npm run check` | Validates source syntax, TypeScript, the Vite build, copied production assets, and the invoice script. |
+| `npm run test` | Runs registry, route, validation, conversion, security-helper, PDF, and metadata tests. |
+| `npm run security:audit` | Verifies local assets and runs `npm audit --audit-level=moderate`. |
+| `npm run preflight` | Runs the complete release gate. |
 
-## Dashboard Search
+The browser QA checklist is in [docs/manual-test-checklist.md](./docs/manual-test-checklist.md).
+Release notes are maintained in [CHANGELOG.md](./CHANGELOG.md).
 
-The dashboard search filters tools by name, category, description, badge, and keyword.
+## Architecture
 
-Use `Cmd+K` on macOS or `Ctrl+K` on Windows/Linux to focus the dashboard search. Opening a tool adds it to the Recently Used section stored in browser `localStorage`.
+```text
+src/registry/tools.registry.js   Tool names, routes, categories, keywords, and capabilities
+src/App.tsx                      Dashboard, category pages, tool pages, and hash navigation
+src/services/                    PDF, image, download, metadata, and text/data operations
+invoice-generator/index.html     Standalone invoice editor and preview-matched PDF export
+assets/vendor/                   Local browser engines used by PDF and invoice workflows
+scripts/                         Setup, build, version, and security release checks
+tests/                           Node.js regression tests
+```
 
-Try:
+The dashboard is rendered from the central registry. Recently used tools and theme preference are stored in browser `localStorage`; selected file contents and generated outputs are not persisted there.
 
-- `merge pdf`
-- `compress image`
-- `invoice`
-- `split pdf`
-- `signature`
-- `resize image`
-- `convert jpg`
-- `receipt`
-- `json`
-- `hash`
-- `metadata`
-- `exif`
-- `privacy`
-- `page numbers`
-- `watermark`
-- `yaml`
-- `url encode`
-- `diff`
-- `word count`
-- `password`
-- `qr`
-- `filename`
+## Privacy And Security
 
-## Roadmap
+MyFileKit has no application backend, account system, analytics integration, or remote file storage. File contents stay in the active browser session unless a user explicitly downloads an output.
 
-These items are planned for future releases and are not shown as working tools until implemented:
+This local-first model reduces network exposure, but it does not make untrusted files inherently safe. Keep the browser updated, avoid opening suspicious outputs, and review [SECURITY.md](./SECURITY.md) before deploying publicly.
 
-- Visual PDF page thumbnails and drag-and-drop page reordering
-- True PDF compression with measurable output controls
-- Password protect/unlock PDF support with a reliable encryption engine
-- PDF form filler and visual PDF signer
-- Full existing-PDF text editing where embedded text can be safely detected and rewritten
-- OCR/inpainting-style image text replacement for PNG/JPG screenshots
-- Background removal with a transparent local or explicitly disclosed service path
-- Word/PDF and Office document conversion
-- Office document metadata cleaner
-- Batch metadata cleaner
-- Metadata editing where format support is reliable
-- HEIC and TIFF metadata cleaner
+## Current Boundaries
 
-## Development Guidelines
+MyFileKit does not currently claim full existing-PDF text editing, OCR-based image text replacement, Office document conversion, encrypted PDF unlock/protection, background removal, or universal metadata removal. Those workflows require format-specific engines and validation beyond the current browser implementation, so they are not shown as tools.
 
-- Keep the dashboard driven by `src/registry/tools.registry.js`.
-- Keep each visible dashboard card connected to a working route.
-- Do not show unfinished tools as selectable dashboard cards.
-- Keep file processing local whenever practical.
-- Prefer focused service modules for reusable file logic.
-- Keep copy precise and avoid claims that are not implemented.
-- Run `npm run preflight` before pushing.
+## Contributing
+
+Read [CONTRIBUTING.md](./CONTRIBUTING.md), run `npm run preflight`, and keep every visible registry entry connected to a working route. Security reports should follow [SECURITY.md](./SECURITY.md).
+
+## Versioning
+
+The current version is `3.0.23`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
+
+```bash
+npm run version:patch
+npm run version:minor
+npm run version:major
+```

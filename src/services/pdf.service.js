@@ -3,9 +3,9 @@ export function getPdfLib() {
   return window.PDFLib;
 }
 
-export async function loadPdf(file) {
+export async function loadPdf(file, options = {}) {
   const { PDFDocument } = getPdfLib();
-  return PDFDocument.load(await file.arrayBuffer());
+  return PDFDocument.load(await file.arrayBuffer(), options);
 }
 
 export async function mergePdfs(files) {
@@ -54,14 +54,14 @@ export async function addTextToPdf(file, text, options = {}) {
   const pdf = await loadPdf(file);
   const font = await pdf.embedFont(StandardFonts.HelveticaBold);
   const pages = pdf.getPages();
-  const pageIndex = clamp(Number(options.page || 1), 1, pages.length) - 1;
+  const pageIndex = pageNumber(options.page ?? 1, pages.length) - 1;
   const page = pages[pageIndex];
   const label = String(text || "").trim();
   if (!label) throw new Error("Enter text to add.");
   page.drawText(label, {
-    x: Number(options.x || 72),
-    y: Number(options.y || 720),
-    size: Number(options.size || 18),
+    x: finiteNumber(options.x ?? 72, "X coordinate"),
+    y: finiteNumber(options.y ?? 720, "Y coordinate"),
+    size: positiveNumber(options.size ?? 18, "Text size"),
     font,
     color: rgb(0.05, 0.09, 0.16),
   });
@@ -71,17 +71,17 @@ export async function addTextToPdf(file, text, options = {}) {
 export async function addSignatureImageToPdf(pdfFile, imageFile, options = {}) {
   const pdf = await loadPdf(pdfFile);
   const pages = pdf.getPages();
-  const pageIndex = clamp(Number(options.page || 1), 1, pages.length) - 1;
+  const pageIndex = pageNumber(options.page ?? 1, pages.length) - 1;
   const page = pages[pageIndex];
   const imageBytes = new Uint8Array(await imageFile.arrayBuffer());
   const image = imageFile.type === "image/png"
     ? await pdf.embedPng(imageBytes)
     : await pdf.embedJpg(await canvasJpegBytes(imageFile));
-  const width = Number(options.width || 180);
+  const width = positiveNumber(options.width ?? 180, "Signature width");
   const height = Math.max(1, width * (image.height / image.width));
   page.drawImage(image, {
-    x: Number(options.x || 72),
-    y: Number(options.y || 96),
+    x: finiteNumber(options.x ?? 72, "X coordinate"),
+    y: finiteNumber(options.y ?? 96, "Y coordinate"),
     width,
     height,
   });
@@ -93,14 +93,15 @@ export async function addPdfPageNumbers(file, options = {}) {
   const pdf = await loadPdf(file);
   const font = await pdf.embedFont(StandardFonts.HelveticaBold);
   const pages = pdf.getPages();
-  const fontSize = Number(options.fontSize || 10);
+  const fontSize = positiveNumber(options.fontSize ?? 10, "Font size");
+  const margin = nonNegativeNumber(options.margin ?? 24, "Page margin");
   const prefix = String(options.prefix || "");
   pages.forEach((page, index) => {
     const { width } = page.getSize();
     const text = `${prefix}${index + 1}`;
     page.drawText(text, {
       x: width / 2 - (text.length * fontSize * 0.25),
-      y: Number(options.margin || 24),
+      y: margin,
       size: fontSize,
       font,
       color: rgb(0.12, 0.16, 0.24),
@@ -115,8 +116,9 @@ export async function watermarkPdf(file, text, options = {}) {
   const font = await pdf.embedFont(StandardFonts.HelveticaBold);
   const label = String(text || "Watermark").trim();
   if (!label) throw new Error("Enter watermark text.");
-  const size = Number(options.size || 48);
-  const opacity = clamp(Number(options.opacity || 0.18), 0.05, 0.6);
+  const size = positiveNumber(options.size ?? 48, "Watermark size");
+  const opacity = clamp(finiteNumber(options.opacity ?? 0.18, "Opacity"), 0.05, 0.6);
+  const rotation = finiteNumber(options.rotation ?? -32, "Rotation");
   pdf.getPages().forEach((page) => {
     const { width, height } = page.getSize();
     page.drawText(label, {
@@ -126,23 +128,19 @@ export async function watermarkPdf(file, text, options = {}) {
       font,
       color: rgb(0.1, 0.16, 0.28),
       opacity,
-      rotate: pdfDegrees(Number(options.rotation || -32)),
+      rotate: pdfDegrees(rotation),
     });
   });
   return pdf.save();
 }
 
 export async function cleanPdfMetadata(file) {
-  const pdf = await loadPdf(file);
-  const now = new Date();
-  pdf.setTitle("");
-  pdf.setAuthor("");
-  pdf.setSubject("");
-  pdf.setKeywords([]);
-  pdf.setProducer("MyFileKit");
-  pdf.setCreator("MyFileKit");
-  pdf.setCreationDate(now);
-  pdf.setModificationDate(now);
+  const pdf = await loadPdf(file, { updateMetadata: false });
+  const infoReference = pdf.context.trailerInfo.Info;
+  if (infoReference) {
+    pdf.context.delete(infoReference);
+    delete pdf.context.trailerInfo.Info;
+  }
   return pdf.save();
 }
 
@@ -159,7 +157,9 @@ export async function textToPdf(text) {
   let page = pdf.addPage([pageWidth, pageHeight]);
   let y = pageHeight - margin;
 
-  String(text || "").split(/\r?\n/).forEach((paragraph) => {
+  const value = String(text || "");
+  if (!value.trim()) throw new Error("Enter text to create a PDF.");
+  value.split(/\r?\n/).forEach((paragraph) => {
     const lines = wrapText(paragraph || " ", maxChars);
     lines.forEach((line) => {
       if (y < margin) {
@@ -188,12 +188,19 @@ export async function imagesToPdf(files) {
 async function canvasJpegBytes(file) {
   if (file.type === "image/jpeg") return new Uint8Array(await file.arrayBuffer());
   const bitmap = await createImageBitmap(file);
-  const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-  canvas.getContext("2d").drawImage(bitmap, 0, 0);
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
-  return new Uint8Array(await blob.arrayBuffer());
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("This browser cannot create a 2D image workspace.");
+    context.drawImage(bitmap, 0, 0);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (!blob) throw new Error("This browser cannot convert that image to JPEG.");
+    return new Uint8Array(await blob.arrayBuffer());
+  } finally {
+    bitmap.close?.();
+  }
 }
 
 function wrapText(text, maxChars) {
@@ -214,4 +221,30 @@ function wrapText(text, maxChars) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
+}
+
+function finiteNumber(value, label) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) throw new Error(`${label} must be a valid number.`);
+  return number;
+}
+
+function positiveNumber(value, label) {
+  const number = finiteNumber(value, label);
+  if (number <= 0) throw new Error(`${label} must be greater than zero.`);
+  return number;
+}
+
+function nonNegativeNumber(value, label) {
+  const number = finiteNumber(value, label);
+  if (number < 0) throw new Error(`${label} cannot be negative.`);
+  return number;
+}
+
+function pageNumber(value, pageCount) {
+  const number = finiteNumber(value, "Page number");
+  if (!Number.isInteger(number) || number < 1 || number > pageCount) {
+    throw new Error(`Page number must be between 1 and ${pageCount}.`);
+  }
+  return number;
 }

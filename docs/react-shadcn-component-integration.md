@@ -46,6 +46,7 @@ Dependencies:
 
 - `framer-motion`
 - `lucide-react`
+- `tw-animate-css`
 
 The components use the current Tailwind theme bridge in `src/styles.css` for shadcn-style class names such as `bg-card`, `border-border`, `hover:bg-muted`, and `text-muted-foreground`.
 

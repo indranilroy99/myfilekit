@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { zipSync } from "fflate";
 import {
   ArrowLeft,
   ArrowRight,
@@ -15,6 +16,7 @@ import {
   LayoutDashboard,
   Moon,
   PenLine,
+  Printer,
   ReceiptText,
   RotateCw,
   Scissors,
@@ -37,19 +39,45 @@ import { categoryRoute, routeForHash } from "./lib/routing";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "./utils/format.js";
 import { safeFilename, withExtension } from "./utils/safe-filename.js";
 import { validateFiles } from "./services/file-validator.js";
-import { downloadBlob, downloadBytes, downloadText } from "./services/download.service.js";
+import { downloadBlob, downloadBytes, downloadText, revokeDownloadUrl } from "./services/download.service.js";
 import { csvToJson, jsonToCsv } from "./services/csv.service.js";
 import { addSignatureToImage, addTextToImage, cleanImageMetadata, compressImage, cropImage, exportCanvas, imageDimensions, imageToCanvas, resizeImage, rotateFlipImage } from "./services/image.service.js";
 import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.service.js";
 import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
-import { cleanFilenameList, diffToText, generatePassword, jsonToYaml, lineDiff, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
+import { base64Decode, base64Encode, cleanFilenameList, diffToText, generatePassword, jsonToYaml, lineDiff, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 
 type Tool = (typeof tools)[number];
 type Status = { tone: "idle" | "success" | "error"; message: string };
 type ThemeMode = "light" | "dark";
 type PdfOutput = { url: string; blob: Blob; filename: string; pages: number; sourceName: string };
+type DownloadReady = { filename: string; mimeType: string; size: number; url: string };
 
 const initialStatus: Status = { tone: "idle", message: "Ready." };
+
+function printDownloadUrl(url: string) {
+  const frame = document.createElement("iframe");
+  frame.title = "MyFileKit print preview";
+  frame.src = url;
+  frame.style.position = "fixed";
+  frame.style.right = "0";
+  frame.style.bottom = "0";
+  frame.style.width = "0";
+  frame.style.height = "0";
+  frame.style.border = "0";
+  frame.style.opacity = "0";
+  frame.onload = () => {
+    try {
+      frame.contentWindow?.focus();
+      frame.contentWindow?.print();
+    } catch {
+      window.open(url, "_blank", "noopener,noreferrer");
+    } finally {
+      window.setTimeout(() => frame.remove(), 60000);
+    }
+  };
+  document.body.appendChild(frame);
+}
+
 const categoryIcons: Record<string, any> = {
   "PDF Tools": FileText,
   "Image Tools": Image,
@@ -190,6 +218,7 @@ function Dashboard() {
   const matches = useMemo(() => filterTools(query), [query]);
   const isSearching = Boolean(query.trim());
   const popularTools = popularToolIds.map(findToolById).filter(Boolean) as Tool[];
+  const distinctRecentTools = recentTools.filter((tool) => !popularToolIds.includes(tool.id)).slice(0, 4);
   const updateQuery = (value: string) => {
     setQuery(value);
     writeSessionValue("myfilekit:lastSearch", value);
@@ -314,11 +343,11 @@ function Dashboard() {
         </section>
       )}
 
-      {!isSearching && recentTools.length > 0 && (
+      {!isSearching && distinctRecentTools.length > 0 && (
         <section className="dashboard-shelf">
           <SectionHeader title="Recently Used" subtitle="Quickly jump back into your last tools." />
           <div className="dashboard-tool-row">
-            {recentTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
+            {distinctRecentTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
           </div>
         </section>
       )}
@@ -388,7 +417,7 @@ function WhyMyFileKit() {
     ["Search without friction", "Start with a task like merge, resize, invoice, hash, or metadata."],
     ["Working tools only", "Visible cards open real routes with practical export or download actions."],
     ["Built for your computer", "Runs in a modern browser on macOS, Windows, and Linux."],
-    ["Easy to extend", "New tools are added through one registry so the dashboard stays consistent."],
+    ["One practical workspace", "Move between common file tasks without installing a separate app for each one."],
   ];
   return (
     <section className="dashboard-shelf">
@@ -632,6 +661,38 @@ function ToolPage({ tool }: { tool: Tool }) {
 }
 
 function ToolMetaPanel({ status, onReset, children }: { status: Status; onReset: () => void; children?: React.ReactNode }) {
+  const [downloadReady, setDownloadReady] = useState<DownloadReady | null>(null);
+  const canReview = downloadReady ? /^(application\/pdf|application\/json|image\/|text\/)/.test(downloadReady.mimeType) : false;
+  const canPrint = downloadReady ? /^(application\/pdf|image\/|text\/html)/.test(downloadReady.mimeType) : false;
+
+  useEffect(() => {
+    const handleDownloadReady = (event: Event) => {
+      const detail = (event as CustomEvent<DownloadReady>).detail;
+      if (!detail?.url || !detail?.filename) return;
+      setDownloadReady((current) => {
+        if (current?.url && current.url !== detail.url) revokeDownloadUrl(current.url);
+        return detail;
+      });
+    };
+
+    window.addEventListener("myfilekit:download-ready", handleDownloadReady);
+    return () => {
+      window.removeEventListener("myfilekit:download-ready", handleDownloadReady);
+      setDownloadReady((current) => {
+        if (current?.url) revokeDownloadUrl(current.url);
+        return null;
+      });
+    };
+  }, []);
+
+  const resetPanel = () => {
+    setDownloadReady((current) => {
+      if (current?.url) revokeDownloadUrl(current.url);
+      return null;
+    });
+    onReset();
+  };
+
   return (
     <aside className="tool-form-status">
       <div>
@@ -639,10 +700,30 @@ function ToolMetaPanel({ status, onReset, children }: { status: Status; onReset:
         <StatusBox status={status} />
       </div>
       {children}
+      {downloadReady ? (
+        <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold leading-6 text-neutral-600">
+          <div>
+            <p className="text-xs font-black uppercase text-neutral-500">Export ready</p>
+            <p className="mt-1 break-words text-[var(--foreground)]">{downloadReady.filename}</p>
+            <p className="mt-1 text-xs font-semibold text-neutral-500">{formatBytes(downloadReady.size)} · Ready in this browser session</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {canReview ? <a className="secondary-button no-underline" href={downloadReady.url} target="_blank" rel="noopener noreferrer">
+              <Eye size={16} /> Review
+            </a> : null}
+            <a className="secondary-button no-underline" href={downloadReady.url} download={downloadReady.filename}>
+              <Download size={16} /> Download
+            </a>
+            {canPrint ? <button className="secondary-button" type="button" onClick={() => printDownloadUrl(downloadReady.url)}>
+              <Printer size={16} /> Print
+            </button> : null}
+          </div>
+        </div>
+      ) : null}
       <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
         Supported files are processed locally in this browser session. Reset clears the current form state.
       </div>
-      <SecondaryButton label="Reset" onClick={onReset} />
+      <SecondaryButton label="Reset" onClick={resetPanel} />
     </aside>
   );
 }
@@ -711,7 +792,7 @@ function PrimaryButton({ label, onClick }: { label: string; onClick: () => void 
     return <AnimatedDownloadButton label={label} onClick={onClick} />;
   }
 
-  return <button className="primary-button" type="button" onClick={onClick}><Download size={17} />{label}</button>;
+  return <button className="primary-button" type="button" onClick={onClick}><Zap size={17} />{label}</button>;
 }
 
 function SecondaryButton({ label, onClick }: { label: string; onClick: () => void }) {
@@ -1068,15 +1149,21 @@ function BatchImageTool({ tool, mode }: { tool: Tool; mode: "compress" | "resize
       const valid = validateFiles(files, tool.file);
       let totalBefore = 0;
       let totalAfter = 0;
-      for (const file of valid) {
+      const outputs: Record<string, Uint8Array> = {};
+      for (const [index, file] of valid.entries()) {
         totalBefore += file.size;
         const blob = mode === "compress"
           ? await compressImage(file, format, Number(quality))
           : await exportCanvas(await resizeImage(file, Number(width), Number(height), true), format, 0.88);
         totalAfter += blob.size;
-        downloadBlob(blob, withExtension(`${safeFilename(file.name)}-${mode}`, imageExt(format)));
+        const filename = withExtension(`${String(index + 1).padStart(2, "0")}-${safeFilename(file.name)}-${mode}`, imageExt(format));
+        outputs[filename] = new Uint8Array(await blob.arrayBuffer());
       }
-      return `Processed ${valid.length} image${valid.length === 1 ? "" : "s"}.\nBefore: ${formatBytes(totalBefore)}\nAfter: ${formatBytes(totalAfter)}`;
+      const zipped = zipSync(outputs, { level: 0 });
+      const zipBuffer = new ArrayBuffer(zipped.byteLength);
+      new Uint8Array(zipBuffer).set(zipped);
+      downloadBlob(new Blob([zipBuffer], { type: "application/zip" }), `myfilekit-${mode}-images.zip`);
+      return `Processed ${valid.length} image${valid.length === 1 ? "" : "s"} into one ZIP file.\nBefore: ${formatBytes(totalBefore)}\nAfter: ${formatBytes(totalAfter)}`;
     })} />
   </ToolForm>;
 }
@@ -1360,6 +1447,7 @@ function MetadataCleanerTool({ tool }: { tool: Tool }) {
 
 function DrawSignatureTool() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const hasInkRef = useRef(false);
   const [color, setColor] = useState("#111111");
   const [size, setSize] = useState("4");
   const [status, setStatus] = useState(initialStatus);
@@ -1380,6 +1468,7 @@ function DrawSignatureTool() {
     const start = (event: PointerEvent) => {
       event.preventDefault();
       drawing = true;
+      hasInkRef.current = true;
       canvas.setPointerCapture?.(event.pointerId);
       const { x, y } = pointFromEvent(event);
       ctx.beginPath();
@@ -1411,10 +1500,14 @@ function DrawSignatureTool() {
     };
   }, [color, size]);
 
-  return <ToolForm status={status} onReset={() => { canvasRef.current?.getContext("2d")?.clearRect(0, 0, 900, 260); setStatus(initialStatus); }}>
+  return <ToolForm status={status} onReset={() => { canvasRef.current?.getContext("2d")?.clearRect(0, 0, 900, 260); hasInkRef.current = false; setStatus(initialStatus); }}>
     <canvas ref={canvasRef} className="surface-card h-auto min-h-44 w-full touch-none rounded-3xl border-dashed border-neutral-400" width={900} height={260} />
     <div className="grid gap-3 sm:grid-cols-2"><Input label="Color" value={color} onChange={setColor} type="color" /><Input label="Thickness" value={size} onChange={setSize} type="number" /></div>
-    <PrimaryButton label="Download PNG" onClick={() => canvasRef.current?.toBlob((blob) => { if (blob) downloadBlob(blob, "signature.png"); setStatus({ tone: "success", message: "Signature downloaded." }); })} />
+    <PrimaryButton label="Download PNG" onClick={() => runSafely(setStatus, async () => {
+      if (!hasInkRef.current || !canvasRef.current) throw new Error("Draw a signature before downloading.");
+      downloadBlob(await canvasToBlob(canvasRef.current, "image/png"), "signature.png");
+      return "Signature ready to download.";
+    })} />
   </ToolForm>;
 }
 
@@ -1425,14 +1518,17 @@ function TypeSignatureTool() {
   return <ToolForm status={status} onReset={() => { setName(""); setStatus(initialStatus); }}>
     <Input label="Name" value={name} onChange={setName} placeholder="Type your name" />
     <Select label="Style" value={style} onChange={setStyle} options={["cursive", "serif", "monospace"]} labels={["Cursive", "Serif", "Monospace"]} />
-    <PrimaryButton label="Download PNG" onClick={() => {
+    <PrimaryButton label="Download PNG" onClick={() => runSafely(setStatus, async () => {
+      if (!name.trim()) throw new Error("Enter a name before downloading a signature.");
       const canvas = document.createElement("canvas");
       canvas.width = 900; canvas.height = 260;
-      const ctx = canvas.getContext("2d")!;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("This browser cannot create a signature image.");
       ctx.font = `72px ${style}`;
-      ctx.fillText(name || "Signature", 40, 145);
-      canvas.toBlob((blob) => { if (blob) downloadBlob(blob, "typed-signature.png"); setStatus({ tone: "success", message: "Signature downloaded." }); });
-    }} />
+      ctx.fillText(name.trim(), 40, 145);
+      downloadBlob(await canvasToBlob(canvas, "image/png"), "typed-signature.png");
+      return "Signature ready to download.";
+    })} />
   </ToolForm>;
 }
 
@@ -1511,7 +1607,10 @@ function CsvToJsonTool() {
   return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
     <Textarea label="CSV input" value={input} onChange={setInput} rows={9} />
     <Textarea label="JSON output" value={output} onChange={setOutput} rows={10} />
-    <PrimaryButton label="Convert" onClick={() => runSafely(setStatus, async () => { setOutput(JSON.stringify(csvToJson(input), null, 2)); return "CSV converted."; })} />
+    <div className="flex flex-wrap gap-2">
+      <PrimaryButton label="Convert" onClick={() => runSafely(setStatus, async () => { setOutput(JSON.stringify(csvToJson(input), null, 2)); return "CSV converted."; })} />
+      <SecondaryButton label="Download JSON" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output), "converted", "json", "application/json;charset=utf-8"); return "JSON ready to download."; })} />
+    </div>
   </ToolForm>;
 }
 
@@ -1522,7 +1621,7 @@ function JsonToCsvTool() {
   return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
     <Textarea label="JSON input" value={input} onChange={setInput} rows={9} />
     <Textarea label="CSV output" value={output} onChange={setOutput} rows={10} />
-    <div className="flex flex-wrap gap-2"><PrimaryButton label="Convert" onClick={() => runSafely(setStatus, async () => { setOutput(jsonToCsv(input)); return "JSON converted."; })} /><SecondaryButton label="Download CSV" onClick={() => downloadText(output, "converted", "csv", "text/csv;charset=utf-8")} /></div>
+    <div className="flex flex-wrap gap-2"><PrimaryButton label="Convert" onClick={() => runSafely(setStatus, async () => { setOutput(jsonToCsv(input)); return "JSON converted."; })} /><SecondaryButton label="Download CSV" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output), "converted", "csv", "text/csv;charset=utf-8"); return "CSV ready to download."; })} /></div>
   </ToolForm>;
 }
 
@@ -1535,7 +1634,7 @@ function JsonToYamlTool() {
     <Textarea label="YAML output" value={output} onChange={setOutput} rows={10} />
     <div className="flex flex-wrap gap-2">
       <PrimaryButton label="Convert to YAML" onClick={() => runSafely(setStatus, async () => { setOutput(jsonToYaml(input)); return "JSON converted to YAML."; })} />
-      <SecondaryButton label="Download YAML" onClick={() => downloadText(output, "converted", "yaml", "text/yaml;charset=utf-8")} />
+      <SecondaryButton label="Download YAML" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output), "converted", "yaml", "text/yaml;charset=utf-8"); return "YAML ready to download."; })} />
     </div>
   </ToolForm>;
 }
@@ -1567,7 +1666,7 @@ function DiffCheckerTool() {
     <Textarea label="Diff output" value={output} onChange={setOutput} rows={10} />
     <div className="flex flex-wrap gap-2">
       <PrimaryButton label="Compare text" onClick={() => runSafely(setStatus, async () => { const rows = lineDiff(left, right); setOutput(diffToText(rows)); return `${rows.filter((row) => row.type !== "same").length} changed line entries found.`; })} />
-      <SecondaryButton label="Download diff" onClick={() => downloadText(output, "text-diff", "diff", "text/plain;charset=utf-8")} />
+      <SecondaryButton label="Download diff" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output), "text-diff", "diff", "text/plain;charset=utf-8"); return "Diff ready to download."; })} />
     </div>
   </ToolForm>;
 }
@@ -1602,7 +1701,7 @@ function Base64Tool() {
   return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
     <Textarea label="Input" value={input} onChange={setInput} rows={7} />
     <Textarea label="Output" value={output} onChange={setOutput} rows={7} />
-    <div className="flex flex-wrap gap-2"><PrimaryButton label="Encode" onClick={() => { setOutput(btoa(unescape(encodeURIComponent(input)))); setStatus({ tone: "success", message: "Encoded." }); }} /><SecondaryButton label="Decode" onClick={() => runSafely(setStatus, async () => { setOutput(decodeURIComponent(escape(atob(input)))); return "Decoded."; })} /></div>
+    <div className="flex flex-wrap gap-2"><PrimaryButton label="Encode" onClick={() => { setOutput(base64Encode(input)); setStatus({ tone: "success", message: "Encoded." }); }} /><SecondaryButton label="Decode" onClick={() => runSafely(setStatus, async () => { setOutput(base64Decode(input)); return "Decoded."; })} /></div>
   </ToolForm>;
 }
 
@@ -1648,7 +1747,7 @@ function PasswordGeneratorTool() {
     <Textarea label="Generated password" value={output} onChange={setOutput} rows={3} />
     <div className="flex flex-wrap gap-2">
       <PrimaryButton label="Generate password" onClick={() => runSafely(setStatus, async () => { setOutput(generatePassword({ length: Number(length), symbols })); return "Password generated locally."; })} />
-      <SecondaryButton label="Copy password" onClick={() => { navigator.clipboard?.writeText(output); setStatus({ tone: "success", message: "Password copied." }); }} />
+      <SecondaryButton label="Copy password" onClick={() => runSafely(setStatus, async () => { await copyText(output); return "Password copied."; })} />
     </div>
   </ToolForm>;
 }
@@ -1661,7 +1760,7 @@ function QrCodeTool() {
     <Textarea label="Text or link" value={input} onChange={setInput} rows={5} />
     {dataUrl && <img className="surface-card wabi-card-edge mx-auto aspect-square w-full max-w-xs p-4" src={dataUrl} alt="Generated QR code" />}
     <div className="flex flex-wrap gap-2">
-      <PrimaryButton label="Generate QR code" onClick={() => runSafely(setStatus, async () => { setDataUrl(await QRCode.toDataURL(input, { width: 720, margin: 2, errorCorrectionLevel: "M" })); return "QR code generated locally."; })} />
+      <PrimaryButton label="Generate QR code" onClick={() => runSafely(setStatus, async () => { if (!input.trim()) throw new Error("Enter text or a link first."); setDataUrl(await QRCode.toDataURL(input, { width: 720, margin: 2, errorCorrectionLevel: "M" })); return "QR code generated locally."; })} />
       {dataUrl && <SecondaryButton label="Download PNG" onClick={async () => { const blob = await (await fetch(dataUrl)).blob(); downloadBlob(blob, "myfilekit-qr-code.png"); }} />}
     </div>
   </ToolForm>;
@@ -1676,14 +1775,14 @@ function FilenameCleanerTool() {
     <Textarea label="Cleaned filenames" value={output} onChange={setOutput} rows={8} />
     <div className="flex flex-wrap gap-2">
       <PrimaryButton label="Clean filenames" onClick={() => { setOutput(cleanFilenameList(input)); setStatus({ tone: "success", message: "Filenames cleaned for safer cross-platform use." }); }} />
-      <SecondaryButton label="Download list" onClick={() => downloadText(output, "cleaned-filenames", "txt")} />
+      <SecondaryButton label="Download list" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output), "cleaned-filenames", "txt"); return "Filename list ready to download."; })} />
     </div>
   </ToolForm>;
 }
 
 function InvoiceLauncher() {
   const features = [
-    "Premium template library",
+    "Customizable template library",
     "Editable invoice, receipt, quote, and estimate wording",
     "Tax, discount, TDS, GST/VAT, HSN/SAC, and reverse-charge fields",
     "Bank, UPI, card, crypto, and custom payment instructions",
@@ -1694,7 +1793,7 @@ function InvoiceLauncher() {
   return (
     <div className="surface-card wabi-card-edge grid gap-5 p-5">
       <div>
-        <p className="text-xs font-black uppercase text-neutral-500">Premium business document editor</p>
+        <p className="text-xs font-black uppercase text-neutral-500">Business document editor</p>
         <h3 className="mt-1 font-display text-2xl font-black">One invoice editor, fully customizable</h3>
         <p className="mt-2 max-w-2xl font-semibold leading-7 text-neutral-700">
           Receipts, quotes, and estimates are handled as invoice-style business documents inside the full editor, instead of split into weaker duplicate tools.
@@ -1705,7 +1804,7 @@ function InvoiceLauncher() {
           <div key={feature} className="surface-muted wabi-card-edge px-4 py-3 text-sm font-bold text-neutral-700">{feature}</div>
         ))}
       </div>
-      <a className="primary-button w-fit" href="/invoice-generator/index.html">Open premium invoice editor</a>
+      <a className="primary-button w-fit" href="/invoice-generator/index.html">Open invoice editor</a>
     </div>
   );
 }
@@ -1832,6 +1931,23 @@ async function runSafely(setStatus: (status: Status) => void, task: () => Promis
 async function sha256File(file: File) {
   const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function canvasToBlob(canvas: HTMLCanvasElement, type: string) {
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type));
+  if (!blob) throw new Error("This browser could not export the image.");
+  return blob;
+}
+
+function requireOutput(value: string) {
+  if (!value.trim()) throw new Error("Generate a result before downloading.");
+  return value;
+}
+
+async function copyText(value: string) {
+  const text = requireOutput(value);
+  if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is not available in this browser.");
+  await navigator.clipboard.writeText(text);
 }
 
 function imageExt(type: string) {

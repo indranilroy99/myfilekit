@@ -18,8 +18,10 @@ const requiredFiles = [
   "src/registry/tools.registry.js",
   "assets/myfilekit-logo.svg",
   "assets/vendor/pdf-lib.min.js",
+  "assets/vendor/html2canvas.min.js",
   "invoice-generator/index.html",
   "README.md",
+  "CHANGELOG.md",
   "SECURITY.md",
   "CONTRIBUTING.md",
   "docs/manual-test-checklist.md"
@@ -59,6 +61,17 @@ if (build.status !== 0) {
   process.stdout.write("Vite build OK\n");
 }
 
+for (const file of [
+  "dist/index.html",
+  "dist/invoice-generator/index.html",
+  "dist/assets/vendor/pdf-lib.min.js",
+  "dist/assets/vendor/html2canvas.min.js"
+]) {
+  const exists = fs.existsSync(path.join(root, file));
+  process.stdout.write(`${exists ? "Built" : "Missing build output"}: ${file}\n`);
+  if (!exists) failed = true;
+}
+
 const invoiceHtml = fs.readFileSync(path.join(root, "invoice-generator", "index.html"), "utf8");
 const invoiceScript = invoiceHtml.match(/<script>([\s\S]*?)<\/script>/);
 if (!invoiceScript) {
@@ -78,6 +91,21 @@ const dashboardHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
 if (/unpkg|cdn\.|https:\/\/|coming soon|ai-assisted|ai tools/i.test(dashboardHtml)) {
   failed = true;
   process.stderr.write("Dashboard HTML contains remote, coming-soon, or AI wording that should not be visible.\n");
+}
+
+const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
+if (!readme.includes(`The current version is \`${packageJson.version}\``) || !readme.includes(`version-${packageJson.version}-`)) {
+  failed = true;
+  process.stderr.write("README version does not match package.json. Run a version script or update the release documentation.\n");
+}
+
+const localReadmeLinks = [...readme.matchAll(/\]\((\.\/[^)#]+)(?:#[^)]+)?\)/g)].map((match) => match[1]);
+for (const link of new Set(localReadmeLinks)) {
+  if (!fs.existsSync(path.resolve(root, link))) {
+    failed = true;
+    process.stderr.write(`README link does not resolve: ${link}\n`);
+  }
 }
 
 function commandPath(command) {
