@@ -2,6 +2,12 @@
 
 All notable MyFileKit changes are documented here. The project uses semantic versioning.
 
+## 3.0.24 - 2026-07-15
+
+### Changed
+
+- Reworked the GitHub README with the shipped MyFileKit wordmark, binary ASCII wordmark encoding, clearer repository navigation, and a concise product introduction.
+
 ## 3.0.23 - 2026-07-15
 
 ### Added
