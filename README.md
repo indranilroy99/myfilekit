@@ -1,13 +1,18 @@
-<p align="center">
-  <img src="./assets/myfilekit-logo.svg" width="320" alt="MyFileKit" />
-</p>
+<pre align="center">
+ __  __       _____ _ _      _  ___ _ _
+|  \/  |_   _|  ___(_) | ___| |/ (_) | |_
+| |\/| | | | | |_  | | |/ _ \ ' /| | __|
+| |  | | |_| |  _| | | |  __/ . \| | |_
+|_|  |_|\__, |_|   |_|_|\___|_|\_\_|\__|
+         |___/
+
+              L O C A L - F I R S T   F I L E   T O O L K I T
+</pre>
 
 <p align="center">
   <strong>Private file work, in one local browser workspace.</strong><br />
   PDF, image, invoice, signature, privacy, text, data, and developer tools that run where your files already are.
 </p>
-
-<pre align="center">01001101 01111001 01000110 01101001 01101100 01100101 01001011 01101001 01110100</pre>
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
@@ -17,13 +22,11 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-[![Version](https://img.shields.io/badge/version-3.0.24-2563eb)](./package.json)
+[![Version](https://img.shields.io/badge/version-3.0.25-2563eb)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-15%20passing-16a34a)](./tests/core.test.js)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20known%20vulnerabilities-16a34a)](./SECURITY.md)
 
 MyFileKit is a local-first browser toolkit for common file workflows. It combines 38 working tools in one searchable interface and processes selected files in the browser wherever the underlying format allows it.
-
-> The binary line is the ASCII encoding of `MyFileKit`. The wordmark above is the same text-led logo used by the application.
 
 ## Product Principles
 
@@ -136,7 +139,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md), run `npm run preflight`, and keep eve
 
 ## Versioning
 
-The current version is `3.0.24`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
+The current version is `3.0.25`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
 
 ```bash
 npm run version:patch

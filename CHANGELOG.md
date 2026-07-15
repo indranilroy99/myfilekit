@@ -2,6 +2,12 @@
 
 All notable MyFileKit changes are documented here. The project uses semantic versioning.
 
+## 3.0.25 - 2026-07-15
+
+### Changed
+
+- Replaced the README banner with a terminal-style ASCII MyFileKit wordmark and removed the SVG badge and raw binary line.
+
 ## 3.0.24 - 2026-07-15
 
 ### Changed
