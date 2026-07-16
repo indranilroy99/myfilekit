@@ -6,7 +6,7 @@ import { csvToJson, jsonToCsv } from "../src/services/csv.service.js";
 import { addPdfPageNumbers, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "../src/services/pdf.service.js";
 import { validateFiles } from "../src/services/file-validator.js";
 import { inspectImageMetadataBuffer } from "../src/services/metadata.service.js";
-import { base64Decode, base64Encode, cleanFilenameList, diffToText, generatePassword, jsonToYaml, lineDiff, textStats, urlDecode, urlEncode } from "../src/services/text-tools.service.js";
+import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "../src/services/text-tools.service.js";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "../src/utils/format.js";
 import { safeFilename, withExtension } from "../src/utils/safe-filename.js";
 import { routeForHash } from "../src/router.js";
@@ -49,6 +49,15 @@ test("metadata cleaner is available and discoverable", () => {
   }
 });
 
+test("image metadata inspector is available in Image Tools and discoverable by EXIF terms", () => {
+  const inspector = tools.find((tool) => tool.id === "image-metadata-inspector-tool");
+  assert.ok(inspector);
+  assert.equal(inspector.category, "Image Tools");
+  assert.equal(inspector.route, "#image-metadata-inspector-tool");
+  assert.deepEqual(inspector.acceptedTypes, ["image/jpeg", "image/png", "image/webp"]);
+  assert.match([...inspector.keywords, inspector.name, inspector.description].join(" ").toLowerCase(), /exif extractor/);
+});
+
 test("page range parsing converts user-facing pages to zero-based indexes", () => {
   assert.deepEqual(parsePageRanges("1-3, 5", 6), [0, 1, 2, 4]);
   assert.throws(() => parsePageRanges("0", 6), /outside/);
@@ -78,6 +87,43 @@ test("markdown preview escapes user HTML", () => {
 test("React shell does not use dangerous user-controlled HTML injection", () => {
   const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(appSource, /dangerouslySetInnerHTML|\\.innerHTML\\s*=/);
+});
+
+test("spotlight cards are reusable, wired into tool cards, and avoid inline HTML injection", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const spotlightSource = fs.readFileSync(new URL("../src/components/ui/spotlight-card.tsx", import.meta.url), "utf8");
+
+  assert.match(appSource, /import \{ GlowCard/);
+  assert.match(appSource, /<GlowCard customSize/);
+  assert.match(spotlightSource, /export function GlowCard/);
+  assert.match(spotlightSource, /glowColor/);
+  assert.doesNotMatch(spotlightSource, /dangerouslySetInnerHTML|\\.innerHTML\\s*=/);
+});
+
+test("liquid buttons provide standard button semantics without SVG filter effects", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const buttonSource = fs.readFileSync(new URL("../src/components/ui/liquid-glass-button.tsx", import.meta.url), "utf8");
+
+  assert.match(appSource, /import \{ LiquidButton \}/);
+  assert.match(appSource, /<LiquidButton className="primary-button"/);
+  assert.match(buttonSource, /forwardRef<HTMLButtonElement/);
+  assert.match(buttonSource, /type=\{type\}/);
+  assert.doesNotMatch(buttonSource, /dangerouslySetInnerHTML|<filter|feTurbulence|backdropFilter/);
+});
+
+test("invoice defaults are neutral and drafts are not persisted", () => {
+  const invoiceSource = fs.readFileSync(new URL("../invoice-generator/index.html", import.meta.url), "utf8");
+  assert.match(invoiceSource, /senderName:\s*"Your name"/);
+  assert.match(invoiceSource, /clientName:\s*"Client name"/);
+  assert.match(invoiceSource, /bankName:\s*""/);
+  assert.match(invoiceSource, /accountNumber:\s*""/);
+  assert.match(invoiceSource, /ifscCode:\s*""/);
+  assert.match(invoiceSource, /upiId:\s*""/);
+
+  assert.doesNotMatch(invoiceSource, /localStorage\.setItem\(|sessionStorage\.setItem\(/);
+  assert.match(invoiceSource, /localStorage\.removeItem\(key\)/);
+  assert.match(invoiceSource, /sessionStorage\.removeItem\(key\)/);
+  assert.match(invoiceSource, /Private session/);
 });
 
 test("every visible tool has a concrete renderer", () => {
@@ -192,14 +238,22 @@ test("text and utility tools transform data locally", () => {
   assert.deepEqual(textStats("one two\nthree"), { words: 3, characters: 13, charactersNoSpaces: 11, lines: 2, readingMinutes: 1 });
   assert.equal(textStats("").readingMinutes, 0);
   assert.equal(diffToText(lineDiff("same\nold", "same\nnew")), "  same\n- old\n+ new");
-  assert.equal(cleanFilenameList("bad file?.pdf"), "bad-file.pdf");
   assert.equal(base64Decode(base64Encode("Hello, 世界")), "Hello, 世界");
-  const password = generatePassword({ length: 24, symbols: true });
+  const password = generatePassword({ length: 24, symbols: true, minimumNumbers: 2, minimumSymbols: 2, avoidAmbiguous: true });
   assert.equal(password.length, 24);
   assert.match(password, /[a-z]/);
   assert.match(password, /[A-Z]/);
   assert.match(password, /[0-9]/);
   assert.match(password, /[^a-zA-Z0-9]/);
+  assert.equal((password.match(/\d/g) || []).length >= 2, true);
+  assert.equal((password.match(/[^a-zA-Z0-9]/g) || []).length >= 2, true);
+  assert.doesNotMatch(password, /[Il1O0o]/);
+  assert.throws(() => generatePassword({ length: 8, numbers: false, minimumNumbers: 1 }), /Enable numbers/);
+  const passphrase = generatePassphrase({ words: 6, separator: "-", capitalise: true, includeNumber: true });
+  assert.equal(passphrase.split("-").length, 7);
+  assert.match(passphrase, /^[A-Z][a-z]+-/);
+  assert.equal(passwordStrength(password).score >= 3, true);
+  assert.equal(passwordStrength("").label, "Not generated");
 });
 
 function makePngWithText(keyword, value) {

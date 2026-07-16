@@ -22,7 +22,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-[![Version](https://img.shields.io/badge/version-3.0.25-2563eb)](./package.json)
+[![Version](https://img.shields.io/badge/version-3.0.26-2563eb)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-15%20passing-16a34a)](./tests/core.test.js)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20known%20vulnerabilities-16a34a)](./SECURITY.md)
 
@@ -41,14 +41,14 @@ MyFileKit is a local-first browser toolkit for common file workflows. It combine
 | Category | Tools |
 | --- | --- |
 | PDF (9) | Merge PDF, Split / Extract PDF Pages, Delete PDF Pages, Rotate PDF Pages, Add Text to PDF, Add Signature to PDF, Add PDF Page Numbers, Watermark PDF, Images to PDF |
-| Image (8) | Compress Image, Batch Compress Images, Resize Image, Batch Resize Images, Convert Image, Crop Image, Rotate / Flip Image, Add Text to Image |
+| Image (9) | Compress Image, Batch Compress Images, Resize Image, Batch Resize Images, Convert Image, Crop Image, Rotate / Flip Image, Add Text to Image, Image Metadata Inspector |
 | Business (1) | Invoice Generator |
 | Signature (3) | Draw Signature, Type Signature, Add Signature to Image |
 | Text & Data (9) | Text to PDF, Markdown Preview, JSON Formatter, CSV to JSON, JSON to CSV, JSON to YAML, URL Encode / Decode, Text Diff Checker, Word Counter |
 | Privacy (2) | EXIF & Metadata Cleaner, PDF Metadata Cleaner |
-| Developer Utilities (6) | Base64 Encode / Decode, File Hash Generator, Hash Compare, Password Generator, QR Code Generator, Filename Cleaner |
+| Developer Utilities (5) | Base64 Encode / Decode, File Hash Generator, Hash Compare, Password Generator, QR Code Generator |
 
-The image metadata cleaner inspects supported JPEG, PNG, and WebP files, exports a local report, and re-encodes pixels to remove most embedded metadata. Re-encoding may change file size or encoding details. The PDF metadata cleaner removes common document information fields; it does not sanitize visible content, attachments, or every possible custom PDF object.
+Image Metadata Inspector reads EXIF, XMP, ICC, GPS, and container metadata from supported JPEG, PNG, and WebP files locally, without changing the source file. EXIF & Metadata Cleaner uses the same local inspection capability and can re-encode a cleaned image copy; re-encoding may change file size or encoding details. The PDF metadata cleaner removes common document information fields; it does not sanitize visible content, attachments, or every possible custom PDF object.
 
 ## Quick Start
 
@@ -139,7 +139,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md), run `npm run preflight`, and keep eve
 
 ## Versioning
 
-The current version is `3.0.25`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
+The current version is `3.0.26`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
 
 ```bash
 npm run version:patch

@@ -34,6 +34,7 @@ import { NeuralNoise } from "@/components/ui/neural-noise";
 import { NumberedPagination } from "@/components/ui/pagination";
 import { GlowCard, type GlowColor } from "@/components/ui/spotlight-card";
 import AnimatedDownloadButton from "@/components/ui/download-hover-button";
+import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "./utils/format.js";
@@ -44,7 +45,7 @@ import { csvToJson, jsonToCsv } from "./services/csv.service.js";
 import { addSignatureToImage, addTextToImage, cleanImageMetadata, compressImage, cropImage, exportCanvas, imageDimensions, imageToCanvas, resizeImage, rotateFlipImage } from "./services/image.service.js";
 import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.service.js";
 import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
-import { base64Decode, base64Encode, cleanFilenameList, diffToText, generatePassword, jsonToYaml, lineDiff, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
+import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 
 type Tool = (typeof tools)[number];
 type Status = { tone: "idle" | "success" | "error"; message: string };
@@ -792,7 +793,7 @@ function PrimaryButton({ label, onClick }: { label: string; onClick: () => void 
     return <AnimatedDownloadButton label={label} onClick={onClick} />;
   }
 
-  return <button className="primary-button" type="button" onClick={onClick}><Zap size={17} />{label}</button>;
+  return <LiquidButton className="primary-button" onClick={onClick}><Zap size={17} />{label}</LiquidButton>;
 }
 
 function SecondaryButton({ label, onClick }: { label: string; onClick: () => void }) {
@@ -878,6 +879,7 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "crop-image-tool") return <CropImageTool tool={tool} />;
   if (tool.id === "rotate-flip-image-tool") return <RotateFlipImageTool tool={tool} />;
   if (tool.id === "add-text-to-image-tool") return <AddTextToImageTool tool={tool} />;
+  if (tool.id === "image-metadata-inspector-tool") return <ImageMetadataInspectorTool tool={tool} />;
   if (tool.id === "add-signature-to-image-tool") return <AddSignatureToImageTool tool={tool} />;
   if (tool.id === "draw-signature-tool") return <DrawSignatureTool />;
   if (tool.id === "type-signature-tool") return <TypeSignatureTool />;
@@ -896,7 +898,6 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "hash-compare-tool") return <HashCompareTool tool={tool} />;
   if (tool.id === "password-generator-tool") return <PasswordGeneratorTool />;
   if (tool.id === "qr-code-generator-tool") return <QrCodeTool />;
-  if (tool.id === "filename-cleaner-tool") return <FilenameCleanerTool />;
   return <StatusBox status={{ tone: "error", message: "This tool renderer is missing." }} />;
 }
 
@@ -1294,7 +1295,15 @@ type MetadataReport = {
   warnings: string[];
 };
 
+function ImageMetadataInspectorTool({ tool }: { tool: Tool }) {
+  return <ImageMetadataTool tool={tool} canClean={false} />;
+}
+
 function MetadataCleanerTool({ tool }: { tool: Tool }) {
+  return <ImageMetadataTool tool={tool} canClean />;
+}
+
+function ImageMetadataTool({ tool, canClean }: { tool: Tool; canClean: boolean }) {
   const [files, setFiles] = useState<File[]>([]);
   const [info, setInfo] = useState<MetadataImageInfo | null>(null);
   const [report, setReport] = useState<MetadataReport | null>(null);
@@ -1351,7 +1360,9 @@ function MetadataCleanerTool({ tool }: { tool: Tool }) {
   return (
     <ToolForm status={status} onReset={reset}>
       <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-        Full local image metadata workflow for JPG/JPEG, PNG, and WebP: inspect EXIF/XMP/ICC/IPTC-style containers where present, review sensitive fields like GPS, then re-encode a cleaned copy in your browser.
+        {canClean
+          ? "Full local image metadata workflow for JPG/JPEG, PNG, and WebP: inspect EXIF/XMP/ICC/IPTC-style containers where present, review sensitive fields like GPS, then re-encode a cleaned copy in your browser."
+          : "Read EXIF, XMP, ICC, GPS, and container metadata from JPG/JPEG, PNG, and WebP images locally. This inspector does not upload, alter, or store your file."}
       </div>
       <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
       <div className="grid gap-4 lg:grid-cols-2">
@@ -1424,23 +1435,25 @@ function MetadataCleanerTool({ tool }: { tool: Tool }) {
           )}
         </div>
       )}
-      <div className="surface-card wabi-card-edge p-4">
-        <p className="font-black">Cleaned result</p>
-        {cleaned && info ? (
-            <div className="mt-3 grid gap-3 text-sm font-semibold text-neutral-600">
-              <InfoRow label="Before" value={formatBytes(info.size)} />
-              <InfoRow label="After" value={formatBytes(cleaned.blob.size)} />
-              <InfoRow label="Output" value={cleaned.filename} />
-              <SecondaryButton label="Download cleaned image" onClick={() => downloadBlob(cleaned.blob, cleaned.filename)} />
-            </div>
-        ) : (
-          <p className="mt-3 text-sm font-semibold text-neutral-500">Cleaned image details will appear here after processing.</p>
-        )}
-      </div>
+      {canClean && (
+        <div className="surface-card wabi-card-edge p-4">
+          <p className="font-black">Cleaned result</p>
+          {cleaned && info ? (
+              <div className="mt-3 grid gap-3 text-sm font-semibold text-neutral-600">
+                <InfoRow label="Before" value={formatBytes(info.size)} />
+                <InfoRow label="After" value={formatBytes(cleaned.blob.size)} />
+                <InfoRow label="Output" value={cleaned.filename} />
+                <SecondaryButton label="Download cleaned image" onClick={() => downloadBlob(cleaned.blob, cleaned.filename)} />
+              </div>
+          ) : (
+            <p className="mt-3 text-sm font-semibold text-neutral-500">Cleaned image details will appear here after processing.</p>
+          )}
+        </div>
+      )}
       <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
         Privacy note: the selected image and metadata report are processed locally in this browser session. MyFileKit does not upload it, store it, track it, or log metadata contents.
       </div>
-      <PrimaryButton label="Clean metadata and re-encode image" onClick={clean} />
+      {canClean && <PrimaryButton label="Clean metadata and re-encode image" onClick={clean} />}
     </ToolForm>
   );
 }
@@ -1601,7 +1614,7 @@ function JsonTool() {
 }
 
 function CsvToJsonTool() {
-  const [input, setInput] = useState("name,email\nIndranil,hello@example.com");
+  const [input, setInput] = useState("name,email\nAlex,alex@example.com");
   const [output, setOutput] = useState("");
   const [status, setStatus] = useState(initialStatus);
   return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
@@ -1615,7 +1628,7 @@ function CsvToJsonTool() {
 }
 
 function JsonToCsvTool() {
-  const [input, setInput] = useState('[{"name":"Indranil","email":"hello@example.com"}]');
+  const [input, setInput] = useState('[{"name":"Alex","email":"alex@example.com"}]');
   const [output, setOutput] = useState("");
   const [status, setStatus] = useState(initialStatus);
   return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
@@ -1737,17 +1750,100 @@ function HashCompareTool({ tool }: { tool: Tool }) {
 }
 
 function PasswordGeneratorTool() {
+  const [mode, setMode] = useState<"password" | "passphrase">("password");
   const [length, setLength] = useState("20");
+  const [lower, setLower] = useState(true);
+  const [upper, setUpper] = useState(true);
+  const [numbers, setNumbers] = useState(true);
   const [symbols, setSymbols] = useState(true);
+  const [minimumNumbers, setMinimumNumbers] = useState("1");
+  const [minimumSymbols, setMinimumSymbols] = useState("1");
+  const [avoidAmbiguous, setAvoidAmbiguous] = useState(true);
+  const [words, setWords] = useState("6");
+  const [separator, setSeparator] = useState("-");
+  const [capitalise, setCapitalise] = useState(true);
+  const [includeNumber, setIncludeNumber] = useState(true);
   const [output, setOutput] = useState("");
   const [status, setStatus] = useState(initialStatus);
-  return <ToolForm status={status} onReset={() => { setOutput(""); setLength("20"); setStatus(initialStatus); }}>
-    <Input label="Length" value={length} onChange={setLength} type="number" />
-    <Checkbox label="Include symbols" checked={symbols} onChange={setSymbols} />
-    <Textarea label="Generated password" value={output} onChange={setOutput} rows={3} />
+  const strength = passwordStrength(output);
+  const modeLabel = mode === "password" ? "password" : "passphrase";
+  const selectMode = (nextMode: "password" | "passphrase") => {
+    if (nextMode === mode) return;
+    setMode(nextMode);
+    setOutput("");
+    setStatus(initialStatus);
+  };
+  const reset = () => {
+    setMode("password");
+    setLength("20");
+    setLower(true);
+    setUpper(true);
+    setNumbers(true);
+    setSymbols(true);
+    setMinimumNumbers("1");
+    setMinimumSymbols("1");
+    setAvoidAmbiguous(true);
+    setWords("6");
+    setSeparator("-");
+    setCapitalise(true);
+    setIncludeNumber(true);
+    setOutput("");
+    setStatus(initialStatus);
+  };
+  const generate = () => runSafely(setStatus, async () => {
+    const value = mode === "password"
+      ? generatePassword({
+          length: Number(length), lower, upper, numbers, symbols,
+          minimumNumbers: Number(minimumNumbers), minimumSymbols: Number(minimumSymbols), avoidAmbiguous,
+        })
+      : generatePassphrase({ words: Number(words), separator, capitalise, includeNumber });
+    setOutput(value);
+    return `${mode === "password" ? "Password" : "Passphrase"} generated locally.`;
+  });
+  return <ToolForm status={status} onReset={reset}>
+    <div className="generator-mode-switch" role="tablist" aria-label="Generator type">
+      <button className={`generator-mode-button ${mode === "password" ? "is-active" : ""}`} role="tab" aria-selected={mode === "password"} type="button" onClick={() => selectMode("password")}>Password</button>
+      <button className={`generator-mode-button ${mode === "passphrase" ? "is-active" : ""}`} role="tab" aria-selected={mode === "passphrase"} type="button" onClick={() => selectMode("passphrase")}>Passphrase</button>
+    </div>
+    <div className="password-output-panel" aria-live="polite">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs font-black uppercase tracking-[.08em] text-neutral-500">Generated {modeLabel}</p>
+        <span className={`password-strength strength-${strength.score}`}>{strength.label}{strength.bits ? ` · ~${strength.bits} bits` : ""}</span>
+      </div>
+      <p className="password-output-value">{output || "Generate a private value when ready."}</p>
+    </div>
+    {mode === "password" ? (
+      <div className="grid gap-4">
+        <div className="surface-card wabi-card-edge grid gap-4 p-4">
+          <Input label="Length" value={length} onChange={setLength} type="number" helper="Choose between 8 and 128 characters. 16 or more is recommended." />
+          <div className="password-option-grid">
+            <Checkbox label="A–Z" checked={upper} onChange={setUpper} />
+            <Checkbox label="a–z" checked={lower} onChange={setLower} />
+            <Checkbox label="0–9" checked={numbers} onChange={setNumbers} />
+            <Checkbox label="Symbols" checked={symbols} onChange={setSymbols} />
+          </div>
+        </div>
+        <div className="surface-card wabi-card-edge grid gap-4 p-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input label="Minimum numbers" value={minimumNumbers} onChange={setMinimumNumbers} type="number" helper="Set 0 to make numbers optional." />
+            <Input label="Minimum symbols" value={minimumSymbols} onChange={setMinimumSymbols} type="number" helper="Set 0 to make symbols optional." />
+          </div>
+          <Checkbox label="Avoid ambiguous characters (I, l, 1, O, 0)" checked={avoidAmbiguous} onChange={setAvoidAmbiguous} />
+        </div>
+      </div>
+    ) : (
+      <div className="surface-card wabi-card-edge grid gap-4 p-4">
+        <Input label="Number of words" value={words} onChange={setWords} type="number" helper="Choose between 3 and 20 words. Six or more is recommended." />
+        <Input label="Word separator" value={separator} onChange={setSeparator} helper="Use a short separator such as - or ." />
+        <div className="password-option-grid">
+          <Checkbox label="Capitalise words" checked={capitalise} onChange={setCapitalise} />
+          <Checkbox label="Add a two-digit number" checked={includeNumber} onChange={setIncludeNumber} />
+        </div>
+      </div>
+    )}
     <div className="flex flex-wrap gap-2">
-      <PrimaryButton label="Generate password" onClick={() => runSafely(setStatus, async () => { setOutput(generatePassword({ length: Number(length), symbols })); return "Password generated locally."; })} />
-      <SecondaryButton label="Copy password" onClick={() => runSafely(setStatus, async () => { await copyText(output); return "Password copied."; })} />
+      <PrimaryButton label={`Generate ${modeLabel}`} onClick={generate} />
+      <SecondaryButton label={`Copy ${modeLabel}`} onClick={() => runSafely(setStatus, async () => { await copyText(requireOutput(output)); return `${mode === "password" ? "Password" : "Passphrase"} copied.`; })} />
     </div>
   </ToolForm>;
 }
@@ -1762,20 +1858,6 @@ function QrCodeTool() {
     <div className="flex flex-wrap gap-2">
       <PrimaryButton label="Generate QR code" onClick={() => runSafely(setStatus, async () => { if (!input.trim()) throw new Error("Enter text or a link first."); setDataUrl(await QRCode.toDataURL(input, { width: 720, margin: 2, errorCorrectionLevel: "M" })); return "QR code generated locally."; })} />
       {dataUrl && <SecondaryButton label="Download PNG" onClick={async () => { const blob = await (await fetch(dataUrl)).blob(); downloadBlob(blob, "myfilekit-qr-code.png"); }} />}
-    </div>
-  </ToolForm>;
-}
-
-function FilenameCleanerTool() {
-  const [input, setInput] = useState("Project final?.pdf\nmy photo 2026.jpg");
-  const [output, setOutput] = useState("");
-  const [status, setStatus] = useState(initialStatus);
-  return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
-    <Textarea label="Filenames" value={input} onChange={setInput} rows={8} />
-    <Textarea label="Cleaned filenames" value={output} onChange={setOutput} rows={8} />
-    <div className="flex flex-wrap gap-2">
-      <PrimaryButton label="Clean filenames" onClick={() => { setOutput(cleanFilenameList(input)); setStatus({ tone: "success", message: "Filenames cleaned for safer cross-platform use." }); }} />
-      <SecondaryButton label="Download list" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output), "cleaned-filenames", "txt"); return "Filename list ready to download."; })} />
     </div>
   </ToolForm>;
 }

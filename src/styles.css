@@ -1642,6 +1642,175 @@ html.dark body::before,
   display: none !important;
 }
 
+.liquid-button {
+  --liquid-border: color-mix(in srgb, var(--primary) 62%, transparent);
+  --liquid-surface: color-mix(in srgb, var(--primary) 94%, #fff 6%);
+  --liquid-highlight: rgb(255 255 255 / .24);
+  align-items: center;
+  border: 1px solid var(--liquid-border);
+  border-radius: 8px;
+  color: var(--primary-foreground);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-weight: 700;
+  gap: .5rem;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.liquid-button-sm { min-height: 2rem; padding: .4rem .75rem; font-size: .8125rem; }
+.liquid-button-default { min-height: 2.75rem; padding: .625rem 1rem; font-size: .875rem; }
+.liquid-button-lg { min-height: 3.25rem; padding: .75rem 1.25rem; font-size: 1rem; }
+
+.liquid-button-surface {
+  background: linear-gradient(180deg, var(--liquid-highlight), transparent 45%), var(--liquid-surface);
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.liquid-button-content {
+  align-items: center;
+  display: inline-flex;
+  gap: .5rem;
+  position: relative;
+}
+
+.liquid-button:hover:not(:disabled) {
+  border-color: var(--primary);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--primary) 20%, transparent);
+  transform: translateY(-1px);
+}
+
+.liquid-button:active:not(:disabled) {
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / .18);
+  transform: translateY(0);
+}
+
+.liquid-button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 32%, transparent);
+  outline-offset: 2px;
+}
+
+.liquid-button:disabled { cursor: not-allowed; opacity: .55; }
+
+.liquid-button-outline,
+.liquid-button-ghost {
+  --liquid-border: var(--border);
+  --liquid-surface: var(--card);
+  --liquid-highlight: rgb(255 255 255 / .62);
+  color: var(--foreground);
+}
+
+.liquid-button-ghost { border-color: transparent; }
+
+html.dark .liquid-button {
+  --liquid-surface: color-mix(in srgb, var(--primary) 78%, #111827 22%);
+  --liquid-highlight: rgb(255 255 255 / .12);
+}
+
+html.dark .liquid-button-outline,
+html.dark .liquid-button-ghost {
+  --liquid-surface: var(--card);
+  --liquid-highlight: rgb(255 255 255 / .06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liquid-button { transition: none; }
+  .liquid-button:hover:not(:disabled),
+  .liquid-button:active:not(:disabled) { transform: none; }
+}
+
+.generator-mode-switch {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 4px;
+}
+
+.generator-mode-button {
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: .875rem;
+  font-weight: 700;
+  min-height: 2.5rem;
+  transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.generator-mode-button:hover { color: var(--foreground); }
+
+.generator-mode-button.is-active {
+  background: var(--card);
+  box-shadow: 0 1px 2px rgb(15 23 42 / .12);
+  color: var(--foreground);
+}
+
+.generator-mode-button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 32%, transparent);
+  outline-offset: 1px;
+}
+
+.password-output-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: .75rem;
+  padding: 1rem;
+}
+
+.password-output-value {
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  font-weight: 700;
+  line-break: anywhere;
+  margin: 0;
+  min-height: 1.75rem;
+  overflow-wrap: anywhere;
+}
+
+.password-strength {
+  border-radius: 999px;
+  font-size: .75rem;
+  font-weight: 700;
+  padding: .25rem .55rem;
+}
+
+.strength-0 { background: var(--muted); color: var(--muted-foreground); }
+.strength-1 { background: color-mix(in srgb, #f97316 14%, var(--card)); color: #c2410c; }
+.strength-2 { background: color-mix(in srgb, #eab308 16%, var(--card)); color: #a16207; }
+.strength-3 { background: color-mix(in srgb, #0ea5e9 14%, var(--card)); color: #0369a1; }
+.strength-4 { background: color-mix(in srgb, #10b981 14%, var(--card)); color: #047857; }
+
+.password-option-grid {
+  display: grid;
+  gap: .75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+html.dark .generator-mode-button.is-active,
+html.dark .password-output-panel { background: var(--card); }
+
+html.dark .strength-1 { color: #fdba74; }
+html.dark .strength-2 { color: #fde68a; }
+html.dark .strength-3 { color: #7dd3fc; }
+html.dark .strength-4 { color: #6ee7b7; }
+
+@media (max-width: 520px) {
+  .password-option-grid { grid-template-columns: 1fr; }
+}
+
 .font-display {
   font-family: var(--font-sans);
   letter-spacing: -.03em;
@@ -2230,26 +2399,26 @@ html:not(.dark) {
   --card: #ffffff;
   --ring: #2563eb;
   --input: #ffffff;
-  --muted: #f7f7f8;
-  --accent: #f7f7f8;
-  --border: #e4e4e7;
+  --muted: #f1f5f9;
+  --accent: #eef2f7;
+  --border: #cbd5e1;
   --popover: #ffffff;
   --primary: #2563eb;
-  --secondary: #f7f7f8;
-  --background: #fafafa;
+  --secondary: #f1f5f9;
+  --background: #f5f7fa;
   --foreground: #18181b;
   --card-foreground: #18181b;
-  --muted-foreground: #71717a;
+  --muted-foreground: #52525b;
   --accent-foreground: #18181b;
   --popover-foreground: #18181b;
   --primary-foreground: #ffffff;
   --secondary-foreground: #18181b;
-  --app-bg: #fafafa;
+  --app-bg: #f5f7fa;
   --ink: #18181b;
   --paper: #ffffff;
-  --paper-soft: #f7f7f8;
-  --stone: #71717a;
-  --line: #e4e4e7;
+  --paper-soft: #f1f5f9;
+  --stone: #52525b;
+  --line: #cbd5e1;
   --moss: #2563eb;
   --indigo: #18181b;
   --clay: #2563eb;
@@ -2260,13 +2429,13 @@ html:not(.dark) {
 
 html:not(.dark),
 html:not(.dark) body {
-  background: #fafafa !important;
+  background: #f5f7fa !important;
   color: #18181b;
 }
 
 html:not(.dark) .site-header-scrolled {
-  border-bottom-color: #e4e4e7 !important;
-  background: rgba(250, 250, 250, .9) !important;
+  border-bottom-color: #cbd5e1 !important;
+  background: rgba(245, 247, 250, .92) !important;
 }
 
 html:not(.dark) .limelight-nav-item,
@@ -2278,7 +2447,7 @@ html:not(.dark) .pagination-nav-button,
 html:not(.dark) .pagination-icon-button,
 html:not(.dark) .pagination-page-button,
 html:not(.dark) .quick-chip {
-  border-color: #e4e4e7 !important;
+  border-color: #d4d8df !important;
   color: #52525b !important;
 }
 
@@ -2324,7 +2493,7 @@ html:not(.dark) .tool-description,
 html:not(.dark) .category-card .text-neutral-500,
 html:not(.dark) .why-card .text-neutral-600,
 html:not(.dark) .command-stat .text-neutral-500 {
-  color: #71717a !important;
+  color: #52525b !important;
 }
 
 html:not(.dark) .hero-panel p.max-w-2xl,
@@ -2336,7 +2505,7 @@ html:not(.dark) .related-tools-section h2,
 html:not(.dark) .tool-card .tag-badge:first-child,
 html:not(.dark) .category-count,
 html:not(.dark) .site-footer {
-  color: #71717a !important;
+  color: #52525b !important;
 }
 
 html:not(.dark) .spotlight-search,
@@ -2375,7 +2544,7 @@ html:not(.dark) .search-clear-button {
 
 html:not(.dark) .dashboard-shelf > div:first-child,
 html:not(.dark) .category-heading {
-  border-bottom-color: #e4e4e7 !important;
+  border-bottom-color: #cbd5e1 !important;
 }
 
 html:not(.dark) .tool-card,
@@ -2390,8 +2559,9 @@ html:not(.dark) .why-card,
 html:not(.dark) .tool-form-status,
 html:not(.dark) .search-result-card,
 html:not(.dark) .hero-empty-result {
-  border-color: #e4e4e7 !important;
+  border-color: #d4d8df !important;
   background: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04) !important;
 }
 
 html:not(.dark) .tool-card:hover,
@@ -2402,6 +2572,23 @@ html:not(.dark) .command-stat:hover,
 html:not(.dark) .search-result-card:hover,
 html:not(.dark) .search-result-card:focus-visible {
   border-color: #a1a1aa !important;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, .07) !important;
+}
+
+html:not(.dark) .dashboard-shelf h2,
+html:not(.dark) .category-heading h3,
+html:not(.dark) .related-tools-section h2 {
+  color: #3f3f46 !important;
+}
+
+html:not(.dark) .search-submit-button,
+html:not(.dark) .icon-tile,
+html:not(.dark) .command-stat-icon,
+html:not(.dark) .search-result-icon,
+html:not(.dark) .category-icon {
+  border: 1px solid #dbe2ea !important;
+  background: #f1f5f9 !important;
+  color: #334155 !important;
 }
 
 html:not(.dark) .primary-button {

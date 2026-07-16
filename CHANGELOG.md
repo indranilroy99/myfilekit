@@ -2,6 +2,22 @@
 
 All notable MyFileKit changes are documented here. The project uses semantic versioning.
 
+## 3.0.26 - 2026-07-17
+
+### Added
+
+- Image Metadata Inspector for local, offline inspection of supported JPG, PNG, and WebP file metadata.
+- Password and passphrase generator controls for character sets, minimum counts, ambiguous-character avoidance, separator choice, capitalization, and optional digits.
+
+### Changed
+
+- Replaced invoice sample data with neutral placeholders and disabled automatic invoice persistence.
+- Improved light-mode contrast, shared action controls, and the local utility interface.
+
+### Removed
+
+- Filename Cleaner from the visible tool registry.
+
 ## 3.0.25 - 2026-07-15
 
 ### Changed

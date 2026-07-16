@@ -17,6 +17,7 @@ export const tools = [
   tool("crop-image-tool", "Crop Image", "Image Tools", "Crop an image using numeric controls.", ["crop image", "trim image"], ["Image", "Local"], { maxFiles: 1, types: ["image/jpeg", "image/png", "image/webp"], extensions: ["jpg", "jpeg", "png", "webp"] }),
   tool("rotate-flip-image-tool", "Rotate / Flip Image", "Image Tools", "Rotate or flip an image and export it.", ["rotate image", "flip image"], ["Image", "Local"], { maxFiles: 1, types: ["image/jpeg", "image/png", "image/webp"], extensions: ["jpg", "jpeg", "png", "webp"] }),
   tool("add-text-to-image-tool", "Add Text to Image", "Image Tools", "Overlay new text onto JPG, PNG, or WebP images.", ["edit png text", "add text image", "caption image", "text overlay"], ["Image", "Local"], { maxFiles: 1, types: ["image/jpeg", "image/png", "image/webp"], extensions: ["jpg", "jpeg", "png", "webp"] }),
+  tool("image-metadata-inspector-tool", "Image Metadata Inspector", "Image Tools", "Read EXIF, XMP, GPS, ICC, and container metadata from supported images locally.", ["image metadata", "exif extractor", "exif viewer", "photo metadata", "gps", "camera model", "xmp", "icc"], ["Image", "Privacy", "Local"], { maxFiles: 1, types: ["image/jpeg", "image/png", "image/webp"], extensions: ["jpg", "jpeg", "png", "webp"] }),
   tool("add-signature-to-image-tool", "Add Signature to Image", "Signature Tools", "Place a signature image onto a photo or screenshot.", ["signature photo", "sign image", "add signature to photo"], ["Signature", "Image", "Local"], { maxFiles: 1, types: ["image/jpeg", "image/png", "image/webp"], extensions: ["jpg", "jpeg", "png", "webp"] }),
   tool("invoice-generator-tool", "Invoice Generator", "Business Tools", "Create invoices with templates, taxes, payments, signatures, and brand controls.", ["invoice", "tax invoice", "bill", "receipt", "quote", "estimate", "business document"], ["Business"]),
   tool("draw-signature-tool", "Draw Signature", "Signature Tools", "Draw a signature and download it as PNG.", ["draw signature", "signature pad"], ["Signature", "Local"]),
@@ -34,9 +35,8 @@ export const tools = [
   tool("base64-tool", "Base64 Encode / Decode", "Developer Utilities", "Encode text or decode Base64.", ["base64", "encode", "decode"], ["Developer", "Local"]),
   tool("file-hash-tool", "File Hash Generator", "Developer Utilities", "Generate a SHA-256 hash for a local file.", ["hash", "sha256", "checksum"], ["Developer", "Local"], { maxFiles: 1 }),
   tool("hash-compare-tool", "Hash Compare", "Developer Utilities", "Compare a file SHA-256 hash with an expected value.", ["compare hash", "checksum verify", "sha256 verify"], ["Developer", "Local"], { maxFiles: 1 }),
-  tool("password-generator-tool", "Password Generator", "Developer Utilities", "Generate strong passwords locally.", ["password", "passphrase", "random"], ["Security", "Local"]),
-  tool("qr-code-generator-tool", "QR Code Generator", "Developer Utilities", "Generate a downloadable QR code for text or links.", ["qr", "qr code", "upi qr", "link qr"], ["Utility", "Local"]),
-  tool("filename-cleaner-tool", "Filename Cleaner", "Developer Utilities", "Clean unsafe filenames into portable names.", ["filename", "rename", "safe filename"], ["Utility", "Local"])
+  tool("password-generator-tool", "Password Generator", "Developer Utilities", "Create passwords or passphrases with local strength controls.", ["password", "passphrase", "random", "secure password", "password length"], ["Security", "Local"]),
+  tool("qr-code-generator-tool", "QR Code Generator", "Developer Utilities", "Generate a downloadable QR code for text or links.", ["qr", "qr code", "upi qr", "link qr"], ["Utility", "Local"])
 ];
 
 export const categories = [

@@ -53,6 +53,8 @@ Open the URL printed by Vite, normally `http://localhost:4173`.
 
 ## Privacy Workflows
 
+- Upload a JPEG with EXIF/GPS data to Image Metadata Inspector and confirm the source file is inspected locally without a cleaning action being offered.
+- Download the inspector JSON report and confirm it contains detected image metadata only.
 - Upload a JPEG with EXIF/GPS data to EXIF & Metadata Cleaner and inspect detected file and metadata information.
 - Repeat with supported PNG and WebP files when test fixtures are available.
 - Download the metadata report and confirm it contains no unrelated browser or application data.
@@ -60,6 +62,12 @@ Open the URL printed by Vite, normally `http://localhost:4173`.
 - Confirm the transparency note about browser re-encoding remains visible.
 - Upload a PDF to PDF Metadata Cleaner, clean it, and confirm common title, author, subject, keyword, producer, and creator fields are absent in the output.
 - Confirm neither metadata tool claims support for arbitrary file types.
+
+## Password Generator
+
+- Generate a password with upper/lowercase, numbers, symbols, minimum counts, and ambiguous characters excluded; verify the generated value honors the chosen settings.
+- Switch to Passphrase, choose word count, separator, capitalisation, and optional number; verify the output matches the selected controls.
+- Copy a generated value and confirm an empty output reports a friendly validation error.
 
 ## Invoice Generator
 

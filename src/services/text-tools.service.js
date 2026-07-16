@@ -52,21 +52,77 @@ export function generatePassword(options = {}) {
   const requestedLength = Number(options.length ?? 20);
   if (!Number.isFinite(requestedLength)) throw new Error("Password length must be a valid number.");
   const length = clamp(Math.trunc(requestedLength), 8, 128);
+  const removeAmbiguous = options.avoidAmbiguous === true;
+  const charset = {
+    lower: removeAmbiguous ? "abcdefghjkmnpqrstuvwxyz" : "abcdefghijklmnopqrstuvwxyz",
+    upper: removeAmbiguous ? "ABCDEFGHJKLMNPQRSTUVWXYZ" : "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    numbers: removeAmbiguous ? "23456789" : "0123456789",
+    symbols: "!@#$%^&*()-_=+[]{};:,.?",
+  };
   const pools = [
-    options.lower !== false ? "abcdefghijkmnopqrstuvwxyz" : "",
-    options.upper !== false ? "ABCDEFGHJKLMNPQRSTUVWXYZ" : "",
-    options.numbers !== false ? "23456789" : "",
-    options.symbols ? "!@#$%^&*()-_=+[]{};:,.?" : "",
+    options.lower !== false ? charset.lower : "",
+    options.upper !== false ? charset.upper : "",
+    options.numbers !== false ? charset.numbers : "",
+    options.symbols ? charset.symbols : "",
   ].filter(Boolean);
   if (!pools.length) throw new Error("Choose at least one character set.");
+
+  const minimumNumbers = Math.max(0, Math.trunc(Number(options.minimumNumbers ?? 0)) || 0);
+  const minimumSymbols = Math.max(0, Math.trunc(Number(options.minimumSymbols ?? 0)) || 0);
+  if (minimumNumbers > 0 && options.numbers === false) throw new Error("Enable numbers to require a minimum number count.");
+  if (minimumSymbols > 0 && !options.symbols) throw new Error("Enable symbols to require a minimum symbol count.");
+
   const alphabet = pools.join("");
   const characters = pools.map((pool) => pool[randomIndex(pool.length)]);
+  for (let index = 1; index < minimumNumbers; index += 1) characters.push(charset.numbers[randomIndex(charset.numbers.length)]);
+  for (let index = 1; index < minimumSymbols; index += 1) characters.push(charset.symbols[randomIndex(charset.symbols.length)]);
+  if (characters.length > length) throw new Error("Increase the length or reduce the required character counts.");
   while (characters.length < length) characters.push(alphabet[randomIndex(alphabet.length)]);
   for (let index = characters.length - 1; index > 0; index -= 1) {
     const swapIndex = randomIndex(index + 1);
     [characters[index], characters[swapIndex]] = [characters[swapIndex], characters[index]];
   }
   return characters.join("");
+}
+
+const PASSPHRASE_WORDS = [
+  "amber", "anchor", "apricot", "archer", "aster", "atlas", "autumn", "bamboo", "beacon", "birch", "blossom", "breeze",
+  "brook", "cabin", "cactus", "candle", "canyon", "cedar", "cipher", "cinder", "clover", "comet", "coral", "cricket",
+  "dahlia", "dawn", "delta", "drift", "ember", "falcon", "fern", "fjord", "flint", "forest", "frost", "galaxy",
+  "garden", "glacier", "harbor", "hazel", "horizon", "island", "jasmine", "juniper", "lagoon", "lantern", "laurel", "legend",
+  "lilac", "linden", "maple", "marble", "meadow", "meteor", "mint", "monarch", "moss", "nebula", "north", "oasis",
+  "oak", "opal", "orbit", "orchid", "otter", "pebble", "pepper", "pine", "prairie", "quartz", "raven", "reef",
+  "river", "robin", "saffron", "sailor", "sierra", "solstice", "sparrow", "spruce", "starling", "summit", "sunset", "thistle",
+  "timber", "topaz", "valley", "velvet", "violet", "voyage", "willow", "winter", "wren", "zephyr"
+];
+
+export function generatePassphrase(options = {}) {
+  const requestedWords = Number(options.words ?? 6);
+  if (!Number.isFinite(requestedWords)) throw new Error("Number of words must be valid.");
+  const wordCount = clamp(Math.trunc(requestedWords), 3, 20);
+  const separator = String(options.separator ?? "-").slice(0, 8);
+  const capitalise = options.capitalise === true;
+  const words = Array.from({ length: wordCount }, () => {
+    const word = PASSPHRASE_WORDS[randomIndex(PASSPHRASE_WORDS.length)];
+    return capitalise ? `${word[0].toUpperCase()}${word.slice(1)}` : word;
+  });
+  if (options.includeNumber) words.push(String(10 + randomIndex(90)));
+  return words.join(separator);
+}
+
+export function passwordStrength(value) {
+  const text = String(value || "");
+  if (!text) return { label: "Not generated", score: 0, bits: 0 };
+  let poolSize = 0;
+  if (/[a-z]/.test(text)) poolSize += 26;
+  if (/[A-Z]/.test(text)) poolSize += 26;
+  if (/\d/.test(text)) poolSize += 10;
+  if (/[^a-zA-Z0-9\s]/.test(text)) poolSize += 28;
+  if (/\s|[-_]/.test(text)) poolSize = Math.max(poolSize, 48);
+  const bits = Math.round(text.length * Math.log2(Math.max(poolSize, 1)));
+  const score = bits >= 80 ? 4 : bits >= 60 ? 3 : bits >= 40 ? 2 : 1;
+  const label = ["Not generated", "Fair", "Good", "Strong", "Very strong"][score];
+  return { label, score, bits };
 }
 
 export function base64Encode(value) {
@@ -91,30 +147,6 @@ export function base64Decode(value) {
   } catch {
     throw new Error("The decoded Base64 value is not valid UTF-8 text.");
   }
-}
-
-export function cleanFilenameList(input) {
-  return String(input || "")
-    .split(/\r?\n/)
-    .map((line) => safePortableName(line))
-    .filter(Boolean)
-    .join("\n");
-}
-
-export function safePortableName(name) {
-  const trimmed = String(name || "").trim();
-  if (!trimmed) return "";
-  const extensionMatch = trimmed.match(/(\.[a-z0-9]{1,12})$/i);
-  const extension = extensionMatch ? extensionMatch[1].toLowerCase() : "";
-  const base = (extension ? trimmed.slice(0, -extension.length) : trimmed)
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^[.\-\s]+|[.\-\s]+$/g, "")
-    .slice(0, 96);
-  return `${base || "file"}${extension}`;
 }
 
 function toYaml(value, depth = 0) {

@@ -2365,7 +2365,7 @@
 
     <section class="workspace">
       <div class="top-strip">
-        <span class="status-dot" id="saveState">Autosaved</span>
+        <span class="status-dot" id="saveState" title="Invoice details remain only in this tab unless you export them.">Private session</span>
         <span>Click any invoice section to edit it</span>
         <span id="topTotal">Total: ₹0.00</span>
       </div>
@@ -2499,8 +2499,10 @@
   <script src="../assets/vendor/pdf-lib.min.js"></script>
   <script src="../assets/vendor/html2canvas.min.js"></script>
   <script>
-    const STORAGE_KEY = "premium-invoice-generator-v2";
-    const LEGACY_STORAGE_KEY = "premium-invoice-generator-v1";
+    const DEPRECATED_STORAGE_KEYS = [
+      "premium-invoice-generator-v1",
+      "premium-invoice-generator-v2"
+    ];
     const MAX_TEXT_LENGTH = 4000;
     const MAX_SHORT_TEXT_LENGTH = 240;
     const MAX_IMAGE_BYTES = 1200000;
@@ -2634,15 +2636,15 @@
 
     const defaultState = {
       documentTitle: "Invoice",
-      invoiceNo: "INV-2026-001",
+      invoiceNo: "INV-0001",
       status: "Due",
       issueDate: new Date().toISOString().slice(0, 10),
       dueDate: nextDate(14),
       currency: "INR",
       poNumber: "PO-4582",
       supplyType: "Services",
-      placeOfSupply: "Maharashtra",
-      hsnSac: "998313",
+      placeOfSupply: "",
+      hsnSac: "",
       reverseCharge: "No",
       senderType: "freelancer",
       logoData: "",
@@ -2666,21 +2668,21 @@
       senderName: "Your name",
       senderTitle: "Your role or business",
       companyName: "",
-      companyMeta: "City, State\nGSTIN / Tax ID: optional",
-      companyEmail: "hello@example.com",
-      companyPhone: "+00 00000 00000",
+      companyMeta: "City, State\nTax ID (optional)",
+      companyEmail: "you@example.com",
+      companyPhone: "",
       senderGstin: "",
       senderPan: "",
       senderWebsite: "",
-      paymentInfo: "Bank transfer / UPI accepted\nPayment reference: invoice number",
-      accountHolder: "Your name",
-      bankName: "Example Bank",
-      accountNumber: "000000000000",
-      ifscCode: "EXAMPLE0000",
+      paymentInfo: "",
+      accountHolder: "",
+      bankName: "",
+      accountNumber: "",
+      ifscCode: "",
       swiftCode: "",
       ibanCode: "",
-      branchName: "Main Branch",
-      upiId: "yourname@upi",
+      branchName: "",
+      upiId: "",
       paypalEmail: "",
       wiseEmail: "",
       chequePayableTo: "",
@@ -2701,17 +2703,17 @@
         crypto: false,
         custom: false
       },
-      signatureText: "Your name",
+      signatureText: "",
       signatureData: "",
-      clientName: "Client Company",
-      clientMeta: "Client Department\nClient City",
+      clientName: "Client name",
+      clientMeta: "Client address",
       clientTaxId: "",
-      clientContact: "Accounts Payable",
-      clientEmail: "billing@example.com",
+      clientContact: "",
+      clientEmail: "",
       clientPhone: "",
       shipTo: "",
       taxRate: 18,
-      discount: 2500,
+      discount: 0,
       tdsMode: "rate",
       tdsRate: 10,
       tdsAmount: 0,
@@ -2759,14 +2761,9 @@
       paperMode: "cream",
       monoMode: false,
       visible: visibleDefaults,
-      customFields: [
-        { label: "Project", value: "Security advisory retainer" },
-        { label: "Payment Reference", value: "Use invoice number in transfer notes" }
-      ],
+      customFields: [],
       items: [
-        { name: "Security Assessment", code: "998313", description: "Application review, findings validation, and client-ready summary", quantity: 1, rate: 45000 },
-        { name: "Detection Engineering Support", code: "998313", description: "Custom detection logic, tuning notes, and implementation guidance", quantity: 1, rate: 28000 },
-        { name: "Advisory Hours", code: "998313", description: "Review calls, remediation guidance, and delivery handover", quantity: 6, rate: 3500 }
+        { name: "Professional service", code: "", description: "Describe the work delivered", quantity: 1, rate: 0 }
       ]
     };
 
@@ -2805,23 +2802,18 @@
     }
 
     function loadState() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
-        const saved = raw ? JSON.parse(raw) : {};
-        const merged = {
-          ...structuredClone(defaultState),
-          ...saved,
-          visible: { ...visibleDefaults, ...(saved.visible || {}) },
-          paymentMethods: { ...defaultState.paymentMethods, ...(saved.paymentMethods || {}) },
-          customFields: Array.isArray(saved.customFields) ? saved.customFields : structuredClone(defaultState.customFields),
-          items: Array.isArray(saved.items) && saved.items.length ? saved.items : structuredClone(defaultState.items)
-        };
+      clearStoredInvoiceDrafts();
+      return structuredClone(defaultState);
+    }
 
-        if (!merged.senderName && saved.companyName) merged.senderName = saved.companyName;
-        if (Number.isInteger(saved.themeIndex) && !Number.isInteger(saved.paletteId)) merged.paletteId = saved.themeIndex;
-        return normalizeState(merged);
-      } catch {
-        return structuredClone(defaultState);
+    function clearStoredInvoiceDrafts() {
+      for (const key of DEPRECATED_STORAGE_KEYS) {
+        try {
+          localStorage.removeItem(key);
+          sessionStorage.removeItem(key);
+        } catch {
+          // Storage can be unavailable in hardened or private browser contexts.
+        }
       }
     }
 
@@ -2935,19 +2927,7 @@
 
     function saveState() {
       state = normalizeState(state);
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        setText("saveState", "Autosaved");
-      } catch {
-        state.logoData = "";
-        state.signatureData = "";
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-          setText("saveState", "Autosaved without images");
-        } catch {
-          setText("saveState", "Storage full");
-        }
-      }
+      setText("saveState", "Private session");
     }
 
     function numeric(value) {
@@ -3295,7 +3275,8 @@
         exportText(JSON.stringify(normalizeState(structuredClone(state)), null, 2), filename, "application/json;charset=utf-8");
       });
       document.getElementById("resetBtn").addEventListener("click", () => {
-        if (!confirm("Reset this invoice to the freelancer sample?")) return;
+        if (!confirm("Reset this invoice and clear all entered details?")) return;
+        clearStoredInvoiceDrafts();
         state = structuredClone(defaultState);
         render(true);
       });
