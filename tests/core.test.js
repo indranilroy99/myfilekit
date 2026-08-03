@@ -393,3 +393,26 @@ function writeU32be(bytes, offset, value) {
 function writeU32le(bytes, offset, value) {
   new DataView(bytes.buffer).setUint32(offset, value, true);
 }
+
+test("jsonToYaml quotes string values that look like YAML 1.1 booleans, null, and numbers", () => {
+  const yaml = jsonToYaml('{"a":"yes","b":"-5","c":"~","d":"off","e":"1e5","f":"plain"}');
+  assert.match(yaml, /a: "yes"/);
+  assert.match(yaml, /b: "-5"/);
+  assert.match(yaml, /c: "~"/);
+  assert.match(yaml, /d: "off"/);
+  assert.match(yaml, /e: "1e5"/);
+  assert.match(yaml, /f: plain/);
+});
+
+test("jsonToCsv rejects arrays of primitives with a clear error", () => {
+  assert.throws(() => jsonToCsv('["a","b"]'), /array of objects/);
+  assert.throws(() => jsonToCsv('[{"a":1},null]'), /array of objects/);
+  assert.throws(() => jsonToCsv('[[1,2]]'), /array of objects/);
+  assert.equal(jsonToCsv('[{"a":"1","b":"2"}]'), "a,b\n1,2");
+});
+
+test("PDF text tools raise a friendly error for non-Latin-1 input", async () => {
+  await assert.rejects(() => textToPdf("你好世界"), /Latin-1 characters only/);
+  const latinPdf = new File([await textToPdf("ok")], "p.pdf", { type: "application/pdf" });
+  await assert.rejects(() => watermarkPdf(latinPdf, "秘密"), /Latin-1 characters only/);
+});

@@ -58,7 +58,7 @@ export async function addTextToPdf(file, text, options = {}) {
   const page = pages[pageIndex];
   const label = String(text || "").trim();
   if (!label) throw new Error("Enter text to add.");
-  page.drawText(label, {
+  drawPdfText(page, label, {
     x: finiteNumber(options.x ?? 72, "X coordinate"),
     y: finiteNumber(options.y ?? 720, "Y coordinate"),
     size: positiveNumber(options.size ?? 18, "Text size"),
@@ -99,7 +99,7 @@ export async function addPdfPageNumbers(file, options = {}) {
   pages.forEach((page, index) => {
     const { width } = page.getSize();
     const text = `${prefix}${index + 1}`;
-    page.drawText(text, {
+    drawPdfText(page, text, {
       x: width / 2 - (text.length * fontSize * 0.25),
       y: margin,
       size: fontSize,
@@ -121,7 +121,7 @@ export async function watermarkPdf(file, text, options = {}) {
   const rotation = finiteNumber(options.rotation ?? -32, "Rotation");
   pdf.getPages().forEach((page) => {
     const { width, height } = page.getSize();
-    page.drawText(label, {
+    drawPdfText(page, label, {
       x: width * 0.18,
       y: height * 0.48,
       size,
@@ -166,7 +166,7 @@ export async function textToPdf(text) {
         page = pdf.addPage([pageWidth, pageHeight]);
         y = pageHeight - margin;
       }
-      page.drawText(line, { x: margin, y, size: fontSize, font, color: rgb(0.05, 0.05, 0.05) });
+      drawPdfText(page, line, { x: margin, y, size: fontSize, font, color: rgb(0.05, 0.05, 0.05) });
       y -= lineHeight;
     });
   });
@@ -229,6 +229,19 @@ function wrapText(text, maxChars) {
   });
   lines.push(line);
   return lines;
+}
+
+function drawPdfText(page, text, options) {
+  try {
+    page.drawText(text, options);
+  } catch (error) {
+    // pdf-lib's standard fonts only cover WinAnsi (Latin-1). Turn its cryptic
+    // "WinAnsi cannot encode ..." error into a clear, user-facing message.
+    if (/cannot encode|WinAnsi/i.test(String(error?.message))) {
+      throw new Error("This PDF text tool supports Latin-1 characters only (no CJK/emoji).");
+    }
+    throw error;
+  }
 }
 
 function clamp(value, min, max) {

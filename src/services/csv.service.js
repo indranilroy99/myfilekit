@@ -22,6 +22,9 @@ export function csvToJson(csvText) {
 export function jsonToCsv(jsonText) {
   const data = JSON.parse(jsonText);
   if (!Array.isArray(data)) throw new Error("JSON must be an array of objects.");
+  if (data.some((item) => item === null || typeof item !== "object" || Array.isArray(item))) {
+    throw new Error("JSON to CSV expects an array of objects.");
+  }
   const headers = [...new Set(data.flatMap((item) => Object.keys(item || {})))];
   if (!headers.length) throw new Error("JSON array does not contain object fields.");
   return [headers, ...data.map((item) => headers.map((header) => formatCell(item?.[header])))]

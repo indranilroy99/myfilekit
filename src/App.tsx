@@ -662,7 +662,6 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
         <div className="mt-auto flex flex-wrap gap-2">
           <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{primaryBadge}</span>
           {!compact && visibleBadges.map((badge: string) => <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>)}
-          {tool.localProcessing && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{compact ? "Local" : "Local processing"}</span>}
           {!compact && multiFile && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{multiFile}</span>}
           {!compact && fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
         </div>
@@ -744,7 +743,7 @@ function CategoryPage({ category }: { category: string }) {
         title={category}
         subtitle={details?.description || "Choose any working tool below."}
         icon={Icon}
-        badges={[`${categoryTools.length} workflows`, "Local processing"]}
+        badges={[`${categoryTools.length} ${categoryTools.length === 1 ? "tool" : "tools"}`]}
       />
       <section className="surface-panel wabi-edge p-6">
         <div className="category-filter mb-5 flex items-center gap-3">
@@ -780,7 +779,7 @@ function ToolPage({ tool }: { tool: Tool }) {
         title={tool.name}
         subtitle={tool.description}
         icon={Icon}
-        badges={["Local processing", fileTypeLabel(tool), multiFileLabel(tool), tool.category].filter(Boolean)}
+        badges={[fileTypeLabel(tool), multiFileLabel(tool), tool.category].filter(Boolean)}
       />
       <section className="grid gap-6">
         <div className="surface-panel wabi-edge tool-page-panel p-5 md:p-7">
@@ -2207,12 +2206,7 @@ function multiFileLabel(tool: Tool) {
   return file.maxFiles && file.maxFiles > 1 ? "Multiple files" : "";
 }
 
-function glowColorForTool(tool: Tool): GlowColor {
-  if (tool.category === "Image Tools") return "green";
-  if (tool.category === "Business Tools") return "orange";
-  if (tool.category === "Signature Tools") return "purple";
-  if (tool.category === "Privacy Tools") return "green";
-  if (tool.category === "Developer Utilities") return "purple";
+function glowColorForTool(_tool: Tool): GlowColor {
   return "blue";
 }
 

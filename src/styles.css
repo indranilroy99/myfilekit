@@ -44,7 +44,7 @@
   --border: rgba(15, 23, 42, .08);
   --radius: 1.15rem;
   --popover: rgba(255, 255, 255, .92);
-  --primary: #0f172a;
+  --primary: #2563eb;
   --sidebar: rgba(248, 250, 252, .86);
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -254,7 +254,7 @@ button {
   background:
     linear-gradient(145deg, rgba(255, 255, 255, .72), rgba(248, 250, 252, .5));
   box-shadow: 0 18px 52px rgba(15, 23, 42, .055);
-  padding: 15px;
+  padding: 16px;
   backdrop-filter: blur(18px);
 }
 
@@ -288,13 +288,13 @@ button {
   min-height: 46px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   border: 1px solid rgba(255, 255, 255, .78);
   border-radius: 999px;
   background:
     linear-gradient(145deg, rgba(255, 255, 255, .78), rgba(248, 250, 252, .58));
   color: var(--ink);
-  padding: 10px 13px;
+  padding: 10px 12px;
   font-size: 14px;
   font-weight: 900;
   text-decoration: none;
@@ -684,7 +684,7 @@ button {
   border: 1px solid rgba(15, 23, 42, .08);
   border-radius: 1rem;
   background: rgba(255, 255, 255, .72);
-  padding: 13px 14px;
+  padding: 12px 14px;
   color: var(--ink);
   outline: none;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 10px 28px rgba(15, 23, 42, .04);
@@ -771,7 +771,7 @@ button {
   gap: 8px;
   min-height: 42px;
   border-radius: 999px;
-  padding: 10px 15px;
+  padding: 10px 16px;
   font-size: 14px;
   font-weight: 900;
   text-decoration: none;
@@ -863,7 +863,7 @@ button {
 .why-card {
   min-height: 130px;
   border-radius: var(--radius);
-  padding: 22px;
+  padding: 24px;
 }
 
 .tool-page-panel {
@@ -956,7 +956,7 @@ button {
   border-radius: 999px;
   background: rgba(255, 255, 255, .64);
   color: var(--ink);
-  padding: 10px 13px;
+  padding: 10px 12px;
   box-shadow: 0 12px 34px rgba(15, 23, 42, .055);
   transition: transform .18s ease, border-color .18s ease, background .18s ease, color .18s ease;
 }
@@ -1135,7 +1135,7 @@ html.dark .tool-card {
     radial-gradient(circle at 20% 10%, rgba(148, 197, 255, .12), transparent 34%),
     linear-gradient(145deg, rgba(16, 24, 40, .88), rgba(11, 18, 32, .72)) !important;
   border-color: transparent !important;
-  border-radius: 1.85rem !important;
+  border-radius: 1.75rem !important;
   color: #f8fafc !important;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .06),
@@ -1595,10 +1595,10 @@ html.dark .liquid-button-ghost {
 }
 
 .strength-0 { background: var(--muted); color: var(--muted-foreground); }
-.strength-1 { background: color-mix(in srgb, #f97316 14%, var(--card)); color: #c2410c; }
-.strength-2 { background: color-mix(in srgb, #eab308 16%, var(--card)); color: #a16207; }
-.strength-3 { background: color-mix(in srgb, #0ea5e9 14%, var(--card)); color: #0369a1; }
-.strength-4 { background: color-mix(in srgb, #10b981 14%, var(--card)); color: #047857; }
+.strength-1 { background: color-mix(in srgb, var(--primary) 10%, var(--card)); color: color-mix(in srgb, var(--primary) 55%, var(--foreground)); }
+.strength-2 { background: color-mix(in srgb, var(--primary) 16%, var(--card)); color: color-mix(in srgb, var(--primary) 70%, var(--foreground)); }
+.strength-3 { background: color-mix(in srgb, var(--primary) 24%, var(--card)); color: color-mix(in srgb, var(--primary) 85%, var(--foreground)); }
+.strength-4 { background: color-mix(in srgb, var(--primary) 32%, var(--card)); color: var(--primary); }
 
 .password-option-grid {
   display: grid;
@@ -1609,10 +1609,10 @@ html.dark .liquid-button-ghost {
 html.dark .generator-mode-button.is-active,
 html.dark .password-output-panel { background: var(--card); }
 
-html.dark .strength-1 { color: #fdba74; }
-html.dark .strength-2 { color: #fde68a; }
-html.dark .strength-3 { color: #7dd3fc; }
-html.dark .strength-4 { color: #6ee7b7; }
+html.dark .strength-1 { color: color-mix(in srgb, var(--primary) 45%, #ffffff); }
+html.dark .strength-2 { color: color-mix(in srgb, var(--primary) 60%, #ffffff); }
+html.dark .strength-3 { color: color-mix(in srgb, var(--primary) 80%, #ffffff); }
+html.dark .strength-4 { color: color-mix(in srgb, var(--primary) 90%, #ffffff); }
 
 @media (max-width: 520px) {
   .password-option-grid { grid-template-columns: 1fr; }
@@ -2013,7 +2013,7 @@ html.dark .tool-card .tool-arrow {
 .tool-card .tag-badge:first-child {
   display: inline-flex !important;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
@@ -2032,31 +2032,7 @@ html.dark .tool-card .tool-arrow {
   height: 4px;
   flex: 0 0 auto;
   border-radius: 999px;
-  background: #3b82f6;
-}
-
-.tool-card.category-image-tools .tag-badge:first-child::before {
-  background: #a855f7;
-}
-
-.tool-card.category-business-tools .tag-badge:first-child::before {
-  background: #14b8a6;
-}
-
-.tool-card.category-signature-tools .tag-badge:first-child::before {
-  background: #f59e0b;
-}
-
-.tool-card.category-text-data-tools .tag-badge:first-child::before {
-  background: #22c55e;
-}
-
-.tool-card.category-privacy-tools .tag-badge:first-child::before {
-  background: #06b6d4;
-}
-
-.tool-card.category-developer-utilities .tag-badge:first-child::before {
-  background: #f97316;
+  background: var(--primary);
 }
 
 .surface-panel,

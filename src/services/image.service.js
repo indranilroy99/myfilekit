@@ -1,10 +1,17 @@
-export async function imageToCanvas(file) {
+export async function imageToCanvas(file, outputType) {
   const bitmap = await createImageBitmap(file);
   try {
     const canvas = document.createElement("canvas");
     canvas.width = bitmap.width;
     canvas.height = bitmap.height;
-    canvasContext(canvas).drawImage(bitmap, 0, 0);
+    const context = canvasContext(canvas);
+    // JPEG has no alpha channel, so a transparent source would flatten onto
+    // black. Paint a white matte before drawing (mirrors pdf.service canvasJpegBytes).
+    if (outputType === "image/jpeg") {
+      context.fillStyle = "#fff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    context.drawImage(bitmap, 0, 0);
     return canvas;
   } finally {
     bitmap.close?.();
@@ -12,6 +19,17 @@ export async function imageToCanvas(file) {
 }
 
 export async function exportCanvas(canvas, type = "image/png", quality = 0.85) {
+  // Resize/crop/rotate/text build their own canvases that never pass through
+  // imageToCanvas, so guarantee a white matte at the encode step for JPEG only.
+  // PNG/WebP output keeps its transparency untouched.
+  if (type === "image/jpeg") {
+    const context = canvasContext(canvas);
+    context.save();
+    context.globalCompositeOperation = "destination-over";
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.restore();
+  }
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, quality));
   if (!blob) throw new Error("This browser cannot export that image format.");
   return blob;
@@ -25,12 +43,12 @@ export async function imageDimensions(file) {
 }
 
 export async function cleanImageMetadata(file, type = file.type || "image/png", quality = 0.92) {
-  const canvas = await imageToCanvas(file);
+  const canvas = await imageToCanvas(file, type);
   return exportCanvas(canvas, type, quality);
 }
 
 export async function compressImage(file, type, quality) {
-  const canvas = await imageToCanvas(file);
+  const canvas = await imageToCanvas(file, type);
   return exportCanvas(canvas, type, quality);
 }
 

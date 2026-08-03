@@ -59,23 +59,30 @@ export function generatePassword(options = {}) {
     numbers: removeAmbiguous ? "23456789" : "0123456789",
     symbols: "!@#$%^&*()-_=+[]{};:,.?",
   };
+  const lowerEnabled = options.lower !== false;
+  const upperEnabled = options.upper !== false;
+  const numbersEnabled = options.numbers !== false;
+  const symbolsEnabled = options.symbols === true;
   const pools = [
-    options.lower !== false ? charset.lower : "",
-    options.upper !== false ? charset.upper : "",
-    options.numbers !== false ? charset.numbers : "",
-    options.symbols ? charset.symbols : "",
+    lowerEnabled ? charset.lower : "",
+    upperEnabled ? charset.upper : "",
+    numbersEnabled ? charset.numbers : "",
+    symbolsEnabled ? charset.symbols : "",
   ].filter(Boolean);
   if (!pools.length) throw new Error("Choose at least one character set.");
 
-  const numbersEnabled = options.numbers !== false;
-  const symbolsEnabled = options.symbols === true;
   const minimumNumbers = numbersEnabled ? Math.max(0, Math.trunc(Number(options.minimumNumbers ?? 0)) || 0) : 0;
   const minimumSymbols = symbolsEnabled ? Math.max(0, Math.trunc(Number(options.minimumSymbols ?? 0)) || 0) : 0;
 
   const alphabet = pools.join("");
-  const characters = pools.map((pool) => pool[randomIndex(pool.length)]);
-  for (let index = 1; index < minimumNumbers; index += 1) characters.push(charset.numbers[randomIndex(charset.numbers.length)]);
-  for (let index = 1; index < minimumSymbols; index += 1) characters.push(charset.symbols[randomIndex(charset.symbols.length)]);
+  // Only seed guaranteed characters up to each set's requested minimum. Lower/upper
+  // have an implicit minimum of one (no configurable minimum); numbers/symbols honor
+  // their minimum, which may be 0 so they stay optional in the combined pool.
+  const characters = [];
+  if (lowerEnabled) characters.push(charset.lower[randomIndex(charset.lower.length)]);
+  if (upperEnabled) characters.push(charset.upper[randomIndex(charset.upper.length)]);
+  for (let index = 0; index < minimumNumbers; index += 1) characters.push(charset.numbers[randomIndex(charset.numbers.length)]);
+  for (let index = 0; index < minimumSymbols; index += 1) characters.push(charset.symbols[randomIndex(charset.symbols.length)]);
   if (characters.length > length) throw new Error("Increase the length or reduce the required character counts.");
   while (characters.length < length) characters.push(alphabet[randomIndex(alphabet.length)]);
   for (let index = characters.length - 1; index > 0; index -= 1) {
@@ -174,7 +181,14 @@ function formatYamlScalar(value) {
   if (value === null) return "null";
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   const text = String(value);
-  if (!text || /[:#\n\r\t]|^\s|\s$|^(true|false|null|\d)/i.test(text)) return JSON.stringify(text);
+  // Quote when the plain scalar would break YAML structure, or when it looks
+  // like a YAML 1.1 boolean/null, a lone `~`, or any number (signed/decimal/exponent).
+  if (
+    !text ||
+    /[:#\n\r\t]|^\s|\s$/.test(text) ||
+    /^(?:y|n|yes|no|on|off|true|false|null|~)$/i.test(text) ||
+    /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)
+  ) return JSON.stringify(text);
   return text;
 }
 

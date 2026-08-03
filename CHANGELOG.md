@@ -2,6 +2,26 @@
 
 All notable MyFileKit changes are documented here. The project uses semantic versioning.
 
+## 3.1.1 - 2026-08-03
+
+### Changed
+
+- Unified the entire UI to a single accent colour: category dots, the pointer glow (previously swept the full hue wheel as the cursor moved), and the password strength meter (now monochrome intensity) all use one accent. Only functional success/error status keeps its own colour.
+- Removed the "Local processing" tag and the "N workflows" label from tool and category headers.
+- Unified tool-card corner radius across themes and snapped stray spacing values to the 4px grid.
+
+### Fixed
+
+- Transparent PNGs exported to JPEG (Convert/Compress/Resize) no longer get a black background; a white matte is applied for JPEG output only.
+- JSON to YAML now quotes string values that look like YAML booleans/null/numbers (`yes`, `no`, `on`, `off`, `~`, `-5`) so they round-trip as strings.
+- JSON to CSV rejects an array of primitives with a clear error instead of emitting garbage.
+- PDF text tools show a friendly message for unsupported non-Latin characters instead of a cryptic encoder error.
+- Password generator now honours a minimum of 0 for a character set.
+
+### Security
+
+- Added Subresource Integrity (SRI) hashes to the vendored pdf-lib and html2canvas scripts. Full OWASP Top 10 review (client-side threat model) found no vulnerabilities: output is escaped at every HTML sink, untrusted image parsing is bounds-checked, prototype pollution is not reachable, and CSP is restrictive.
+
 ## 3.1.0 - 2026-08-03
 
 ### Added

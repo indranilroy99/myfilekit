@@ -1,6 +1,6 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef } from "react";
 
-export type GlowColor = "blue" | "purple" | "green" | "red" | "orange";
+export type GlowColor = "blue";
 type GlowSize = "sm" | "md" | "lg";
 
 type GlowCardProps = {
@@ -13,12 +13,10 @@ type GlowCardProps = {
   customSize?: boolean;
 };
 
+// Single fixed accent hue (217 = #3b82f6). spread 0 keeps the glow one colour
+// regardless of pointer position — no cursor-driven rainbow sweep.
 const glowColorMap: Record<GlowColor, { base: number; spread: number }> = {
-  blue: { base: 220, spread: 200 },
-  purple: { base: 280, spread: 300 },
-  green: { base: 120, spread: 200 },
-  red: { base: 0, spread: 200 },
-  orange: { base: 30, spread: 200 },
+  blue: { base: 217, spread: 0 },
 };
 
 const sizeMap: Record<GlowSize, string> = {
