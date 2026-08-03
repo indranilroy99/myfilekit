@@ -3,15 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; frame-src 'self' blob: file:; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
-  <title>MyFileKit</title>
+  <title>MyFileKit — Local-first PDF, Image & File Tools</title>
+  <meta name="description" content="Privacy-first, local-first PDF, image, and file tools that run entirely in your browser. Nothing is uploaded — your files never leave your device.">
+  <meta name="theme-color" content="#09090b">
+  <meta property="og:title" content="MyFileKit — Local-first PDF, Image & File Tools">
+  <meta property="og:description" content="Privacy-first PDF, image, and file tools that run entirely in your browser. Nothing is uploaded.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="MyFileKit — Local-first PDF, Image & File Tools">
+  <meta name="twitter:description" content="Privacy-first PDF, image, and file tools that run entirely in your browser. Nothing is uploaded.">
   <link rel="icon" href="/assets/myfilekit-logo.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
 <body>
   <a class="skip-link" href="#root">Skip to app</a>
   <div id="root"></div>
-  <script vite-ignore src="/assets/vendor/pdf-lib.min.js"></script>
+  <script vite-ignore defer src="/assets/vendor/pdf-lib.min.js"></script>
   <script type="module" src="/src/main.tsx"></script>
+  <script defer src="/register-sw.js"></script>
 </body>
 </html>

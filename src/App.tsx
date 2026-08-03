@@ -23,14 +23,16 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Loader2,
+  Menu,
   Sun,
   Upload,
+  X,
   Zap,
 } from "lucide-react";
 import { FlowButton } from "@/components/ui/flow-button";
 import { Icons } from "@/components/ui/icons";
 import { LimelightNav, type NavItem } from "@/components/ui/limelight-nav";
-import { NeuralNoise } from "@/components/ui/neural-noise";
 import { NumberedPagination } from "@/components/ui/pagination";
 import { GlowCard, type GlowColor } from "@/components/ui/spotlight-card";
 import AnimatedDownloadButton from "@/components/ui/download-hover-button";
@@ -105,9 +107,14 @@ const themeStorageKey = "myfilekit:theme";
 const popularToolIds = ["merge-pdf-tool", "compress-image-tool", "resize-image-tool", "invoice-generator-tool", "json-formatter-tool", "file-hash-tool"];
 const browseToolsPageSize = 10;
 
+// Set by Cmd/Ctrl+K when it navigates to the dashboard from another route, so the
+// dashboard can focus its search input on mount instead of racing a fixed timeout.
+let pendingSearchFocus = false;
+
 export default function App() {
   const [hash, setHash] = useState(window.location.hash || "#dashboard");
   const [theme, setTheme] = useState<ThemeMode>(() => readThemePreference());
+  const isInitialRoute = useRef(true);
 
   useEffect(() => {
     const syncHash = () => setHash(window.location.hash || "#dashboard");
@@ -127,9 +134,29 @@ export default function App() {
   }, [theme]);
 
   const route = routeForHash(hash);
+  const routeTitle = route.type === "dashboard" ? "Dashboard"
+    : route.type === "browse" ? "Browse tools"
+    : route.type === "category" ? route.category
+    : route.type === "tool" ? route.tool.name
+    : "Page not found";
+
+  // On route change, move focus to the new page heading (or the main landmark)
+  // so keyboard and screen-reader users don't stay stranded on stale controls.
+  useEffect(() => {
+    if (isInitialRoute.current) {
+      isInitialRoute.current = false;
+      return;
+    }
+    const main = document.getElementById("app-main");
+    if (!main) return;
+    const target = (main.querySelector("h1") || main) as HTMLElement;
+    target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+  }, [hash]);
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-[var(--ink)]">
+      <span aria-live="polite" className="sr-only">{routeTitle}</span>
       <Shell hash={hash} theme={theme} onToggleTheme={() => setTheme((current) => current === "dark" ? "light" : "dark")}>
         {route.type === "dashboard" && <Dashboard />}
         {route.type === "browse" && <BrowseToolsPage />}
@@ -143,10 +170,11 @@ export default function App() {
 
 function Shell({ children, hash, theme, onToggleTheme }: { children: React.ReactNode; hash: string; theme: ThemeMode; onToggleTheme: () => void }) {
   const [isScrolled, setIsScrolled] = useState(() => window.scrollY > 4);
+  const [menuOpen, setMenuOpen] = useState(false);
   const primaryNavItems = useMemo<NavItem[]>(() => [
     { id: "dashboard", icon: <LayoutDashboard />, label: "Dashboard", onClick: () => { window.location.hash = "#dashboard"; } },
-    ...categories.slice(0, 4).map((category) => {
-      const Icon = categoryIcons[category];
+    ...categories.map((category) => {
+      const Icon = categoryIcons[category] || Sparkles;
       return {
         id: category,
         icon: <Icon />,
@@ -163,6 +191,28 @@ function Shell({ children, hash, theme, onToggleTheme }: { children: React.React
     window.addEventListener("scroll", syncScroll, { passive: true });
     return () => window.removeEventListener("scroll", syncScroll);
   }, []);
+
+  // Global "focus search" shortcut so Cmd/Ctrl+K works on every route, not just the dashboard.
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        if ((window.location.hash || "#dashboard") !== "#dashboard") {
+          // Dashboard is not mounted yet: flag the intent so it focuses search on mount.
+          pendingSearchFocus = true;
+          window.location.hash = "#dashboard";
+        } else {
+          // Already on the dashboard: focus immediately, no timeout race.
+          window.dispatchEvent(new Event("myfilekit:focus-search"));
+        }
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
+
+  // Close the mobile menu whenever the route changes.
+  useEffect(() => { setMenuOpen(false); }, [hash]);
 
   return (
     <>
@@ -182,14 +232,109 @@ function Shell({ children, hash, theme, onToggleTheme }: { children: React.React
           />
           <div className="flex items-center gap-2">
             <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-            <FlowButton text="Browse tools" onClick={() => { window.location.hash = "#browse-tools"; }} />
+            <div className="hidden lg:block">
+              <FlowButton text="Browse tools" onClick={() => { window.location.hash = "#browse-tools"; }} />
+            </div>
+            <button
+              className="grid h-11 w-11 place-items-center rounded-2xl border border-[var(--line)] bg-[var(--paper-soft)] text-[var(--ink)] lg:hidden"
+              type="button"
+              aria-label="Open navigation menu"
+              aria-haspopup="dialog"
+              aria-expanded={menuOpen}
+              aria-controls="mobile-nav"
+              onClick={() => setMenuOpen(true)}
+            >
+              <Menu size={22} />
+            </button>
           </div>
         </div>
       </header>
-      <main id="app-main" className="mx-auto w-full max-w-screen-2xl px-5 pb-16 pt-7 sm:px-6 lg:px-10 2xl:max-w-[1680px] 2xl:px-0">
+      <MobileNav open={menuOpen} onClose={() => setMenuOpen(false)} activeHash={hash} />
+      <main id="app-main" tabIndex={-1} className="mx-auto w-full max-w-screen-2xl px-5 pb-16 pt-7 outline-none sm:px-6 lg:px-10 2xl:max-w-[1680px] 2xl:px-0">
         {children}
       </main>
     </>
+  );
+}
+
+function MobileNav({ open, onClose, activeHash }: { open: boolean; onClose: () => void; activeHash: string }) {
+  const panelRef = useRef<HTMLElement | null>(null);
+  // Read onClose through a ref so the drawer effect can depend only on `open` and
+  // not re-run (resetting focus/scroll) when the parent re-renders a new onClose.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const activeCategory = useMemo(() => {
+    const route = routeForHash(activeHash);
+    return route.type === "category" ? route.category : route.type === "tool" ? route.tool.category : "";
+  }, [activeHash]);
+
+  useEffect(() => {
+    if (!open) return;
+    // Remember the trigger (hamburger button) so we can restore focus on close.
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+    const focusableSelector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const getFocusable = () =>
+      Array.from(panel?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])
+        .filter((el) => el.offsetParent !== null || el === document.activeElement);
+
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { onCloseRef.current(); return; }
+      if (event.key !== "Tab") return;
+      const focusable = getFocusable();
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      // Trap Tab / Shift+Tab: cycle within the panel instead of escaping to the page.
+      if (event.shiftKey) {
+        if (active === first || !panel?.contains(active)) { event.preventDefault(); last.focus(); }
+      } else if (active === last || !panel?.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleKey);
+    panel?.querySelector<HTMLElement>("a, button")?.focus();
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      document.body.style.overflow = previousBodyOverflow;
+      previouslyFocused?.focus?.();
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  const linkClass = "flex min-h-11 items-center rounded-2xl px-4 py-3 text-sm font-black text-[var(--ink)] no-underline transition hover:bg-[var(--paper-soft)]";
+
+  return (
+    <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Site navigation" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <nav
+        id="mobile-nav"
+        ref={panelRef}
+        aria-label="Site navigation"
+        className="absolute right-0 top-0 flex h-full w-72 max-w-[82vw] flex-col gap-1 overflow-y-auto border-l border-[var(--line)] bg-[var(--app-bg)] p-4 shadow-[var(--shadow-lift)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <span className="font-display text-lg font-black">Menu</span>
+          <button className="grid h-11 w-11 place-items-center rounded-2xl border border-[var(--line)] text-[var(--ink)]" type="button" aria-label="Close navigation menu" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+        <a className={linkClass} href="#dashboard" aria-current={activeHash === "#dashboard" ? "page" : undefined} onClick={onClose}>Dashboard</a>
+        {categories.map((category) => (
+          <a key={category} className={linkClass} href={categoryRoute(category)} aria-current={activeCategory === category ? "page" : undefined} onClick={onClose}>
+            {category}
+          </a>
+        ))}
+        <a className={linkClass} href="#browse-tools" aria-current={activeHash === "#browse-tools" ? "page" : undefined} onClick={onClose}>Browse tools</a>
+      </nav>
+    </div>
   );
 }
 
@@ -244,27 +389,25 @@ function Dashboard() {
 
   useEffect(() => {
     const handleRecentTools = () => setRecentTools(loadRecentTools());
-    const handleShortcut = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        window.location.hash = "#dashboard";
-        requestAnimationFrame(() => searchRef.current?.focus());
-      }
-    };
+    const handleFocusSearch = () => requestAnimationFrame(() => searchRef.current?.focus());
     window.addEventListener("myfilekit:recent-tools", handleRecentTools);
     window.addEventListener("storage", handleRecentTools);
-    window.addEventListener("keydown", handleShortcut);
+    window.addEventListener("myfilekit:focus-search", handleFocusSearch);
+    // Cmd/Ctrl+K arrived from another route: consume the pending intent once on mount.
+    if (pendingSearchFocus) {
+      pendingSearchFocus = false;
+      handleFocusSearch();
+    }
     return () => {
       window.removeEventListener("myfilekit:recent-tools", handleRecentTools);
       window.removeEventListener("storage", handleRecentTools);
-      window.removeEventListener("keydown", handleShortcut);
+      window.removeEventListener("myfilekit:focus-search", handleFocusSearch);
     };
   }, []);
 
   return (
     <div className="dashboard-page">
       <section className={`hero-panel surface-panel wabi-edge overflow-hidden ${isSearching ? "hero-panel-searching" : ""}`}>
-        <NeuralNoise className="hero-neural" color={[0.05, 0.11, 0.18]} opacity={0.055} speed={0.00008} />
         <div className="relative z-10 mx-auto grid max-w-6xl justify-items-center gap-6 px-6 py-10 text-center md:px-10 lg:px-12">
           <div className="grid w-full justify-items-center gap-5">
             {!isSearching && (
@@ -741,20 +884,38 @@ function ToolForm({ children, status, onReset }: { children: React.ReactNode; st
 }
 
 function StatusBox({ status }: { status: Status }) {
-  return <p role="status" aria-live="polite" className={`min-h-12 whitespace-pre-line rounded-2xl border px-4 py-3 text-sm font-bold ${status.tone === "error" ? "border-red-200 bg-red-50 text-red-800" : status.tone === "success" ? "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f]" : "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]"}`}>{status.message}</p>;
+  const tone = status.tone === "error"
+    ? "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]"
+    : status.tone === "success"
+      ? "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f] [.dark_&]:border-[#3f5136] [.dark_&]:bg-[#16241a] [.dark_&]:text-[#bfe3b0]"
+      : "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]";
+  return <p role="status" aria-live="polite" className={`min-h-12 whitespace-pre-line rounded-2xl border px-4 py-3 text-sm font-bold ${tone}`}>{status.message}</p>;
 }
 
-function FileControl({ accept, multiple = false, files, setFiles }: { accept: string; multiple?: boolean; files: File[]; setFiles: (files: File[]) => void }) {
+function FileControl({ accept, multiple = false, files, setFiles, label }: { accept: string; multiple?: boolean; files: File[]; setFiles: (files: File[]) => void; label?: string }) {
+  const [isDragging, setIsDragging] = useState(false);
+  const heading = label || `Choose or drop file${multiple ? "s" : ""}`;
+  const ariaLabel = label || `Choose ${multiple ? "files" : "file"}`;
+  const acceptList = accept.split(",").map((item) => item.trim()).filter(Boolean);
+  const matchesAccept = (file: File) => {
+    if (!acceptList.length || acceptList.includes("*/*")) return true;
+    return acceptList.some((rule) => rule === file.type || (rule.endsWith("/*") && file.type.startsWith(rule.slice(0, -1))));
+  };
   return <label
-    className="surface-card grid cursor-pointer gap-3 rounded-3xl border-dashed border-neutral-300 p-5 transition hover:border-[var(--moss)]"
-    onDragOver={(event) => event.preventDefault()}
+    className={`surface-card grid cursor-pointer gap-3 rounded-3xl border-dashed border-neutral-300 p-5 transition hover:border-[var(--moss)] ${isDragging ? "border-[var(--moss)] bg-[var(--paper-soft)]" : ""}`}
+    onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
+    onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
+    onDragLeave={(event) => { event.preventDefault(); setIsDragging(false); }}
     onDrop={(event) => {
       event.preventDefault();
-      setFiles(Array.from(event.dataTransfer.files || []));
+      setIsDragging(false);
+      const dropped = Array.from(event.dataTransfer.files || []);
+      const filtered = dropped.filter(matchesAccept);
+      setFiles(filtered.length ? filtered : dropped);
     }}
   >
-    <span className="flex items-center gap-3 font-black"><Upload size={20} /> Choose or drop file{multiple ? "s" : ""}</span>
-    <input aria-label={`Choose ${multiple ? "files" : "file"}`} className="sr-only" type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} />
+    <span className="flex items-center gap-3 font-black"><Upload size={20} /> {heading}</span>
+    <input aria-label={ariaLabel} className="sr-only" type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} />
     <span className="text-sm font-semibold text-neutral-500">{files.length ? files.map((file) => file.name).join(", ") : "No file selected"}</span>
   </label>;
 }
@@ -788,16 +949,40 @@ function Checkbox({ label, checked, onChange }: { label: string; checked: boolea
   return <label className="surface-card flex items-center gap-3 rounded-2xl px-4 py-3 font-bold"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />{label}</label>;
 }
 
-function PrimaryButton({ label, onClick }: { label: string; onClick: () => void }) {
-  if (label.toLowerCase().startsWith("download")) {
-    return <AnimatedDownloadButton label={label} onClick={onClick} />;
-  }
-
-  return <LiquidButton className="primary-button" onClick={onClick}><Zap size={17} />{label}</LiquidButton>;
+function usePendingHandler(onClick: () => unknown) {
+  const [pending, setPending] = useState(false);
+  const handleClick = async () => {
+    if (pending) return;
+    try {
+      setPending(true);
+      await onClick();
+    } finally {
+      setPending(false);
+    }
+  };
+  return { pending, handleClick };
 }
 
-function SecondaryButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return <button className="secondary-button" type="button" onClick={onClick}>{label}</button>;
+function PrimaryButton({ label, onClick }: { label: string; onClick: () => unknown }) {
+  const { pending, handleClick } = usePendingHandler(onClick);
+  const isDownload = label.toLowerCase().startsWith("download");
+  const busyLabel = isDownload ? "Downloading…" : "Working…";
+
+  if (isDownload) {
+    return <AnimatedDownloadButton label={pending ? busyLabel : label} onClick={handleClick} disabled={pending} />;
+  }
+
+  return (
+    <LiquidButton className="primary-button" onClick={handleClick} disabled={pending} aria-busy={pending}>
+      {pending ? <Loader2 className="animate-spin" size={17} /> : <Zap size={17} />}
+      {pending ? busyLabel : label}
+    </LiquidButton>
+  );
+}
+
+function SecondaryButton({ label, onClick }: { label: string; onClick: () => unknown }) {
+  const { pending, handleClick } = usePendingHandler(onClick);
+  return <button className="secondary-button" type="button" onClick={handleClick} disabled={pending} aria-busy={pending}>{label}</button>;
 }
 
 function EmptyState({ query, onPick }: { query: string; onPick?: (term: string) => void }) {
@@ -1051,8 +1236,8 @@ function AddSignatureToPdfTool({ tool }: { tool: Tool }) {
   const [status, setStatus] = useState(initialStatus);
   const imageOptions = { maxFiles: 1, types: ["image/jpeg", "image/png", "image/webp"], extensions: ["jpg", "jpeg", "png", "webp"] };
   return <ToolForm status={status} onReset={() => { setFiles([]); setSignatures([]); setStatus(initialStatus); }}>
-    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
-    <FileControl accept="image/jpeg,image/png,image/webp" files={signatures} setFiles={setSignatures} />
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} label="Choose PDF" />
+    <FileControl accept="image/jpeg,image/png,image/webp" files={signatures} setFiles={setSignatures} label="Choose signature image" />
     <div className="grid gap-3 sm:grid-cols-4"><Input label="Page" value={page} onChange={setPage} type="number" /><Input label="X" value={x} onChange={setX} type="number" /><Input label="Y" value={y} onChange={setY} type="number" /><Input label="Width" value={width} onChange={setWidth} type="number" /></div>
     <PrimaryButton label="Add signature to PDF" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
@@ -1123,14 +1308,18 @@ function ImageOutputTool({ tool, mode }: { tool: Tool; mode: "compress" | "conve
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
     <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
     <Select label="Output format" value={format} onChange={setFormat} options={["image/jpeg", "image/png", "image/webp"]} labels={["JPEG", "PNG", "WebP"]} />
-    {mode === "compress" && <Range label="Quality" value={quality} onChange={setQuality} />}
+    {mode === "compress" && format !== "image/png" && <Range label="Quality" value={quality} onChange={setQuality} />}
+    {mode === "compress" && format === "image/png" && (
+      <p className="text-xs font-semibold text-neutral-500">PNG is lossless, so the quality setting does not apply. Choose JPEG or WebP to trade quality for a smaller file.</p>
+    )}
     <PrimaryButton label={mode === "compress" ? "Compress image" : "Convert image"} onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       const blob = mode === "compress"
         ? await compressImage(file, format, Number(quality))
         : await exportCanvas(await imageToCanvas(file), format, 0.92);
       downloadBlob(blob, withExtension(`${safeFilename(file.name)}-${mode}`, imageExt(format)));
-      return `Original: ${formatBytes(file.size)}\nOutput: ${formatBytes(blob.size)}`;
+      const grew = mode === "compress" && blob.size >= file.size;
+      return `Original: ${formatBytes(file.size)}\nOutput: ${formatBytes(blob.size)}${grew ? "\nNote: the output is not smaller than the original. The source may already be optimized — try JPEG or WebP output." : ""}`;
     })} />
   </ToolForm>;
 }
@@ -1140,12 +1329,18 @@ function BatchImageTool({ tool, mode }: { tool: Tool; mode: "compress" | "resize
   const [quality, setQuality] = useState("0.82");
   const [width, setWidth] = useState("1200");
   const [height, setHeight] = useState("800");
+  const [preserve, setPreserve] = useState(true);
   const [format, setFormat] = useState("image/jpeg");
   const [status, setStatus] = useState(initialStatus);
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
     <FileControl accept="image/jpeg,image/png,image/webp" multiple files={files} setFiles={setFiles} />
     <Select label="Output format" value={format} onChange={setFormat} options={["image/jpeg", "image/png", "image/webp"]} labels={["JPEG", "PNG", "WebP"]} />
-    {mode === "compress" ? <Range label="Quality" value={quality} onChange={setQuality} /> : <div className="grid gap-3 sm:grid-cols-2"><Input label="Width" value={width} onChange={setWidth} type="number" /><Input label="Height" value={height} onChange={setHeight} type="number" /></div>}
+    {mode === "compress" ? <Range label="Quality" value={quality} onChange={setQuality} /> : (
+      <>
+        <div className="grid gap-3 sm:grid-cols-2"><Input label="Width" value={width} onChange={setWidth} type="number" /><Input label="Height" value={height} onChange={setHeight} type="number" /></div>
+        <Checkbox label="Preserve aspect ratio" checked={preserve} onChange={setPreserve} />
+      </>
+    )}
     <PrimaryButton label={mode === "compress" ? "Compress batch" : "Resize batch"} onClick={() => runSafely(setStatus, async () => {
       const valid = validateFiles(files, tool.file);
       let totalBefore = 0;
@@ -1155,7 +1350,7 @@ function BatchImageTool({ tool, mode }: { tool: Tool; mode: "compress" | "resize
         totalBefore += file.size;
         const blob = mode === "compress"
           ? await compressImage(file, format, Number(quality))
-          : await exportCanvas(await resizeImage(file, Number(width), Number(height), true), format, 0.88);
+          : await exportCanvas(await resizeImage(file, Number(width), Number(height), preserve), format, 0.88);
         totalAfter += blob.size;
         const filename = withExtension(`${String(index + 1).padStart(2, "0")}-${safeFilename(file.name)}-${mode}`, imageExt(format));
         outputs[filename] = new Uint8Array(await blob.arrayBuffer());
@@ -1263,8 +1458,8 @@ function AddSignatureToImageTool({ tool }: { tool: Tool }) {
   const [status, setStatus] = useState(initialStatus);
   const imageOptions = { maxFiles: 1, types: ["image/jpeg", "image/png", "image/webp"], extensions: ["jpg", "jpeg", "png", "webp"] };
   return <ToolForm status={status} onReset={() => { setFiles([]); setSignatures([]); setStatus(initialStatus); }}>
-    <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
-    <FileControl accept="image/jpeg,image/png,image/webp" files={signatures} setFiles={setSignatures} />
+    <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} label="Choose base image" />
+    <FileControl accept="image/jpeg,image/png,image/webp" files={signatures} setFiles={setSignatures} label="Choose signature image" />
     <div className="grid gap-3 sm:grid-cols-4"><Input label="X" value={x} onChange={setX} type="number" /><Input label="Y" value={y} onChange={setY} type="number" /><Input label="Width" value={width} onChange={setWidth} type="number" /><Input label="Opacity" value={opacity} onChange={setOpacity} type="number" /></div>
     <PrimaryButton label="Add signature to image" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
@@ -1561,7 +1756,11 @@ function MarkdownTool() {
   return <ToolForm status={status} onReset={() => { setMarkdown(""); setStatus(initialStatus); }}>
     <Textarea label="Markdown" value={markdown} onChange={setMarkdown} rows={10} />
     <div className="surface-card wabi-card-edge grid gap-3 p-4">{renderMarkdownPreview(markdown)}</div>
-    <PrimaryButton label="Download HTML" onClick={() => { downloadText(html, "markdown-preview", "html", "text/html;charset=utf-8"); setStatus({ tone: "success", message: "HTML downloaded." }); }} />
+    <PrimaryButton label="Download HTML" onClick={() => runSafely(setStatus, async () => {
+      if (!markdown.trim()) throw new Error("Add Markdown before downloading.");
+      downloadText(html, "markdown-preview", "html", "text/html;charset=utf-8");
+      return "HTML downloaded.";
+    })} />
   </ToolForm>;
 }
 
@@ -1609,7 +1808,12 @@ function JsonTool() {
   return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
     <Textarea label="JSON input" value={input} onChange={setInput} rows={10} />
     <Textarea label="Result" value={output} onChange={setOutput} rows={10} />
-    <div className="flex flex-wrap gap-2"><PrimaryButton label="Format" onClick={() => transform(2)} /><SecondaryButton label="Minify" onClick={() => transform(0)} /><SecondaryButton label="Download JSON" onClick={() => downloadText(output || input, "formatted", "json", "application/json;charset=utf-8")} /></div>
+    <div className="flex flex-wrap gap-2">
+      <PrimaryButton label="Format" onClick={() => transform(2)} />
+      <SecondaryButton label="Minify" onClick={() => transform(0)} />
+      <SecondaryButton label="Copy" onClick={() => runSafely(setStatus, async () => { await copyText(requireOutput(output || input)); return "Copied."; })} />
+      <SecondaryButton label="Download JSON" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output || input), "formatted", "json", "application/json;charset=utf-8"); return "JSON ready to download."; })} />
+    </div>
   </ToolForm>;
 }
 
@@ -1622,6 +1826,7 @@ function CsvToJsonTool() {
     <Textarea label="JSON output" value={output} onChange={setOutput} rows={10} />
     <div className="flex flex-wrap gap-2">
       <PrimaryButton label="Convert" onClick={() => runSafely(setStatus, async () => { setOutput(JSON.stringify(csvToJson(input), null, 2)); return "CSV converted."; })} />
+      <SecondaryButton label="Copy" onClick={() => runSafely(setStatus, async () => { await copyText(requireOutput(output)); return "Copied."; })} />
       <SecondaryButton label="Download JSON" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output), "converted", "json", "application/json;charset=utf-8"); return "JSON ready to download."; })} />
     </div>
   </ToolForm>;
@@ -1634,7 +1839,7 @@ function JsonToCsvTool() {
   return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
     <Textarea label="JSON input" value={input} onChange={setInput} rows={9} />
     <Textarea label="CSV output" value={output} onChange={setOutput} rows={10} />
-    <div className="flex flex-wrap gap-2"><PrimaryButton label="Convert" onClick={() => runSafely(setStatus, async () => { setOutput(jsonToCsv(input)); return "JSON converted."; })} /><SecondaryButton label="Download CSV" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output), "converted", "csv", "text/csv;charset=utf-8"); return "CSV ready to download."; })} /></div>
+    <div className="flex flex-wrap gap-2"><PrimaryButton label="Convert" onClick={() => runSafely(setStatus, async () => { setOutput(jsonToCsv(input)); return "JSON converted."; })} /><SecondaryButton label="Copy" onClick={() => runSafely(setStatus, async () => { await copyText(requireOutput(output)); return "Copied."; })} /><SecondaryButton label="Download CSV" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output), "converted", "csv", "text/csv;charset=utf-8"); return "CSV ready to download."; })} /></div>
   </ToolForm>;
 }
 
@@ -1647,6 +1852,7 @@ function JsonToYamlTool() {
     <Textarea label="YAML output" value={output} onChange={setOutput} rows={10} />
     <div className="flex flex-wrap gap-2">
       <PrimaryButton label="Convert to YAML" onClick={() => runSafely(setStatus, async () => { setOutput(jsonToYaml(input)); return "JSON converted to YAML."; })} />
+      <SecondaryButton label="Copy" onClick={() => runSafely(setStatus, async () => { await copyText(requireOutput(output)); return "Copied."; })} />
       <SecondaryButton label="Download YAML" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output), "converted", "yaml", "text/yaml;charset=utf-8"); return "YAML ready to download."; })} />
     </div>
   </ToolForm>;
@@ -1660,7 +1866,7 @@ function UrlCodecTool() {
     <Textarea label="Input" value={input} onChange={setInput} rows={7} />
     <Textarea label="Output" value={output} onChange={setOutput} rows={7} />
     <div className="flex flex-wrap gap-2">
-      <PrimaryButton label="Encode URL text" onClick={() => { setOutput(urlEncode(input)); setStatus({ tone: "success", message: "URL text encoded." }); }} />
+      <PrimaryButton label="Encode URL text" onClick={() => runSafely(setStatus, async () => { if (!input.trim()) throw new Error("Enter text to encode."); setOutput(urlEncode(input)); return "URL text encoded."; })} />
       <SecondaryButton label="Decode URL text" onClick={() => runSafely(setStatus, async () => { setOutput(urlDecode(input)); return "URL text decoded."; })} />
     </div>
   </ToolForm>;
@@ -1679,6 +1885,7 @@ function DiffCheckerTool() {
     <Textarea label="Diff output" value={output} onChange={setOutput} rows={10} />
     <div className="flex flex-wrap gap-2">
       <PrimaryButton label="Compare text" onClick={() => runSafely(setStatus, async () => { const rows = lineDiff(left, right); setOutput(diffToText(rows)); return `${rows.filter((row) => row.type !== "same").length} changed line entries found.`; })} />
+      <SecondaryButton label="Copy" onClick={() => runSafely(setStatus, async () => { await copyText(requireOutput(output)); return "Copied."; })} />
       <SecondaryButton label="Download diff" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output), "text-diff", "diff", "text/plain;charset=utf-8"); return "Diff ready to download."; })} />
     </div>
   </ToolForm>;
@@ -1714,7 +1921,7 @@ function Base64Tool() {
   return <ToolForm status={status} onReset={() => { setInput(""); setOutput(""); setStatus(initialStatus); }}>
     <Textarea label="Input" value={input} onChange={setInput} rows={7} />
     <Textarea label="Output" value={output} onChange={setOutput} rows={7} />
-    <div className="flex flex-wrap gap-2"><PrimaryButton label="Encode" onClick={() => { setOutput(base64Encode(input)); setStatus({ tone: "success", message: "Encoded." }); }} /><SecondaryButton label="Decode" onClick={() => runSafely(setStatus, async () => { setOutput(base64Decode(input)); return "Decoded."; })} /></div>
+    <div className="flex flex-wrap gap-2"><PrimaryButton label="Encode" onClick={() => runSafely(setStatus, async () => { if (!input.trim()) throw new Error("Enter text to encode."); setOutput(base64Encode(input)); return "Encoded."; })} /><SecondaryButton label="Decode" onClick={() => runSafely(setStatus, async () => { setOutput(base64Decode(input)); return "Decoded."; })} /><SecondaryButton label="Copy" onClick={() => runSafely(setStatus, async () => { await copyText(requireOutput(output)); return "Copied."; })} /></div>
   </ToolForm>;
 }
 
@@ -1857,7 +2064,7 @@ function QrCodeTool() {
     {dataUrl && <img className="surface-card wabi-card-edge mx-auto aspect-square w-full max-w-xs p-4" src={dataUrl} alt="Generated QR code" />}
     <div className="flex flex-wrap gap-2">
       <PrimaryButton label="Generate QR code" onClick={() => runSafely(setStatus, async () => { if (!input.trim()) throw new Error("Enter text or a link first."); setDataUrl(await QRCode.toDataURL(input, { width: 720, margin: 2, errorCorrectionLevel: "M" })); return "QR code generated locally."; })} />
-      {dataUrl && <SecondaryButton label="Download PNG" onClick={async () => { const blob = await (await fetch(dataUrl)).blob(); downloadBlob(blob, "myfilekit-qr-code.png"); }} />}
+      {dataUrl && <SecondaryButton label="Download PNG" onClick={() => runSafely(setStatus, async () => { const blob = await (await fetch(dataUrl)).blob(); downloadBlob(blob, "myfilekit-qr-code.png"); return "QR code downloaded."; })} />}
     </div>
   </ToolForm>;
 }
@@ -1898,7 +2105,27 @@ function MissingPage() {
 function filterTools(query: string) {
   const parts = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return tools;
-  return tools.filter((tool: Tool) => parts.every((part) => searchableText(tool).includes(part)));
+  const scored: Array<{ tool: Tool; score: number }> = [];
+  for (const tool of tools) {
+    const name = tool.name.toLowerCase();
+    const keywords = (tool.keywords || []).join(" ").toLowerCase();
+    const description = tool.description.toLowerCase();
+    const haystack = searchableText(tool);
+    let score = 0;
+    let matchedAll = true;
+    for (const part of parts) {
+      if (!haystack.includes(part)) { matchedAll = false; break; }
+      if (name === part) score += 100;
+      else if (name.startsWith(part)) score += 60;
+      else if (name.includes(part)) score += 40;
+      else if (keywords.includes(part)) score += 20;
+      else if (description.includes(part)) score += 10;
+      else score += 5;
+    }
+    if (matchedAll) scored.push({ tool, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map((entry) => entry.tool);
 }
 
 function searchableText(tool: Tool) {
@@ -1913,7 +2140,7 @@ function activePrimaryNavIndex(hash: string) {
   if (!hash || hash === "#dashboard" || hash === "#browse-tools") return 0;
   const route = routeForHash(hash);
   const category = route.type === "category" ? route.category : route.type === "tool" ? route.tool.category : "";
-  const navCategoryIndex = categories.slice(0, 4).findIndex((item) => item === category);
+  const navCategoryIndex = categories.findIndex((item) => item === category);
   return navCategoryIndex >= 0 ? navCategoryIndex + 1 : 0;
 }
 

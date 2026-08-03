@@ -1,8 +1,22 @@
 export function csvToJson(csvText) {
   const rows = parseCsv(csvText);
   if (rows.length < 2) throw new Error("CSV needs a header row and at least one data row.");
-  const headers = rows[0].map((header) => header.trim());
-  return rows.slice(1).filter((row) => row.some(Boolean)).map((row) => Object.fromEntries(headers.map((header, index) => [header || `column_${index + 1}`, row[index] || ""])));
+  const seen = new Map();
+  const used = new Set();
+  const headers = rows[0].map((header, index) => {
+    const base = header.trim() || `column_${index + 1}`;
+    let count = (seen.get(base) || 0) + 1;
+    seen.set(base, count);
+    let name = count > 1 ? `${base}_${count}` : base;
+    while (used.has(name)) {
+      count += 1;
+      seen.set(base, count);
+      name = `${base}_${count}`;
+    }
+    used.add(name);
+    return name;
+  });
+  return rows.slice(1).filter((row) => row.some(Boolean)).map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])));
 }
 
 export function jsonToCsv(jsonText) {
@@ -10,7 +24,7 @@ export function jsonToCsv(jsonText) {
   if (!Array.isArray(data)) throw new Error("JSON must be an array of objects.");
   const headers = [...new Set(data.flatMap((item) => Object.keys(item || {})))];
   if (!headers.length) throw new Error("JSON array does not contain object fields.");
-  return [headers, ...data.map((item) => headers.map((header) => item?.[header] ?? ""))]
+  return [headers, ...data.map((item) => headers.map((header) => formatCell(item?.[header])))]
     .map((row) => row.map(csvEscape).join(","))
     .join("\n");
 }
@@ -44,6 +58,12 @@ function parseCsv(text) {
   row.push(value);
   rows.push(row);
   return rows;
+}
+
+function formatCell(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return value;
 }
 
 function csvEscape(value) {

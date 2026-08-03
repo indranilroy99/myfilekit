@@ -9,9 +9,10 @@ export function validateFiles(files, options) {
 
   list.forEach((file) => {
     const extension = file.name.toLowerCase().split(".").pop();
-    const mimeAllowed = !options.types || options.types.includes(file.type);
+    const mimeUnknown = !file.type || file.type === "application/octet-stream";
+    const mimeAllowed = !options.types || mimeUnknown || options.types.includes(file.type);
     const extAllowed = !options.extensions || options.extensions.includes(extension);
-    if (!mimeAllowed && !extAllowed) throw new Error(`${file.name} is not a supported file type.`);
+    if (!mimeAllowed || !extAllowed) throw new Error(`${file.name} is not a supported file type.`);
     if (file.size > maxSize) throw new Error(`${file.name} is larger than the ${Math.round(maxSize / MB)} MB limit.`);
   });
   return list;

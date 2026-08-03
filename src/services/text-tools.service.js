@@ -67,10 +67,10 @@ export function generatePassword(options = {}) {
   ].filter(Boolean);
   if (!pools.length) throw new Error("Choose at least one character set.");
 
-  const minimumNumbers = Math.max(0, Math.trunc(Number(options.minimumNumbers ?? 0)) || 0);
-  const minimumSymbols = Math.max(0, Math.trunc(Number(options.minimumSymbols ?? 0)) || 0);
-  if (minimumNumbers > 0 && options.numbers === false) throw new Error("Enable numbers to require a minimum number count.");
-  if (minimumSymbols > 0 && !options.symbols) throw new Error("Enable symbols to require a minimum symbol count.");
+  const numbersEnabled = options.numbers !== false;
+  const symbolsEnabled = options.symbols === true;
+  const minimumNumbers = numbersEnabled ? Math.max(0, Math.trunc(Number(options.minimumNumbers ?? 0)) || 0) : 0;
+  const minimumSymbols = symbolsEnabled ? Math.max(0, Math.trunc(Number(options.minimumSymbols ?? 0)) || 0) : 0;
 
   const alphabet = pools.join("");
   const characters = pools.map((pool) => pool[randomIndex(pool.length)]);

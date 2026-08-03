@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' 'unsafe-inline' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <title>Invoice Studio - MyFileKit</title>
   <style>
@@ -88,6 +88,22 @@
       padding: 22px;
       border-bottom: 1px solid var(--line);
       background: linear-gradient(180deg, rgba(255, 253, 248, .96), rgba(255, 253, 248, .66));
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 14px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: .01em;
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    .back-link:hover {
+      color: var(--accent);
     }
 
     .brand-row {
@@ -1663,6 +1679,7 @@
   <main class="app">
     <aside class="control-panel" aria-label="Invoice controls">
       <div class="panel-head">
+        <a class="back-link" href="../index.html">&larr; Back to MyFileKit</a>
         <div class="brand-row">
           <div>
             <h1>Invoice Studio</h1>
@@ -3052,26 +3069,58 @@
       if (!window.PDFLib) throw new Error("PDF engine is not loaded.");
       const canvas = await renderInvoicePreviewCanvas();
 
-      const { PDFDocument } = window.PDFLib;
+      const { PDFDocument, rgb } = window.PDFLib;
       const pdf = await PDFDocument.create();
       pdf.setTitle(pdfSafeText(state.documentTitle || state.invoiceNo || "Invoice"));
       pdf.setSubject("Invoice generated locally with MyFileKit");
       pdf.setCreator("MyFileKit");
       pdf.setProducer("MyFileKit");
 
+      // A4 page in PDF points. Keep a fixed A4 width and height and paginate the
+      // tall source canvas into page-height bands so long invoices stay readable.
       const pageWidth = 595.28;
-      const pageHeight = pageWidth * (canvas.height / canvas.width);
-      const page = pdf.addPage([pageWidth, pageHeight]);
-      const pngBytes = Uint8Array.from(atob(canvas.toDataURL("image/png").split(",")[1]), (char) => char.charCodeAt(0));
-      const image = await pdf.embedPng(pngBytes);
-      const imageWidth = pageWidth;
-      const imageHeight = pageHeight;
-      page.drawImage(image, {
-        x: 0,
-        y: 0,
-        width: imageWidth,
-        height: imageHeight
-      });
+      const pageHeight = 841.89;
+      // Points-per-source-pixel once the canvas width is scaled to the page width.
+      const scale = pageWidth / canvas.width;
+      // Source-canvas pixels that fit on one full A4 page at that scale.
+      const bandHeightPx = Math.max(1, Math.floor(pageHeight / scale));
+      const totalHeightPx = canvas.height;
+      const pageCount = Math.max(1, Math.ceil(totalHeightPx / bandHeightPx));
+
+      const sliceCanvas = document.createElement("canvas");
+      const sliceCtx = sliceCanvas.getContext("2d");
+
+      for (let i = 0; i < pageCount; i++) {
+        const sourceY = i * bandHeightPx;
+        const sliceHeightPx = Math.min(bandHeightPx, totalHeightPx - sourceY);
+        if (sliceHeightPx <= 0) break;
+
+        // Copy just this vertical band of the tall canvas onto a scratch canvas.
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        // White fill so transparent regions (and a short final band) stay white.
+        sliceCtx.fillStyle = "#ffffff";
+        sliceCtx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+        sliceCtx.drawImage(canvas, 0, sourceY, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+
+        const pngBytes = Uint8Array.from(atob(sliceCanvas.toDataURL("image/png").split(",")[1]), (char) => char.charCodeAt(0));
+        const image = await pdf.embedPng(pngBytes);
+
+        const page = pdf.addPage([pageWidth, pageHeight]);
+        // Paint the whole page white first (covers the empty area of a partial last page).
+        page.drawRectangle({ x: 0, y: 0, width: pageWidth, height: pageHeight, color: rgb(1, 1, 1) });
+
+        // Draw the band at natural scale: width fills the page and height keeps the same
+        // scale factor, so there is no stretching. Top-align so a short final band sits at
+        // the top with white below it.
+        const drawHeight = sliceHeightPx * scale;
+        page.drawImage(image, {
+          x: 0,
+          y: pageHeight - drawHeight,
+          width: pageWidth,
+          height: drawHeight
+        });
+      }
       return pdf.save();
     }
 

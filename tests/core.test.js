@@ -141,6 +141,22 @@ test("file validation checks count, type, extension, and size", () => {
   assert.throws(() => validateFiles([file], { maxFiles: 1, types: ["image/png"], extensions: ["png"] }), /not a supported/);
 });
 
+test("file validation accepts known extensions when the browser MIME is empty or generic", () => {
+  const emptyMime = new File(["webp"], "image.webp", { type: "" });
+  const genericMime = new File(["webp"], "image.webp", { type: "application/octet-stream" });
+  const options = { maxFiles: 1, types: ["image/webp"], extensions: ["webp"] };
+  assert.equal(validateFiles([emptyMime], options)[0].name, "image.webp");
+  assert.equal(validateFiles([genericMime], options)[0].name, "image.webp");
+  const wrongExt = new File(["exe"], "malware.exe", { type: "" });
+  assert.throws(() => validateFiles([wrongExt], options), /not a supported file type/);
+});
+
+test("CSV disambiguation avoids collisions with real _n columns", () => {
+  const rows = csvToJson("a,a_2,a\n1,2,3");
+  assert.deepEqual(Object.keys(rows[0]), ["a", "a_2", "a_3"]);
+  assert.deepEqual(rows[0], { a: "1", a_2: "2", a_3: "3" });
+});
+
 test("metadata cleaner validates supported image types and safe output names", () => {
   const metadataTool = tools.find((tool) => tool.id === "metadata-cleaner");
   const jpg = new File(["jpg"], "photo.jpg", { type: "image/jpeg" });
@@ -248,7 +264,9 @@ test("text and utility tools transform data locally", () => {
   assert.equal((password.match(/\d/g) || []).length >= 2, true);
   assert.equal((password.match(/[^a-zA-Z0-9]/g) || []).length >= 2, true);
   assert.doesNotMatch(password, /[Il1O0o]/);
-  assert.throws(() => generatePassword({ length: 8, numbers: false, minimumNumbers: 1 }), /Enable numbers/);
+  const withoutNumbers = generatePassword({ length: 8, numbers: false, minimumNumbers: 1 });
+  assert.equal(withoutNumbers.length, 8);
+  assert.doesNotMatch(withoutNumbers, /\d/);
   const passphrase = generatePassphrase({ words: 6, separator: "-", capitalise: true, includeNumber: true });
   assert.equal(passphrase.split("-").length, 7);
   assert.match(passphrase, /^[A-Z][a-z]+-/);

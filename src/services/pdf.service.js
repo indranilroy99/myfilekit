@@ -43,7 +43,7 @@ export async function rotatePdfPages(file, pageIndexes, degrees) {
   const pages = await output.copyPages(source, source.getPageIndices());
   const selected = new Set(pageIndexes);
   pages.forEach((page, index) => {
-    if (selected.has(index)) page.setRotation(pdfDegrees(degrees));
+    if (selected.has(index)) page.setRotation(pdfDegrees((page.getRotation().angle + Number(degrees)) % 360));
     output.addPage(page);
   });
   return output.save();
@@ -194,6 +194,8 @@ async function canvasJpegBytes(file) {
     canvas.height = bitmap.height;
     const context = canvas.getContext("2d");
     if (!context) throw new Error("This browser cannot create a 2D image workspace.");
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(bitmap, 0, 0);
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
     if (!blob) throw new Error("This browser cannot convert that image to JPEG.");
@@ -208,11 +210,21 @@ function wrapText(text, maxChars) {
   const lines = [];
   let line = "";
   words.forEach((word) => {
-    if ((line + " " + word).trim().length > maxChars) {
+    let token = word;
+    while (token.length > maxChars) {
+      if (line) {
+        lines.push(line);
+        line = "";
+      }
+      lines.push(token.slice(0, maxChars));
+      token = token.slice(maxChars);
+    }
+    if (!token) return;
+    if ((line + " " + token).trim().length > maxChars) {
       lines.push(line);
-      line = word;
+      line = token;
     } else {
-      line = (line + " " + word).trim();
+      line = (line + " " + token).trim();
     }
   });
   lines.push(line);
