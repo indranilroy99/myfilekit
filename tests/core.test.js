@@ -13,6 +13,7 @@ import { safeFilename, withExtension } from "../src/utils/safe-filename.js";
 import { routeForHash } from "../src/router.js";
 import * as webrtc from "../src/services/webrtc.service.js";
 import * as whiteboard from "../src/services/whiteboard.service.js";
+import * as pdfCrypto from "../src/services/pdf-crypto.service.js";
 import { deflateSync, strToU8 } from "fflate";
 
 const pdfLibCode = fs.readFileSync(new URL("../assets/vendor/pdf-lib.min.js", import.meta.url), "utf8");
@@ -45,8 +46,8 @@ test("metadata cleaner is available and discoverable", () => {
   assert.ok(metadataTool);
   assert.equal(metadataTool.status, "available");
   assert.equal(metadataTool.route, "#metadata-cleaner-tool");
-  assert.equal(metadataTool.category, "Privacy Tools");
-  assert.ok(categories.includes("Privacy Tools"));
+  assert.equal(metadataTool.category, "Security & Privacy");
+  assert.ok(categories.includes("Security & Privacy"));
   const searchableText = [metadataTool.name, metadataTool.description, metadataTool.category, ...metadataTool.keywords, ...metadataTool.badges].join(" ").toLowerCase();
   for (const query of ["metadata", "exif", "privacy"]) {
     assert.match(searchableText, new RegExp(query));
@@ -676,7 +677,7 @@ test("Phase 2 PDF tools are registered under sensible categories with renderers"
     "redact-pdf-tool": "PDF Tools",
     "create-pdf-tool": "PDF Tools",
     "repair-pdf-tool": "PDF Tools",
-    "fingerprint-pdf-tool": "Privacy Tools",
+    "fingerprint-pdf-tool": "Security & Privacy",
   };
   const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   for (const [id, category] of Object.entries(expected)) {
@@ -2382,4 +2383,408 @@ test("llm.service refuses to send unless enabled is strictly true", async () => 
     globalThis.fetch = previousFetch;
   }
   assert.equal(calls, 0, "no fetch may happen unless the endpoint is explicitly enabled");
+});
+
+// --- PDF standard security handler (src/services/pdf-crypto.service.js) -------
+// This is security code, so it is exercised hard here in Node: known-answer
+// tests for the primitives, full encrypt/decrypt round trips at every revision
+// the writer supports, permission-bit arithmetic, and clear refusals. The
+// encryptor is also validated against pdf.js, a third-party implementation, so
+// "it round-trips through my own decryptor" is never the only evidence.
+
+const HEX = (bytes) => Buffer.from(bytes).toString("hex");
+const MARKER = "MyFileKit crypto marker ZQ7";
+
+async function cryptoSamplePdf(pages = 3) {
+  const { PDFDocument, StandardFonts } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let index = 0; index < pages; index++) {
+    const page = doc.addPage([400, 300]);
+    page.drawText(`Confidential page ${index + 1}`, { x: 40, y: 240, size: 18, font });
+    page.drawText(MARKER, { x: 40, y: 200, size: 11, font });
+  }
+  doc.setTitle("Crypto Round Trip");
+  doc.setAuthor("MyFileKit Tester");
+  return new Uint8Array(await doc.save());
+}
+
+// Every inflatable stream in the file, base64'd and sorted: a byte-level
+// fingerprint of the document's actual content, independent of object numbering.
+async function decodedStreamFingerprint(bytes) {
+  const { PDFDocument, PDFRawStream, decodePDFRawStream } = window.PDFLib;
+  const doc = await PDFDocument.load(bytes, { updateMetadata: false });
+  const out = [];
+  for (const [, object] of doc.context.enumerateIndirectObjects()) {
+    if (!(object instanceof PDFRawStream)) continue;
+    try {
+      out.push(Buffer.from(decodePDFRawStream(object).decode()).toString("base64"));
+    } catch {
+      out.push(Buffer.from(object.contents).toString("base64"));
+    }
+  }
+  return out.sort();
+}
+
+let pdfjsForInterop;
+async function loadPdfjsForInterop() {
+  if (!pdfjsForInterop) pdfjsForInterop = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  return pdfjsForInterop;
+}
+
+async function pdfjsPageTexts(bytes, password) {
+  const pdfjs = await loadPdfjsForInterop();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), password, verbosity: 0, isEvalSupported: false }).promise;
+  const texts = [];
+  for (let page = 1; page <= doc.numPages; page++) {
+    texts.push((await doc.getPage(page)).getTextContent ? (await (await doc.getPage(page)).getTextContent()).items.map((item) => item.str).join("") : "");
+  }
+  await doc.destroy();
+  return texts;
+}
+
+test("md5 and rc4 match published known answers", () => {
+  assert.equal(HEX(pdfCrypto.md5(new Uint8Array(0))), "d41d8cd98f00b204e9800998ecf8427e");
+  assert.equal(HEX(pdfCrypto.md5(strToU8("abc"))), "900150983cd24fb0d6963f7d28e17f72");
+  assert.equal(HEX(pdfCrypto.md5(strToU8("message digest"))), "f96b697d7cb7938d525a2f31aaf161d0");
+  assert.equal(HEX(pdfCrypto.md5(strToU8("The quick brown fox jumps over the lazy dog"))), "9e107d9d372bb6826bd81d3542a419d6");
+  // 55/56/64-byte inputs straddle MD5's padding boundary, where a length bug hides.
+  assert.equal(HEX(pdfCrypto.md5(strToU8("a".repeat(55)))), "ef1772b6dff9a122358552954ad0df65");
+  assert.equal(HEX(pdfCrypto.md5(strToU8("a".repeat(56)))), "3b0c8ac703f828b04c6c197006d17218");
+  assert.equal(HEX(pdfCrypto.md5(strToU8("a".repeat(64)))), "014842d480b571495a4a0363793f7367");
+  // RC4 test vector from the original specification.
+  assert.equal(HEX(pdfCrypto.rc4(strToU8("Key"), strToU8("Plaintext"))), "bbf316e8d940af0ad3");
+  assert.equal(HEX(pdfCrypto.rc4(strToU8("Secret"), strToU8("Attack at dawn"))), "45a01f645fc35b383552544b9bf5");
+  // RC4 is its own inverse.
+  assert.equal(Buffer.from(pdfCrypto.rc4(strToU8("k"), pdfCrypto.rc4(strToU8("k"), strToU8("round trip")))).toString(), "round trip");
+});
+
+test("the password padding string matches ISO 32000-1 Table 21", () => {
+  assert.equal(pdfCrypto.PDF_PAD_STRING.length, 32);
+  assert.equal(
+    HEX(pdfCrypto.PDF_PAD_STRING),
+    "28bf4e5e4e758a41640" + "04e56fffa01082e2e00b6d0683e802f0ca9fe6453697a"
+  );
+});
+
+test("the object-level rewrite is lossless on its own, before any crypto", async () => {
+  // The parser/serialiser is the riskiest half of this service, so it is tested
+  // apart from the crypt layer: same pages, same metadata, same stream bytes,
+  // with pdf-lib's object streams and cross-reference stream unpacked into a
+  // classic table.
+  const original = await cryptoSamplePdf(4);
+  assert.equal(Buffer.from(original).includes("/ObjStm"), true);
+  const rewritten = await pdfCrypto.rewritePdfObjects(original);
+  assert.equal(Buffer.from(rewritten.bytes).includes("/ObjStm"), false);
+  assert.equal(Buffer.from(rewritten.bytes).includes("/Type /XRef"), false);
+  assert.match(Buffer.from(rewritten.bytes.subarray(0, 9)).toString("latin1"), /^%PDF-1\.\d/);
+  // A classic table: object 0 heads the free list, then one 20-byte entry each.
+  assert.match(Buffer.from(rewritten.bytes).toString("latin1"), /\nxref\n0 \d+\n0000000000 65535 f \n(\d{10} 00000 n \n)+trailer\n/);
+  assert.match(Buffer.from(rewritten.bytes).toString("latin1"), /startxref\n\d+\n%%EOF\n$/);
+  const reloaded = await window.PDFLib.PDFDocument.load(rewritten.bytes, { updateMetadata: false });
+  assert.equal(reloaded.getPageCount(), 4);
+  assert.equal(reloaded.getTitle(), "Crypto Round Trip");
+  assert.deepEqual(await decodedStreamFingerprint(rewritten.bytes), await decodedStreamFingerprint(original));
+  assert.deepEqual(await pdfjsPageTexts(rewritten.bytes), await pdfjsPageTexts(original));
+});
+
+test("permission bits map to the /P integer the spec describes", () => {
+  // ISO 32000-1 Table 22 numbers the bits from 1; bit N has value 2^(N-1).
+  assert.deepEqual(pdfCrypto.PDF_PERMISSION_BITS, {
+    print: 3,
+    modify: 4,
+    copy: 5,
+    annotate: 6,
+    fillForms: 9,
+    accessibility: 10,
+    assemble: 11,
+    printHighQuality: 12,
+  });
+  const all = pdfCrypto.permissionsToP(pdfCrypto.ALL_PERMISSIONS_ALLOWED);
+  // Bits 1-2 clear, every other bit set.
+  assert.equal(all, -4);
+  assert.equal(all & 1, 0);
+  assert.equal(all & 2, 0);
+  const bits = { print: 4, modify: 8, copy: 16, annotate: 32, fillForms: 256, accessibility: 512, assemble: 1024, printHighQuality: 2048 };
+  for (const [permission, bit] of Object.entries(bits)) {
+    const p = pdfCrypto.permissionsToP({ ...pdfCrypto.ALL_PERMISSIONS_ALLOWED, [permission]: false });
+    assert.equal(p & bit, 0, `${permission} should clear bit value ${bit}`);
+    assert.equal(all & bit, bit, `${permission} should be set when everything is allowed`);
+    // Only that one bit moves.
+    assert.equal(p | bit, all, `${permission} cleared more than its own bit`);
+    assert.equal(pdfCrypto.pToPermissions(p)[permission], false);
+  }
+  assert.deepEqual(pdfCrypto.pToPermissions(all), { ...pdfCrypto.ALL_PERMISSIONS_ALLOWED });
+});
+
+test("AES-256 (revision 6) encrypt/decrypt is a lossless round trip", async () => {
+  const original = await cryptoSamplePdf();
+  const before = await decodedStreamFingerprint(original);
+
+  const encrypted = await pdfCrypto.encryptPdf(original, { userPassword: "hunter2", ownerPassword: "owner-secret", algorithm: "aes-256" });
+  assert.match(encrypted.algorithm, /AES-256/);
+  assert.equal(encrypted.version, 5);
+  assert.equal(encrypted.revision, 6);
+
+  // The document really is encrypted: its plaintext marker is gone from the
+  // bytes, and pdf-lib refuses to read the file without a password.
+  assert.equal(Buffer.from(encrypted.bytes).includes(MARKER), false);
+  assert.equal(Buffer.from(encrypted.bytes).includes("/AESV3"), true);
+  await assert.rejects(() => window.PDFLib.PDFDocument.load(encrypted.bytes), /encrypted/i);
+
+  // pdf-lib's writer uses object streams and a cross-reference stream; the
+  // crypt layer unpacks both, so nothing stays hidden in a compressed container.
+  assert.equal(Buffer.from(original).includes("/ObjStm"), true);
+  assert.equal(Buffer.from(encrypted.bytes).includes("/ObjStm"), false);
+
+  const decrypted = await pdfCrypto.decryptPdf(encrypted.bytes, "hunter2");
+  const reloaded = await window.PDFLib.PDFDocument.load(decrypted.bytes, { updateMetadata: false });
+  assert.equal(reloaded.getPageCount(), 3);
+  assert.equal(reloaded.getTitle(), "Crypto Round Trip");
+  assert.equal(reloaded.getAuthor(), "MyFileKit Tester");
+  assert.deepEqual(await decodedStreamFingerprint(decrypted.bytes), before);
+
+  // The owner password reaches the same file key.
+  const viaOwner = await pdfCrypto.decryptPdf(encrypted.bytes, "owner-secret");
+  assert.deepEqual(await decodedStreamFingerprint(viaOwner.bytes), before);
+});
+
+test("AES-128 (revision 4, AESV2) encrypt/decrypt is a lossless round trip", async () => {
+  const original = await cryptoSamplePdf(2);
+  const before = await decodedStreamFingerprint(original);
+  const encrypted = await pdfCrypto.encryptPdf(original, { userPassword: "correct horse", algorithm: "aes-128" });
+  assert.equal(encrypted.version, 4);
+  assert.equal(encrypted.revision, 4);
+  assert.equal(Buffer.from(encrypted.bytes).includes("/AESV2"), true);
+  assert.equal(Buffer.from(encrypted.bytes).includes(MARKER), false);
+  const decrypted = await pdfCrypto.decryptPdf(encrypted.bytes, "correct horse");
+  assert.equal((await window.PDFLib.PDFDocument.load(decrypted.bytes, { updateMetadata: false })).getPageCount(), 2);
+  assert.deepEqual(await decodedStreamFingerprint(decrypted.bytes), before);
+});
+
+test("every RC4 revision the writer supports also reads back losslessly", async () => {
+  const original = await cryptoSamplePdf(1);
+  const before = await decodedStreamFingerprint(original);
+  // rc4-128 is /V 4 with an RC4 crypt filter; the -r3 and -r2 variants exist so
+  // the /V 2 (RC4-128) and /V 1 (RC4-40) read paths are covered by real files.
+  const expected = {
+    "rc4-128": { version: 4, revision: 4, keyBits: 128 },
+    "rc4-128-r3": { version: 2, revision: 3, keyBits: 128 },
+    "rc4-40-r2": { version: 1, revision: 2, keyBits: 40 },
+    "aes-256-r5": { version: 5, revision: 5, keyBits: 256 },
+  };
+  for (const [algorithm, shape] of Object.entries(expected)) {
+    const encrypted = await pdfCrypto.encryptPdf(original, { userPassword: "legacy-pw", ownerPassword: "legacy-owner", algorithm });
+    assert.equal(encrypted.version, shape.version, `${algorithm} /V`);
+    assert.equal(encrypted.revision, shape.revision, `${algorithm} /R`);
+    assert.equal(Buffer.from(encrypted.bytes).includes(MARKER), false, `${algorithm} left plaintext behind`);
+    const info = await pdfCrypto.inspectPdfEncryption(encrypted.bytes);
+    assert.equal(info.encrypted, true);
+    assert.equal(info.keyBits, shape.keyBits, `${algorithm} key length`);
+    assert.equal(info.opensWithoutPassword, false);
+    for (const password of ["legacy-pw", "legacy-owner"]) {
+      const decrypted = await pdfCrypto.decryptPdf(encrypted.bytes, password);
+      assert.deepEqual(await decodedStreamFingerprint(decrypted.bytes), before, `${algorithm} via ${password}`);
+    }
+  }
+});
+
+test("a wrong password is refused identically for every revision and produces no output", async () => {
+  const original = await cryptoSamplePdf(1);
+  const messages = new Set();
+  for (const algorithm of ["aes-256", "aes-128", "rc4-128", "rc4-128-r3", "rc4-40-r2", "aes-256-r5"]) {
+    const encrypted = await pdfCrypto.encryptPdf(original, { userPassword: "right", ownerPassword: "owner", algorithm });
+    for (const attempt of ["wrong", "", "Right", "right ", "owne"]) {
+      const error = await pdfCrypto.decryptPdf(encrypted.bytes, attempt).then(
+        (result) => new Error(`${algorithm}/"${attempt}" produced ${result.bytes.length} bytes instead of failing`),
+        (thrown) => thrown
+      );
+      assert.match(error.message, /does not open this PDF/, `${algorithm} with "${attempt}"`);
+      messages.add(error.message);
+    }
+  }
+  // One message for every failure: nothing reveals whether the user or the owner
+  // password was the near miss, or which revision rejected it.
+  assert.equal(messages.size, 1);
+});
+
+test("encrypting with printing disallowed clears the right /P bit and it survives a re-read", async () => {
+  const original = await cryptoSamplePdf(1);
+  const permissions = { ...pdfCrypto.ALL_PERMISSIONS_ALLOWED, print: false, copy: false };
+  const encrypted = await pdfCrypto.encryptPdf(original, { userPassword: "pw", algorithm: "aes-256", permissions });
+  assert.equal(encrypted.p & 4, 0, "print bit (value 4) must be clear");
+  assert.equal(encrypted.p & 16, 0, "copy bit (value 16) must be clear");
+  assert.equal(encrypted.p & 8, 8, "modify bit (value 8) must stay set");
+  assert.equal(encrypted.permissions.print, false);
+  assert.equal(encrypted.permissions.modify, true);
+
+  // Readable straight off the file without the password...
+  const inspected = await pdfCrypto.inspectPdfEncryption(encrypted.bytes);
+  assert.equal(inspected.p, encrypted.p);
+  assert.equal(inspected.permissions.print, false);
+  assert.equal(inspected.permissions.copy, false);
+  assert.equal(inspected.permissions.annotate, true);
+
+  // ...and unchanged after decrypting with it.
+  const decrypted = await pdfCrypto.decryptPdf(encrypted.bytes, "pw");
+  assert.equal(decrypted.p, encrypted.p);
+  assert.deepEqual(decrypted.permissions, encrypted.permissions);
+});
+
+test("unlockPdf strips the /Encrypt dictionary and makes permissions permissive", async () => {
+  const original = await cryptoSamplePdf(2);
+  const before = await decodedStreamFingerprint(original);
+  // An owner password with an empty user password: opens freely, but restricted.
+  const restricted = await pdfCrypto.encryptPdf(original, {
+    userPassword: "",
+    ownerPassword: "boss",
+    algorithm: "aes-256",
+    permissions: { ...pdfCrypto.ALL_PERMISSIONS_ALLOWED, print: false, copy: false, modify: false },
+  });
+  assert.equal((await pdfCrypto.inspectPdfEncryption(restricted.bytes)).opensWithoutPassword, true);
+
+  const unlocked = await pdfCrypto.unlockPdf(restricted.bytes);
+  assert.equal(Buffer.from(unlocked.bytes).includes("/Encrypt"), false);
+  assert.equal(Buffer.from(unlocked.bytes).includes("/AESV3"), false);
+  assert.equal(unlocked.p, -4);
+  assert.deepEqual(unlocked.permissions, { ...pdfCrypto.ALL_PERMISSIONS_ALLOWED });
+  assert.deepEqual(unlocked.permissionsBefore, pdfCrypto.pToPermissions(restricted.p));
+  assert.equal((await pdfCrypto.inspectPdfEncryption(unlocked.bytes)).encrypted, false);
+  assert.equal((await window.PDFLib.PDFDocument.load(unlocked.bytes, { updateMetadata: false })).getPageCount(), 2);
+  assert.deepEqual(await decodedStreamFingerprint(unlocked.bytes), before);
+
+  // The same holds at every revision, including the RC4 ones, where an empty
+  // user password takes a completely different code path (Algorithm 2 vs 2.A).
+  for (const algorithm of ["aes-128", "rc4-128", "rc4-128-r3", "rc4-40-r2"]) {
+    const legacy = await pdfCrypto.encryptPdf(original, {
+      userPassword: "",
+      ownerPassword: "boss",
+      algorithm,
+      permissions: { ...pdfCrypto.ALL_PERMISSIONS_ALLOWED, print: false },
+    });
+    assert.equal((await pdfCrypto.inspectPdfEncryption(legacy.bytes)).opensWithoutPassword, true, algorithm);
+    const opened = await pdfCrypto.unlockPdf(legacy.bytes);
+    assert.equal(opened.p, -4, algorithm);
+    assert.equal(opened.permissionsBefore.print, false, algorithm);
+    assert.deepEqual(await decodedStreamFingerprint(opened.bytes), before, algorithm);
+  }
+
+  // A PDF that needs a password to open is not this tool's job, and it says so.
+  const needsPassword = await pdfCrypto.encryptPdf(original, { userPassword: "needed", algorithm: "aes-256" });
+  await assert.rejects(() => pdfCrypto.unlockPdf(needsPassword.bytes), /needs a password just to open it/);
+  // Neither is an unencrypted file.
+  await assert.rejects(() => pdfCrypto.unlockPdf(original), /no encryption/);
+});
+
+test("unsupported or damaged /Encrypt dictionaries are refused clearly, never guessed at", async () => {
+  const original = await cryptoSamplePdf(1);
+  const encrypted = await pdfCrypto.encryptPdf(original, { userPassword: "pw", algorithm: "aes-256" });
+  const patch = (from, to) => new Uint8Array(Buffer.from(Buffer.from(encrypted.bytes).toString("latin1").replace(from, to), "latin1"));
+
+  const cases = [
+    [patch("/V 5", "/V 3"), /\/V 3, which this tool does not support/],
+    [patch("/R 6", "/R 9"), /\/R 9, which this tool does not support/],
+    [patch("/Filter /Standard", "/Filter /Adobe.PubSec"), /Adobe\.PubSec security handler/],
+    [patch("/CFM /AESV3", "/CFM /Nonsense"), /Nonsense crypt filter method/],
+    [patch("/StmF /StdCF", "/StmF /NoSuchFilter"), /crypt filter \/NoSuchFilter, but does not define it/],
+  ];
+  for (const [bytes, expected] of cases) {
+    await assert.rejects(() => pdfCrypto.decryptPdf(bytes, "pw"), expected);
+  }
+
+  // A nonsense crypt-filter key length is refused rather than used. (/V 5 pins
+  // the key at 256 bits by definition, so this only applies from /V 4 down.)
+  const aes128 = await pdfCrypto.encryptPdf(original, { userPassword: "pw", algorithm: "aes-128" });
+  const shortKey = new Uint8Array(Buffer.from(Buffer.from(aes128.bytes).toString("latin1").replace("/Length 16", "/Length 2"), "latin1"));
+  await assert.rejects(() => pdfCrypto.decryptPdf(shortKey, "pw"), /which is out of range/);
+
+  // Not a PDF at all, and a PDF with no objects: both fail fast rather than hang.
+  await assert.rejects(() => pdfCrypto.decryptPdf(strToU8("this is not a pdf"), "pw"), /does not look like a PDF/);
+  await assert.rejects(() => pdfCrypto.decryptPdf(strToU8("%PDF-1.7\ntrailer<<>>\n%%EOF"), "pw"), /No PDF objects/);
+  // And an unencrypted PDF is not silently re-emitted as if it had been decrypted.
+  await assert.rejects(() => pdfCrypto.decryptPdf(original, "pw"), /is not encrypted/);
+  // Nor is an already-encrypted PDF silently double-encrypted.
+  await assert.rejects(() => pdfCrypto.encryptPdf(encrypted.bytes, { userPassword: "new" }), /already password protected/);
+  // An empty password on both fields is refused before any work happens.
+  await assert.rejects(() => pdfCrypto.encryptPdf(original, { userPassword: "", ownerPassword: "" }), /Enter a password/);
+  await assert.rejects(() => pdfCrypto.encryptPdf(original, { userPassword: "pw", algorithm: "des" }), /Unknown PDF encryption algorithm/);
+});
+
+test("pdf.js opens what encryptPdf writes, and rejects the wrong password", async () => {
+  const original = await cryptoSamplePdf(2);
+  const expectedText = await pdfjsPageTexts(original);
+  assert.match(expectedText[0], /MyFileKit crypto marker ZQ7/);
+
+  for (const algorithm of ["aes-256", "aes-128", "rc4-128", "rc4-128-r3", "rc4-40-r2", "aes-256-r5"]) {
+    const encrypted = await pdfCrypto.encryptPdf(original, { userPassword: "hunter2", ownerPassword: "owner-secret", algorithm });
+    // A third-party implementation reads the same content back out.
+    assert.deepEqual(await pdfjsPageTexts(encrypted.bytes, "hunter2"), expectedText, `${algorithm} with the user password`);
+    assert.deepEqual(await pdfjsPageTexts(encrypted.bytes, "owner-secret"), expectedText, `${algorithm} with the owner password`);
+    await assert.rejects(() => pdfjsPageTexts(encrypted.bytes, "wrong"), /Incorrect Password/, `${algorithm} wrong password`);
+    await assert.rejects(() => pdfjsPageTexts(encrypted.bytes, undefined), /No password given/, `${algorithm} missing password`);
+    // And our own decryptor's output is readable with no password at all.
+    const decrypted = await pdfCrypto.decryptPdf(encrypted.bytes, "hunter2");
+    assert.deepEqual(await pdfjsPageTexts(decrypted.bytes), expectedText, `${algorithm} after decryptPdf`);
+  }
+});
+
+test("pdf.js sees the permission bits encryptPdf wrote", async () => {
+  const pdfjs = await loadPdfjsForInterop();
+  const original = await cryptoSamplePdf(1);
+  const encrypted = await pdfCrypto.encryptPdf(original, {
+    userPassword: "pw",
+    ownerPassword: "own",
+    algorithm: "aes-256",
+    permissions: { ...pdfCrypto.ALL_PERMISSIONS_ALLOWED, print: false, copy: false },
+  });
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(encrypted.bytes), password: "pw", verbosity: 0, isEvalSupported: false }).promise;
+  const granted = await doc.getPermissions();
+  await doc.destroy();
+  assert.equal(granted.includes(pdfjs.PermissionFlag.PRINT), false);
+  assert.equal(granted.includes(pdfjs.PermissionFlag.COPY), false);
+  assert.equal(granted.includes(pdfjs.PermissionFlag.MODIFY_CONTENTS), true);
+  assert.equal(granted.includes(pdfjs.PermissionFlag.ASSEMBLE), true);
+});
+
+test("the three security tools are registered under Security & Privacy with renderers", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const expected = { "encrypt-pdf-tool": "Encrypt PDF", "remove-password-tool": "Remove Password", "unlock-pdf-tool": "Unlock PDF" };
+  for (const [id, name] of Object.entries(expected)) {
+    const found = tools.find((tool) => tool.id === id);
+    assert.ok(found, `${id} should be registered`);
+    assert.equal(found.name, name);
+    assert.equal(found.category, "Security & Privacy");
+    assert.equal(found.status, "available");
+    assert.equal(found.localProcessing, true);
+    assert.deepEqual(found.acceptedTypes, ["application/pdf"]);
+    assert.equal(routeForHash(found.route).tool.id, id);
+    assert.equal(appSource.includes(`"${id}"`), true, `${id} is missing from ToolRenderer`);
+  }
+  // The rename is complete: the old category name survives nowhere.
+  assert.equal(categories.includes("Security & Privacy"), true);
+  assert.equal(categories.includes("Privacy Tools"), false);
+  assert.equal(tools.some((tool) => tool.category === "Privacy Tools"), false);
+  assert.equal(appSource.includes("Privacy Tools"), false);
+  assert.equal(fs.readFileSync(new URL("../src/registry/tools.registry.js", import.meta.url), "utf8").includes("Privacy Tools"), false);
+  // The pre-existing privacy tools moved across with it.
+  for (const id of ["pdf-metadata-cleaner-tool", "metadata-cleaner", "fingerprint-pdf-tool"]) {
+    assert.equal(tools.find((tool) => tool.id === id).category, "Security & Privacy", id);
+  }
+});
+
+test("the security tools never write a password into their status text or filenames", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const start = appSource.indexOf("function EncryptPdfTool");
+  const end = appSource.indexOf("function ImageOutputTool");
+  assert.ok(start > 0 && end > start);
+  const section = appSource.slice(start, end);
+  // No logging, no storage, no network, no password interpolated into output.
+  for (const forbidden of ["console.", "localStorage", "sessionStorage", "indexedDB", "fetch("]) {
+    assert.equal(section.includes(forbidden), false, `the security tools must not use ${forbidden}`);
+  }
+  assert.equal(/\$\{\s*(password|ownerPassword|confirmation)\s*\}/.test(section), false, "a password must never be interpolated into output");
+  assert.equal(/type="password"/.test(appSource.slice(appSource.indexOf("function PasswordField"), start)), true);
+  // Passwords are cleared on reset and on unmount.
+  assert.equal(section.includes("useEffect(() => forgetPasswords, [])"), true);
+  assert.equal(section.includes("useEffect(() => forgetPassword, [])"), true);
 });

@@ -52,6 +52,7 @@ import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.
 import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
 import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip } from "./services/pdf-render.service.js";
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
+import { ALL_PERMISSIONS_ALLOWED, PDF_ENCRYPTION_ALGORITHMS, PDF_PERMISSION_LABELS, decryptPdf, encryptPdf, unlockPdf } from "./services/pdf-crypto.service.js";
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 import { canvasToPdf, canvasesToPdf, csvToPdf, markdownToPdf } from "./services/convert.service.js";
 import { STATE_CODES, computeGstInvoice, computePosBill, defaultStepOptions, formatAmount, gstInvoicePdf, gstr1SummaryCsv, gstr1SummaryPdf, gstr1SummaryXlsx, posReceiptPdf, readInvoiceRows, runWorkflow, summariseGstr1, summarisePosSession, workflowOpList } from "./services/business.service.js";
@@ -103,7 +104,7 @@ const categoryIcons: Record<string, any> = {
   "Business Tools": ReceiptText,
   "Signature Tools": PenLine,
   "Text & Data Tools": FileArchive,
-  "Privacy Tools": ShieldCheck,
+  "Security & Privacy": ShieldCheck,
   "Developer Utilities": Hash,
   "Sharing & Collaboration": Share2,
 };
@@ -114,7 +115,7 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
   "Business Tools": { description: "Invoices, Indian GST tax invoices, counter billing, and GSTR-1 filing prep.", accent: "Business" },
   "Signature Tools": { description: "Draw or type signatures and export them as PNG files.", accent: "Signature" },
   "Text & Data Tools": { description: "Format JSON, convert CSV, preview Markdown, and create PDFs from text.", accent: "Data" },
-  "Privacy Tools": { description: "Clean supported image metadata locally in your browser.", accent: "Privacy" },
+  "Security & Privacy": { description: "Encrypt and unlock PDFs, and clean document and image metadata, locally in your browser.", accent: "Privacy" },
   "Developer Utilities": { description: "Handle hashes, Base64, and small file checks without leaving the page.", accent: "Utility" },
   "Sharing & Collaboration": { description: "Send files browser-to-browser and sketch together over a direct connection — still no server.", accent: "Sharing" },
 };
@@ -1094,6 +1095,9 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "create-pdf-tool") return <CreatePdfTool />;
   if (tool.id === "repair-pdf-tool") return <RepairPdfTool tool={tool} />;
   if (tool.id === "fingerprint-pdf-tool") return <FingerprintPdfTool tool={tool} />;
+  if (tool.id === "encrypt-pdf-tool") return <EncryptPdfTool tool={tool} />;
+  if (tool.id === "remove-password-tool") return <RemovePasswordTool tool={tool} />;
+  if (tool.id === "unlock-pdf-tool") return <UnlockPdfTool tool={tool} />;
   if (["compress-image-tool", "convert-image-tool"].includes(tool.id)) return <ImageOutputTool tool={tool} mode={tool.id === "compress-image-tool" ? "compress" : "convert"} />;
   if (tool.id === "batch-compress-images-tool") return <BatchImageTool tool={tool} mode="compress" />;
   if (tool.id === "batch-resize-images-tool") return <BatchImageTool tool={tool} mode="resize" />;
@@ -1963,6 +1967,129 @@ function FingerprintPdfTool({ tool }: { tool: Tool }) {
       const { bytes, id } = await fingerprintPdf(file);
       downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-fingerprinted`, "pdf"), "application/pdf");
       return `Embedded fingerprint id:\n${id}\nKeep this id to identify this copy later.`;
+    })} />
+  </ToolForm>;
+}
+
+// The crypt layer reports permissions as a plain object keyed by name; these
+// casts give the JSX a typed view of it without pulling type annotations into
+// the service.
+const permissionLabels = PDF_PERMISSION_LABELS as Record<string, string>;
+const permissionKeys = Object.keys(permissionLabels);
+const encryptionAlgorithms = PDF_ENCRYPTION_ALGORITHMS as Record<string, { label: string; internal?: boolean }>;
+const offeredAlgorithmIds = Object.keys(encryptionAlgorithms).filter((id) => !encryptionAlgorithms[id].internal);
+const allPermissionsAllowed = ALL_PERMISSIONS_ALLOWED as Record<string, boolean>;
+
+function listPermissions(flags: Record<string, boolean>, wanted: boolean) {
+  return permissionKeys.filter((key) => Boolean(flags[key]) === wanted).map((key) => permissionLabels[key].toLowerCase());
+}
+
+function PasswordField({ label, value, onChange, helper = "" }: { label: string; value: string; onChange: (value: string) => void; helper?: string }) {
+  return <label className="grid gap-2">
+    <span className="text-xs font-black uppercase text-neutral-500">{label}</span>
+    <input className="field-input" type="password" value={value} onChange={(event) => onChange(event.target.value)} autoComplete="new-password" spellCheck={false} />
+    {helper && <span className="text-xs font-semibold text-neutral-500">{helper}</span>}
+  </label>;
+}
+
+function EncryptPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [ownerPassword, setOwnerPassword] = useState("");
+  const [algorithm, setAlgorithm] = useState("aes-256");
+  const [permissions, setPermissions] = useState<Record<string, boolean>>({ ...allPermissionsAllowed });
+  const [status, setStatus] = useState(initialStatus);
+
+  // Passwords live only in this component's state and are never logged or
+  // stored. Drop them on unmount as well as on reset.
+  const forgetPasswords = () => {
+    setPassword("");
+    setConfirmation("");
+    setOwnerPassword("");
+  };
+  useEffect(() => forgetPasswords, []);
+
+  return <ToolForm status={status} onReset={() => {
+    setFiles([]);
+    forgetPasswords();
+    setAlgorithm("aes-256");
+    setPermissions({ ...allPermissionsAllowed });
+    setStatus(initialStatus);
+  }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Applies the standard PDF security handler here in this browser, so any reader — Acrobat, Preview, Chrome — will ask for the password before opening the file. There is no recovery route: if the password is lost, the document cannot be opened again by anyone, including you.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <PasswordField label="Password to open the PDF" value={password} onChange={setPassword} />
+    <PasswordField label="Confirm password" value={confirmation} onChange={setConfirmation} />
+    <PasswordField label="Owner password (optional)" value={ownerPassword} onChange={setOwnerPassword} helper="A second, different password that can change the permissions below. Leave it blank to reuse the password above." />
+    <Select label="Encryption" value={algorithm} onChange={setAlgorithm} options={offeredAlgorithmIds} labels={offeredAlgorithmIds.map((id) => encryptionAlgorithms[id].label)} />
+    {algorithm === "rc4-128" && (
+      <p className="text-xs font-black uppercase text-red-700 [.dark_&]:text-[#f8b4b4]">RC4 is broken and offers no real protection. Only pick it for a reader too old to handle AES.</p>
+    )}
+    <fieldset className="grid gap-2">
+      <legend className="text-xs font-black uppercase text-neutral-500">Allow anyone with the password to</legend>
+      {permissionKeys.map((key) => (
+        <Checkbox
+          key={key}
+          label={permissionLabels[key]}
+          checked={Boolean(permissions[key])}
+          onChange={(value) => setPermissions((current) => ({ ...current, [key]: value }))}
+        />
+      ))}
+    </fieldset>
+    <PrimaryButton label="Encrypt PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      if (!password) throw new Error("Enter a password to open the PDF with.");
+      if (password !== confirmation) throw new Error("The two passwords do not match.");
+      if (ownerPassword && ownerPassword === password) throw new Error("The owner password must be different from the open password.");
+      const result = await encryptPdf(file, { userPassword: password, ownerPassword, algorithm, permissions });
+      downloadBytes(result.bytes, withExtension(`${safeFilename(file.name)}-encrypted`, "pdf"), "application/pdf");
+      const blocked = listPermissions(result.permissions as Record<string, boolean>, false);
+      return `Encrypted with ${result.algorithm}.\n${blocked.length ? `Not allowed: ${blocked.join(", ")}.` : "All permissions allowed."}\nStore the password somewhere safe — it cannot be recovered.`;
+    })} />
+  </ToolForm>;
+}
+
+function RemovePasswordTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [password, setPassword] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+
+  const forgetPassword = () => setPassword("");
+  useEffect(() => forgetPassword, []);
+
+  return <ToolForm status={status} onReset={() => { setFiles([]); forgetPassword(); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      This decrypts a PDF you can already open, with a password you already know, and saves an identical copy that needs no password. Text, fonts, images, and structure are kept — nothing is rasterised. It does not crack, guess, or bypass anything: a wrong password just fails. Use it only on documents you are entitled to decrypt.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <PasswordField label="Current PDF password" value={password} onChange={setPassword} helper="Either the password that opens the PDF or its owner password will work." />
+    <PrimaryButton label="Remove password" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      if (!password) throw new Error("Enter the PDF's current password.");
+      const result = await decryptPdf(file, password);
+      downloadBytes(result.bytes, withExtension(`${safeFilename(file.name)}-no-password`, "pdf"), "application/pdf");
+      return `Removed ${result.algorithm} encryption from ${file.name}.\nThe copy you just downloaded opens without a password.`;
+    })} />
+  </ToolForm>;
+}
+
+function UnlockPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Some PDFs open freely but block printing, copying, or editing behind an owner password. This removes those restrictions and saves an unrestricted copy. It is not the same as Remove Password: if the PDF asks for a password just to open it, use Remove Password instead, with the password you already have. Use this only on documents you have the right to unlock.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <PrimaryButton label="Unlock PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const result = await unlockPdf(file);
+      downloadBytes(result.bytes, withExtension(`${safeFilename(file.name)}-unlocked`, "pdf"), "application/pdf");
+      const restored = listPermissions(result.permissionsBefore as Record<string, boolean>, false);
+      return `Removed ${result.algorithm} owner-password restrictions from ${file.name}.\n${restored.length ? `Restored: ${restored.join(", ")}.` : "That PDF was encrypted but had no restrictions set."}`;
     })} />
   </ToolForm>;
 }
@@ -4951,7 +5078,7 @@ function iconForTool(tool: Tool) {
   if (tool.category === "Image Tools") return Image;
   if (tool.category === "Business Tools") return ReceiptText;
   if (tool.category === "Signature Tools") return PenLine;
-  if (tool.category === "Privacy Tools") return ShieldCheck;
+  if (tool.category === "Security & Privacy") return ShieldCheck;
   if (tool.category === "Sharing & Collaboration") return Share2;
   if (tool.id.includes("rotate")) return RotateCw;
   if (tool.id.includes("crop") || tool.id.includes("split")) return Scissors;
