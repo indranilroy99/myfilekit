@@ -111,6 +111,70 @@ test("liquid buttons provide standard button semantics without SVG filter effect
   assert.doesNotMatch(buttonSource, /dangerouslySetInnerHTML|<filter|feTurbulence|backdropFilter/);
 });
 
+test("pdf-render service imports in Node and exposes the six new tool functions", async () => {
+  // Importing must not blow up even though the service uses pdf.js under the
+  // hood — pdf.js (and its Vite `?url` worker) is loaded lazily in the browser.
+  const service = await import("../src/services/pdf-render.service.js");
+  for (const fn of ["pdfToImages", "extractPdfText", "compressPdf", "pdfToZip", "flattenPdf", "invertPdf"]) {
+    assert.equal(typeof service[fn], "function", `${fn} should be exported`);
+  }
+});
+
+test("pdfToZip splits a PDF into one single-page PDF per page inside a ZIP", async () => {
+  // pdf-lib-only path (no canvas), so it is fully unit-testable in Node.
+  const { PDFDocument } = window.PDFLib;
+  const source = await PDFDocument.create();
+  for (let i = 0; i < 3; i += 1) source.addPage([200, 200]);
+  const bytes = await source.save();
+  const file = { arrayBuffer: async () => bytes.slice().buffer };
+
+  const { pdfToZip } = await import("../src/services/pdf-render.service.js");
+  const { unzipSync } = await import("fflate");
+  const { zipped, pages } = await pdfToZip(file);
+  assert.equal(pages, 3);
+
+  const entries = unzipSync(zipped);
+  assert.deepEqual(Object.keys(entries).sort(), ["page-1.pdf", "page-2.pdf", "page-3.pdf"]);
+  for (const name of Object.keys(entries)) {
+    const doc = await PDFDocument.load(entries[name]);
+    assert.equal(doc.getPageCount(), 1);
+  }
+});
+
+test("new PDF render tools are registered under sensible categories", () => {
+  const expected = {
+    "pdf-to-image-tool": "PDF Tools",
+    "extract-text-tool": "Text & Data Tools",
+    "compress-pdf-tool": "PDF Tools",
+    "pdf-to-zip-tool": "PDF Tools",
+    "flatten-pdf-tool": "PDF Tools",
+    "invert-pdf-tool": "PDF Tools",
+  };
+  for (const [id, category] of Object.entries(expected)) {
+    const found = tools.find((tool) => tool.id === id);
+    assert.ok(found, `${id} should be registered`);
+    assert.equal(found.category, category);
+    assert.ok(categories.includes(category));
+    assert.equal(found.status, "available");
+    assert.equal(found.localProcessing, true);
+  }
+});
+
+test("pdf.js worker is bundled locally (no CDN) and the service loads it lazily", () => {
+  // Rendering itself needs a browser canvas, so it cannot run in Node. Instead
+  // we lock in the offline guarantee at the source level.
+  const libSource = fs.readFileSync(new URL("../src/lib/pdfjs.ts", import.meta.url), "utf8");
+  // Worker is bundled locally via Vite's `?worker` import and handed to pdf.js
+  // through `workerPort` (so pdf.js never guesses the worker type and hangs).
+  assert.match(libSource, /pdf\.worker\.min\.mjs\?worker/);
+  assert.match(libSource, /GlobalWorkerOptions\.workerPort\s*=/);
+  assert.doesNotMatch(libSource, /cdnjs|unpkg|jsdelivr|https?:\/\//);
+
+  const serviceSource = fs.readFileSync(new URL("../src/services/pdf-render.service.js", import.meta.url), "utf8");
+  assert.match(serviceSource, /import\(["']\.\.\/lib\/pdfjs["']\)/);
+  assert.doesNotMatch(serviceSource, /^import .*from ["']\.\.\/lib\/pdfjs["']/m);
+});
+
 test("invoice defaults are neutral and drafts are not persisted", () => {
   const invoiceSource = fs.readFileSync(new URL("../invoice-generator/index.html", import.meta.url), "utf8");
   assert.match(invoiceSource, /senderName:\s*"Your name"/);

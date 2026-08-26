@@ -47,6 +47,7 @@ import { csvToJson, jsonToCsv } from "./services/csv.service.js";
 import { addSignatureToImage, addTextToImage, cleanImageMetadata, compressImage, cropImage, exportCanvas, imageDimensions, imageToCanvas, resizeImage, rotateFlipImage } from "./services/image.service.js";
 import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.service.js";
 import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
+import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip } from "./services/pdf-render.service.js";
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 
 type Tool = (typeof tools)[number];
@@ -1055,6 +1056,12 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "pdf-page-numbers-tool") return <PdfPageNumbersTool tool={tool} />;
   if (tool.id === "watermark-pdf-tool") return <WatermarkPdfTool tool={tool} />;
   if (tool.id === "pdf-metadata-cleaner-tool") return <PdfMetadataCleanerTool tool={tool} />;
+  if (tool.id === "pdf-to-image-tool") return <PdfToImageTool tool={tool} />;
+  if (tool.id === "extract-text-tool") return <ExtractTextTool tool={tool} />;
+  if (tool.id === "compress-pdf-tool") return <CompressPdfTool tool={tool} />;
+  if (tool.id === "pdf-to-zip-tool") return <PdfToZipTool tool={tool} />;
+  if (tool.id === "flatten-pdf-tool") return <FlattenPdfTool tool={tool} />;
+  if (tool.id === "invert-pdf-tool") return <InvertPdfTool tool={tool} />;
   if (tool.id === "images-to-pdf-tool") return <PdfFileTool tool={tool} action="Create PDF" multiple accept="image/jpeg,image/png,image/webp" run={(files) => imagesToPdf(files).then((bytes) => downloadBytes(bytes, "myfilekit-images.pdf", "application/pdf"))} />;
   if (["compress-image-tool", "convert-image-tool"].includes(tool.id)) return <ImageOutputTool tool={tool} mode={tool.id === "compress-image-tool" ? "compress" : "convert"} />;
   if (tool.id === "batch-compress-images-tool") return <BatchImageTool tool={tool} mode="compress" />;
@@ -1295,6 +1302,136 @@ function PdfMetadataCleanerTool({ tool }: { tool: Tool }) {
       const bytes = await cleanPdfMetadata(file);
       downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-metadata-cleaned`, "pdf"), "application/pdf");
       return `Common document metadata cleaned from ${file.name}.`;
+    })} />
+  </ToolForm>;
+}
+
+function PdfToImageTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [format, setFormat] = useState("jpg");
+  const [dpi, setDpi] = useState("150");
+  const [quality, setQuality] = useState("0.82");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Select label="Image format" value={format} onChange={setFormat} options={["jpg", "png", "webp"]} labels={["JPG", "PNG", "WebP"]} />
+    <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["72", "150", "200", "300"]} labels={["72 · screen", "150 · default", "200 · high", "300 · print"]} />
+    {format !== "png" && <Range label="Quality" value={quality} onChange={setQuality} />}
+    <PrimaryButton label="Convert to images" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const images = await pdfToImages(file, { format, dpi: Number(dpi), quality: Number(quality) });
+      const base = safeFilename(file.name);
+      if (images.length === 1) {
+        downloadBlob(images[0].blob, withExtension(`${base}-page-1`, format));
+        return `Exported 1 page as ${format.toUpperCase()}.`;
+      }
+      const entries: Record<string, Uint8Array> = {};
+      for (const image of images) entries[image.name] = new Uint8Array(await image.blob.arrayBuffer());
+      const zipped = zipSync(entries, { level: 0 });
+      const buffer = new ArrayBuffer(zipped.byteLength);
+      new Uint8Array(buffer).set(zipped);
+      downloadBlob(new Blob([buffer], { type: "application/zip" }), `${base}-images.zip`);
+      return `Exported ${images.length} pages as ${format.toUpperCase()} into one ZIP file.`;
+    })} />
+  </ToolForm>;
+}
+
+function ExtractTextTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setText(""); setStatus(initialStatus); }}>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <PrimaryButton label="Extract text" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const extracted = await extractPdfText(file);
+      setText(extracted);
+      return extracted.trim()
+        ? "Extracted text from the PDF."
+        : "No selectable text found — this PDF is likely scanned images.";
+    })} />
+    <Textarea label="Extracted text" value={text} onChange={setText} rows={12} />
+    <div className="flex flex-wrap gap-2">
+      <SecondaryButton label="Copy" onClick={() => runSafely(setStatus, async () => { await copyText(text); return "Copied."; })} />
+      <SecondaryButton label="Download .txt" onClick={() => runSafely(setStatus, async () => {
+        downloadText(requireOutput(text), `${safeFilename(files[0]?.name || "extracted")}-text`, "txt");
+        return "Text file ready to download.";
+      })} />
+    </div>
+  </ToolForm>;
+}
+
+function CompressPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [quality, setQuality] = useState("0.6");
+  const [dpi, setDpi] = useState("120");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      This rasterises each page to a JPEG image, so selectable text becomes part of the image. Best for image-heavy or scanned PDFs.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["96", "120", "150", "200"]} labels={["96 · smallest", "120 · default", "150 · sharp", "200 · sharpest"]} />
+    <Range label="JPEG quality" value={quality} onChange={setQuality} />
+    <PrimaryButton label="Compress PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const { bytes, before, after } = await rasterCompressPdf(file, { quality: Number(quality), dpi: Number(dpi) });
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-compressed`, "pdf"), "application/pdf");
+      const saved = before > 0 ? Math.round((1 - after / before) * 100) : 0;
+      return after >= before
+        ? `Original: ${formatBytes(before)}\nOutput: ${formatBytes(after)}\nNote: the output is not smaller — this PDF may already be optimised. Try a lower DPI or quality.`
+        : `Original: ${formatBytes(before)}\nOutput: ${formatBytes(after)}\nSaved about ${saved}%.`;
+    })} />
+  </ToolForm>;
+}
+
+function PdfToZipTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <PrimaryButton label="Split into ZIP" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const { zipped, pages } = await pdfToZip(file);
+      const buffer = new ArrayBuffer(zipped.byteLength);
+      new Uint8Array(buffer).set(zipped);
+      downloadBlob(new Blob([buffer], { type: "application/zip" }), `${safeFilename(file.name)}-pages.zip`);
+      return `Split ${pages} page${pages === 1 ? "" : "s"} into one ZIP file (one PDF per page).`;
+    })} />
+  </ToolForm>;
+}
+
+function FlattenPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [dpi, setDpi] = useState("150");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Rebuilds every page as a flat image, removing form fields, annotations, and other interactive layers before you share.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["120", "150", "200", "300"]} labels={["120 · smaller", "150 · default", "200 · high", "300 · print"]} />
+    <PrimaryButton label="Flatten PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = await flattenPdf(file, { dpi: Number(dpi) });
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-flattened`, "pdf"), "application/pdf");
+      return `Flattened ${file.name} into a non-interactive PDF.`;
+    })} />
+  </ToolForm>;
+}
+
+function InvertPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [dpi, setDpi] = useState("150");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["120", "150", "200", "300"]} labels={["120 · smaller", "150 · default", "200 · high", "300 · print"]} />
+    <PrimaryButton label="Invert colours" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = await invertPdf(file, { dpi: Number(dpi) });
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-inverted`, "pdf"), "application/pdf");
+      return `Inverted the colours of ${file.name}.`;
     })} />
   </ToolForm>;
 }

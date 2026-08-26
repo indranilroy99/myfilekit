@@ -33,6 +33,12 @@ export default defineConfig({
       "@": path.resolve(projectRoot, "src")
     }
   },
+  worker: {
+    // pdf.js ships an ESM worker. Emit + construct workers as ES modules so the
+    // `?worker` import (src/lib/pdfjs.ts) produces a worker that actually runs
+    // and completes the pdf.js handshake instead of silently hanging.
+    format: "es"
+  },
   build: {
     rollupOptions: {
       output: {
