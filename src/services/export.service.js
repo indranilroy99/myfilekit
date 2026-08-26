@@ -27,7 +27,14 @@ async function getPdfjs() {
  */
 export async function extractPositionedPages(file, { onProgress } = {}) {
   const { loadPdfDocument } = await getPdfjs();
-  const pdf = await loadPdfDocument(file);
+  let pdf;
+  try {
+    pdf = await loadPdfDocument(file);
+  } catch (error) {
+    // pdf.js reports parse failures as raw messages like "Invalid PDF structure";
+    // every other parser here gives actionable guidance, so this one should too.
+    throw new Error("This file could not be read as a PDF. If it is damaged, try the Repair PDF tool first.");
+  }
   const pages = [];
   try {
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {

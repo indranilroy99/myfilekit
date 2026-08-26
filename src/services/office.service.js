@@ -82,6 +82,12 @@ export function loadXlsx() {
 export async function readWorkbookSheets(file) {
   const XLSX = await loadXlsx();
   const data = new Uint8Array(await file.arrayBuffer());
+  // SheetJS falls back to reading anything it cannot identify as plain text, so a
+  // PDF renamed .xlsx would come back as a one-column "sheet" of PDF source.
+  // Sniff the container first and reject what is neither a spreadsheet nor text.
+  if (!looksLikeSpreadsheet(data)) {
+    throw new Error("This file could not be read as a spreadsheet. Supported formats are .xlsx, .xls, and .csv.");
+  }
   let workbook;
   try {
     workbook = XLSX.read(data, { type: "array" });
@@ -96,6 +102,40 @@ export async function readWorkbookSheets(file) {
   }));
   if (sheets.every((sheet) => !sheet.rows.length)) throw new Error("This workbook has no cell data to convert.");
   return sheets;
+}
+
+// A real spreadsheet is either an OOXML zip (.xlsx) or a legacy OLE2 container
+// (.xls); anything else has to look like plain text before SheetJS sees it, so
+// csv/tsv still work while binary files (which SheetJS would happily "read" as
+// text) are turned away.
+function looksLikeSpreadsheet(data) {
+  const startsWith = (bytes) => bytes.every((byte, index) => data[index] === byte);
+  if (startsWith([0x50, 0x4b, 0x03, 0x04])) return true; // "PK\x03\x04" — xlsx / OOXML
+  if (startsWith([0xd0, 0xcf, 0x11, 0xe0])) return true; // OLE2 — legacy .xls
+  // Formats whose header is ASCII (so the text check below would pass them).
+  const binaryMagic = [
+    [0x25, 0x50, 0x44, 0x46], // %PDF
+    [0x47, 0x49, 0x46, 0x38], // GIF8
+    [0x52, 0x61, 0x72, 0x21], // Rar!
+    [0x37, 0x7a, 0xbc, 0xaf], // 7z
+    [0x4d, 0x5a], // MZ — Windows executable
+  ];
+  if (binaryMagic.some((magic) => startsWith(magic))) return false;
+  return looksLikeText(data);
+}
+
+// Plain-text heuristic for csv/tsv: no NUL bytes and effectively no control
+// characters in the first few KB. Encoding-agnostic on purpose, so UTF-8 and
+// legacy single-byte CSVs both pass.
+function looksLikeText(data) {
+  const sample = data.subarray(0, 4096);
+  if (!sample.length) return false;
+  let control = 0;
+  for (const byte of sample) {
+    if (byte === 0) return false;
+    if (byte < 0x09 || (byte > 0x0d && byte < 0x20)) control += 1;
+  }
+  return control / sample.length < 0.02;
 }
 
 // Pure HTML builder for the workbook. First row of each sheet is styled as a
@@ -137,9 +177,9 @@ export async function pptxToSlides(file) {
   const entries = unzipEntries(await file.arrayBuffer(), "This file could not be read as a PowerPoint (.pptx) file.");
 
   const presentation = entries["ppt/presentation.xml"] ? strFromU8(entries["ppt/presentation.xml"]) : "";
-  const sizeMatch = presentation.match(/<p:sldSz[^>]*\bcx="(\d+)"[^>]*\bcy="(\d+)"/);
-  const slideWEmu = sizeMatch ? Number(sizeMatch[1]) : 9144000;
-  const slideHEmu = sizeMatch ? Number(sizeMatch[2]) : 6858000;
+  const size = tagAttrs(presentation, /<p:sldSz\b[^>]*>/g, ["cx", "cy"]);
+  const slideWEmu = size && Number(size[0]) > 0 ? Number(size[0]) : 9144000;
+  const slideHEmu = size && Number(size[1]) > 0 ? Number(size[1]) : 6858000;
 
   const slideNames = Object.keys(entries)
     .map((path) => path.match(/^ppt\/slides\/slide(\d+)\.xml$/))
@@ -163,8 +203,10 @@ function readSlideRels(entries, index) {
   const map = {};
   if (!entries[relsPath]) return map;
   const xml = strFromU8(entries[relsPath]);
-  for (const match of xml.matchAll(/<Relationship\b[^>]*\bId="([^"]+)"[^>]*\bTarget="([^"]+)"/g)) {
-    map[match[1]] = match[2];
+  for (const match of xml.matchAll(/<Relationship\b[^>]*>/g)) {
+    const id = attr(match[0], "Id");
+    const target = attr(match[0], "Target");
+    if (id && target) map[id] = target;
   }
   return map;
 }
@@ -177,11 +219,11 @@ function parseSlideElements(xml, rels, entries, slideWEmu, slideHEmu) {
     const kind = match[1];
     const box = parseBox(block, slideWEmu, slideHEmu);
     if (kind === "pic") {
-      const embed = block.match(/<a:blip\b[^>]*r:embed="([^"]+)"/);
-      const image = embed ? imageFromRel(rels[embed[1]], entries) : null;
+      const embed = tagAttrs(block, /<a:blip\b[^>]*>/g, ["r:embed"]);
+      const image = embed ? imageFromRel(rels[embed[0]], entries) : null;
       if (image) elements.push({ type: "image", dataUrl: image, box });
     } else {
-      const isTitle = /<p:ph\b[^>]*type="(title|ctrTitle)"/.test(block);
+      const isTitle = [...block.matchAll(/<p:ph\b[^>]*>/g)].some((ph) => ["title", "ctrTitle"].includes(attr(ph[0], "type")));
       const paragraphs = parseParagraphs(block);
       if (paragraphs.some((p) => p.text)) elements.push({ type: "text", title: isTitle, paragraphs, box });
     }
@@ -191,14 +233,16 @@ function parseSlideElements(xml, rels, entries, slideWEmu, slideHEmu) {
 
 // EMU offset/extent -> fractional box (0..1) so callers can scale to any size.
 function parseBox(block, slideWEmu, slideHEmu) {
-  const off = block.match(/<a:off\b[^>]*\bx="(-?\d+)"[^>]*\by="(-?\d+)"/);
-  const ext = block.match(/<a:ext\b[^>]*\bcx="(\d+)"[^>]*\bcy="(\d+)"/);
+  const off = tagAttrs(block, /<a:off\b[^>]*>/g, ["x", "y"]);
+  const ext = tagAttrs(block, /<a:ext\b[^>]*>/g, ["cx", "cy"]);
   if (!off || !ext) return null;
+  const [x, y, w, h] = [...off, ...ext].map(Number);
+  if (![x, y, w, h].every((value) => Number.isFinite(value))) return null;
   return {
-    x: Number(off[1]) / slideWEmu,
-    y: Number(off[2]) / slideHEmu,
-    w: Number(ext[1]) / slideWEmu,
-    h: Number(ext[2]) / slideHEmu,
+    x: x / slideWEmu,
+    y: y / slideHEmu,
+    w: w / slideWEmu,
+    h: h / slideHEmu,
   };
 }
 
@@ -207,9 +251,9 @@ function parseParagraphs(block) {
   const paragraphs = [];
   for (const match of block.matchAll(/<a:p\b[\s\S]*?<\/a:p>/g)) {
     const paragraph = match[0];
-    const level = paragraph.match(/<a:pPr\b[^>]*\blvl="(\d+)"/);
+    const level = tagAttrs(paragraph, /<a:pPr\b[^>]*>/g, ["lvl"]);
     const runs = [...paragraph.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((run) => decodeXml(run[1]));
-    paragraphs.push({ text: runs.join(""), level: level ? Number(level[1]) : 0 });
+    paragraphs.push({ text: runs.join(""), level: level && Number(level[0]) >= 0 ? Number(level[0]) : 0 });
   }
   return paragraphs;
 }
@@ -233,18 +277,21 @@ export async function epubToHtml(file) {
 
   const container = entries["META-INF/container.xml"];
   if (!container) throw new Error("This EPUB is missing its container manifest and can't be read.");
-  const opfMatch = strFromU8(container).match(/<rootfile\b[^>]*\bfull-path="([^"]+)"/);
-  if (!opfMatch) throw new Error("This EPUB does not point to a package document.");
-  const opfPath = opfMatch[1];
+  const rootfile = tagAttrs(strFromU8(container), /<rootfile\b[^>]*>/g, ["full-path"]);
+  if (!rootfile) throw new Error("This EPUB does not point to a package document.");
+  const opfPath = resolveEntryPath(entries, "", decodeXml(rootfile[0]));
   const opfDir = dirName(opfPath);
   if (!entries[opfPath]) throw new Error("This EPUB's package document is missing.");
   const opf = strFromU8(entries[opfPath]);
 
   const manifest = {};
-  for (const match of opf.matchAll(/<item\b[^>]*\bid="([^"]+)"[^>]*\bhref="([^"]+)"/g)) {
-    manifest[match[1]] = resolvePath(opfDir, decodeXml(match[2]));
+  for (const match of opf.matchAll(/<item\b[^>]*>/g)) {
+    const id = attr(match[0], "id");
+    const href = attr(match[0], "href");
+    if (!id || !href) continue;
+    manifest[id] = resolveEntryPath(entries, opfDir, decodeXml(href));
   }
-  const spine = [...opf.matchAll(/<itemref\b[^>]*\bidref="([^"]+)"/g)].map((match) => match[1]);
+  const spine = [...opf.matchAll(/<itemref\b[^>]*>/g)].map((match) => attr(match[0], "idref")).filter(Boolean);
   const order = spine.length ? spine : Object.keys(manifest);
 
   const chapters = [];
@@ -268,13 +315,15 @@ function bodyContent(html) {
 // Replace <img src="..."> / SVG <image xlink:href="..."> that point at packaged
 // images with inline data URLs; leave already-inline data: URLs untouched.
 function inlineImages(html, baseDir, entries) {
-  return html.replace(/\b(src|xlink:href|href)\s*=\s*"([^"]+)"/gi, (whole, attr, value) => {
+  return html.replace(/\b(src|xlink:href|href)\s*=\s*("([^"]*)"|'([^']*)')/gi, (whole, name, _quoted, double, single) => {
+    const value = double !== undefined ? double : single;
+    if (!value) return whole;
     if (/^(data:|https?:|\/\/|mailto:|#)/i.test(value)) return whole;
     if (!/\.(png|jpe?g|gif|webp|svg)$/i.test(value)) return whole;
-    const path = resolvePath(baseDir, value.split("#")[0]);
+    const path = resolveEntryPath(entries, baseDir, value.split("#")[0]);
     const bytes = entries[path];
     if (!bytes) return whole;
-    return `${attr}="data:${mimeForImage(path)};base64,${bytesToBase64(bytes)}"`;
+    return `${name}="data:${mimeForImage(path)};base64,${bytesToBase64(bytes)}"`;
   });
 }
 
@@ -335,6 +384,49 @@ function bytesToBase64(bytes) {
   }
   if (typeof btoa === "function") return btoa(binary);
   return Buffer.from(binary, "binary").toString("base64");
+}
+
+// XML attribute order is not significant and either quote style is legal, so the
+// pptx/epub parsing above matches a whole TAG first and then reads each attribute
+// independently through these two helpers instead of assuming a fixed layout.
+function attr(tag, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // The lookbehind stops `href` from matching `xlink:href` (and `x` from `cx`).
+  const match = String(tag).match(new RegExp(`(?<![\\w:.-])${escaped}\\s*=\\s*("([^"]*)"|'([^']*)')`));
+  if (!match) return null;
+  return match[2] !== undefined ? match[2] : match[3];
+}
+
+// Values of the first tag matching `tagPattern` that carries every named
+// attribute, in `names` order; null when no tag qualifies. Requiring the full set
+// keeps unrelated same-name tags (e.g. `<a:ext uri=...>` inside `<a:extLst>`)
+// from shadowing the real one, exactly as the old combined regexes did.
+function tagAttrs(xml, tagPattern, names) {
+  for (const match of String(xml).matchAll(tagPattern)) {
+    const values = names.map((name) => attr(match[0], name));
+    if (values.every((value) => value !== null)) return values;
+  }
+  return null;
+}
+
+// EPUB hrefs are URL-encoded per spec, so a file named "Chapter 01.xhtml" appears
+// as "Chapter%2001.xhtml" while the ZIP entry keeps the literal space. Malformed
+// escapes fall back to the raw value.
+function decodeUri(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+// Resolve an href against the archive, preferring the decoded spelling but
+// accepting the raw one so either encoding of a name resolves.
+function resolveEntryPath(entries, baseDir, href) {
+  const decoded = resolvePath(baseDir, decodeUri(href));
+  if (entries[decoded]) return decoded;
+  const raw = resolvePath(baseDir, href);
+  return entries[raw] ? raw : decoded;
 }
 
 function decodeXml(value) {

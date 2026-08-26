@@ -119,7 +119,7 @@ function normaliseBaseUrl(value) {
 
 /** True when an endpoint is saved, complete, and switched on. */
 export function isLlmConfigured(settings) {
-  return Boolean(settings?.enabled && settings?.baseUrl && settings?.model && settings?.apiKey);
+  return settings?.enabled === true && Boolean(settings?.baseUrl && settings?.model && settings?.apiKey);
 }
 
 /** Origin the browser must be allowed to reach, for CSP guidance. */
@@ -199,7 +199,9 @@ export function buildAnswerPrompt(question, passages, { limit = MAX_PROMPT_CHARA
  * mistake. `fetchImpl` exists so the refusal path is unit-testable in Node.
  */
 export async function requestChatCompletion({ settings, system, prompt, maxTokens, temperature, signal, fetchImpl } = {}) {
-  if (!settings?.enabled) {
+  // Strictly `true` only: a hand-built truthy value ("true", 1, {}) must not
+  // count as "explicitly enabled".
+  if (settings?.enabled !== true) {
     throw new Error("The optional AI endpoint is switched off. Nothing was sent. Turn it on in the AI endpoint panel to use it.");
   }
   if (!isLlmConfigured(settings)) {

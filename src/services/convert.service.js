@@ -220,8 +220,7 @@ function wrapByWidth(font, text, size, maxWidth) {
     let token = word;
     // Break a single word that is wider than the column.
     while (measureWidth(font, token, size) > maxWidth && token.length > 1) {
-      let cut = token.length;
-      while (cut > 1 && measureWidth(font, token.slice(0, cut), size) > maxWidth) cut -= 1;
+      const cut = widestFittingPrefix(font, token, size, maxWidth);
       if (current) { lines.push(current); current = ""; }
       lines.push(token.slice(0, cut));
       token = token.slice(cut);
@@ -236,6 +235,21 @@ function wrapByWidth(font, text, size, maxWidth) {
   }
   if (current) lines.push(current);
   return lines.length ? lines : [""];
+}
+
+// Longest prefix of `token` (never shorter than one character, so the caller
+// always makes progress) that still fits `maxWidth`. Binary search instead of
+// stepping down one character at a time: a single 8000-character token used to
+// re-measure a near-full-length string thousands of times and froze the tab.
+function widestFittingPrefix(font, token, size, maxWidth) {
+  let low = 1;
+  let high = token.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (measureWidth(font, token.slice(0, mid), size) > maxWidth) high = mid - 1;
+    else low = mid;
+  }
+  return low;
 }
 
 // Standard fonts throw the same WinAnsi error when measuring non-Latin-1 text,

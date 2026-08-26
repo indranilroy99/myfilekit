@@ -39,11 +39,26 @@ function drawTextSafe(page, text, options) {
   try {
     page.drawText(text, options);
   } catch (error) {
-    if (/cannot encode|WinAnsi/i.test(String(error?.message))) {
-      throw new Error("This PDF text tool supports Latin-1 characters only (no CJK/emoji).");
-    }
-    throw error;
+    throw latin1Error(error);
   }
+}
+
+// Measuring text throws the very same encoding error as drawing it, so any
+// measurement taken before drawTextSafe needs the same guard.
+function measureSafe(font, text, size) {
+  try {
+    return font.widthOfTextAtSize(text, size);
+  } catch (error) {
+    throw latin1Error(error);
+  }
+}
+
+function latin1Error(error, fieldName) {
+  if (/cannot encode|WinAnsi/i.test(String(error?.message))) {
+    const where = fieldName ? ` Check the "${fieldName}" field.` : "";
+    return new Error(`This PDF text tool supports Latin-1 characters only (no CJK/emoji).${where}`);
+  }
+  return error;
 }
 
 /**
@@ -151,8 +166,8 @@ export async function addHeadersFooters(file, options = {}) {
 
   const resolve = (template, pageNumber) => template.replace(/\{n\}/g, String(pageNumber)).replace(/\{total\}/g, String(total));
   const xFor = (text, width) => {
-    const textWidth = font.widthOfTextAtSize(text, size);
     if (align === "left") return margin;
+    const textWidth = measureSafe(font, text, size);
     if (align === "right") return Math.max(margin, width - margin - textWidth);
     return Math.max(margin, (width - textWidth) / 2);
   };
@@ -202,18 +217,30 @@ export async function fillPdfForm(file, values = {}, flatten = false) {
   const fields = form.getFields();
   if (!fields.length) throw new Error("This PDF has no fillable form fields.");
 
+  const filled = [];
   for (const field of fields) {
     const name = field.getName();
     if (!(name in values)) continue;
-    if (field instanceof PDFTextField) {
-      field.setText(String(values[name] ?? ""));
-    } else if (field instanceof PDFCheckBox) {
-      if (values[name]) field.check();
-      else field.uncheck();
+    try {
+      if (field instanceof PDFTextField) {
+        field.setText(String(values[name] ?? ""));
+        filled.push(name);
+      } else if (field instanceof PDFCheckBox) {
+        if (values[name]) field.check();
+        else field.uncheck();
+      }
+    } catch (error) {
+      throw latin1Error(error, name);
     }
   }
-  if (flatten) form.flatten();
-  return pdf.save();
+  // pdf-lib builds field appearances during flatten/save, so the encoding error
+  // surfaces here rather than at setText — name the field that caused it.
+  try {
+    if (flatten) form.flatten();
+    return await pdf.save();
+  } catch (error) {
+    throw latin1Error(error, filled.find((name) => [...String(values[name] ?? "")].some((char) => char.codePointAt(0) > 0xff)));
+  }
 }
 
 /**

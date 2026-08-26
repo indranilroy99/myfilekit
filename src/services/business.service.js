@@ -1012,8 +1012,10 @@ export function workflowOpList() {
 }
 
 export function defaultStepOptions(opId) {
+  // Own-property check only: inherited keys like "__proto__" or "toString" are
+  // not workflow ops and must get the same friendly error as any other typo.
+  if (!Object.hasOwn(WORKFLOW_OPS, opId)) throw new Error(`"${opId}" is not a supported workflow step.`);
   const op = WORKFLOW_OPS[opId];
-  if (!op) throw new Error(`"${opId}" is not a supported workflow step.`);
   return Object.fromEntries(op.fields.map((field) => [field.key, field.default ?? ""]));
 }
 
@@ -1026,7 +1028,7 @@ export async function runWorkflow(sourceFile, steps, { onStep } = {}) {
   const list = Array.isArray(steps) ? steps : [];
   if (!list.length) throw new Error("Add at least one step to the workflow.");
   for (const step of list) {
-    if (!WORKFLOW_OPS[step?.op]) throw new Error(`"${step?.op}" is not a supported workflow step.`);
+    if (!Object.hasOwn(WORKFLOW_OPS, step?.op)) throw new Error(`"${step?.op}" is not a supported workflow step.`);
   }
 
   const name = String(sourceFile?.name || "workflow.pdf");
@@ -1184,8 +1186,7 @@ function wrapByWidth(font, text, size, maxWidth) {
   for (const word of words) {
     let token = word;
     while (safeWidth(font, token, size) > maxWidth && token.length > 1) {
-      let cut = token.length;
-      while (cut > 1 && safeWidth(font, token.slice(0, cut), size) > maxWidth) cut -= 1;
+      const cut = widestFittingPrefix(font, token, size, maxWidth);
       if (current) { lines.push(current); current = ""; }
       lines.push(token.slice(0, cut));
       token = token.slice(cut);
@@ -1200,6 +1201,21 @@ function wrapByWidth(font, text, size, maxWidth) {
   }
   if (current) lines.push(current);
   return lines.length ? lines : [""];
+}
+
+// Longest prefix of `token` (never shorter than one character, so the caller
+// always makes progress) that still fits `maxWidth`. Binary search instead of
+// stepping down one character at a time: a single 8000-character token used to
+// re-measure a near-full-length string thousands of times and froze the tab.
+function widestFittingPrefix(font, token, size, maxWidth) {
+  let low = 1;
+  let high = token.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (safeWidth(font, token.slice(0, mid), size) > maxWidth) high = mid - 1;
+    else low = mid;
+  }
+  return low;
 }
 
 function clipToWidth(font, text, size, maxWidth) {

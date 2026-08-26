@@ -1954,3 +1954,432 @@ test("Phase 6b sharing tools are registered, routable, and backend-free", () => 
     assert.equal(/\bfetch\s*\(|XMLHttpRequest|EventSource/.test(source), false, `${file} makes an HTTP call`);
   }
 });
+
+// --- PDF wrapping, encoding guards, and XMP cleaning ----------------------
+// textToPdf writes its lines as hex strings inside flate-compressed content
+// streams, so these helpers read the lines that were actually drawn.
+const TEXT_PDF_PAGE_WIDTH = 612;
+const TEXT_PDF_MARGIN = 54;
+const TEXT_PDF_MAX_WIDTH = TEXT_PDF_PAGE_WIDTH - TEXT_PDF_MARGIN * 2;
+const TEXT_PDF_FONT_SIZE = 11;
+
+async function drawnPdfTextLines(bytes) {
+  const { PDFDocument, decodePDFRawStream } = window.PDFLib;
+  const doc = await PDFDocument.load(bytes);
+  const lines = [];
+  for (const page of doc.getPages()) {
+    const contents = page.node.Contents();
+    const streams = typeof contents.asArray === "function"
+      ? contents.asArray().map((ref) => doc.context.lookup(ref))
+      : [contents];
+    for (const stream of streams) {
+      const decoded = new TextDecoder("latin1").decode(decodePDFRawStream(stream).decode());
+      for (const match of decoded.matchAll(/<([0-9A-Fa-f]*)>\s*Tj/g)) {
+        lines.push(match[1].replace(/../g, (pair) => String.fromCharCode(parseInt(pair, 16))));
+      }
+    }
+  }
+  return lines;
+}
+
+async function helveticaMeasurer() {
+  const { PDFDocument, StandardFonts } = window.PDFLib;
+  const probe = await PDFDocument.create();
+  const font = await probe.embedFont(StandardFonts.Helvetica);
+  return (line) => font.widthOfTextAtSize(line, TEXT_PDF_FONT_SIZE);
+}
+
+test("textToPdf wraps by measured width, so wide uppercase text stays inside the margins", async () => {
+  const measure = await helveticaMeasurer();
+  // 86 characters of this notice measure 585pt — wider than the 504pt printable
+  // area — so a character-count wrap clipped the tail off the page.
+  const notice = "NOTICE TO ALL EMPLOYEES REGARDING WAREHOUSE SAFETY AND COMPLIANCE REQUIREMENTS FOR THE NEW QUARTER";
+  const noticeLines = await drawnPdfTextLines(await textToPdf(notice));
+  assert.ok(noticeLines.length >= 2);
+  for (const line of noticeLines) {
+    assert.ok(measure(line) <= TEXT_PDF_MAX_WIDTH, `line overruns the printable width: ${measure(line)}pt`);
+  }
+  assert.equal(noticeLines.join(" "), notice);
+
+  // "W" is the widest Helvetica glyph: 86 of them measure 893pt.
+  const wideLines = await drawnPdfTextLines(await textToPdf("W".repeat(300)));
+  assert.ok(wideLines.length >= 6);
+  for (const line of wideLines) {
+    assert.ok(measure(line) <= TEXT_PDF_MAX_WIDTH, `line overruns the printable width: ${measure(line)}pt`);
+  }
+  assert.equal(wideLines.join(""), "W".repeat(300));
+});
+
+test("textToPdf splits an over-long token without dropping characters or stalling", async () => {
+  const measure = await helveticaMeasurer();
+  const token = "Mixed-Token-1234567890".repeat(400).slice(0, 8000);
+  assert.equal(token.length, 8000);
+
+  const started = Date.now();
+  const bytes = await textToPdf(token);
+  const elapsed = Date.now() - started;
+  // A linear walk-back to find each cut point is quadratic and freezes the tab;
+  // the binary search keeps an 8000-character token well under a second.
+  assert.ok(elapsed < 1000, `wrapping 8000 characters took ${elapsed}ms`);
+
+  const lines = await drawnPdfTextLines(bytes);
+  assert.equal(lines.join(""), token);
+  for (const line of lines) {
+    assert.ok(measure(line) <= TEXT_PDF_MAX_WIDTH, `line overruns the printable width: ${measure(line)}pt`);
+  }
+
+  // A long token surrounded by ordinary words keeps every character too.
+  const mixed = `lead words ${"Q".repeat(500)} trailing words`;
+  const mixedLines = await drawnPdfTextLines(await textToPdf(mixed));
+  assert.equal(mixedLines.join(" ").replace(/\s+/g, ""), mixed.replace(/\s+/g, ""));
+});
+
+test("addHeadersFooters raises the friendly Latin-1 error for every alignment", async () => {
+  const { addHeadersFooters } = await import("../src/services/pdf-edit.service.js");
+  const { PDFDocument } = window.PDFLib;
+  const source = await PDFDocument.create();
+  source.addPage([400, 400]);
+  const file = new File([await source.save()], "src.pdf", { type: "application/pdf" });
+
+  // Measuring the text throws the same cryptic pdf-lib error as drawing it, and
+  // it runs first — including for "left", where the measurement is discarded.
+  for (const align of ["center", "left", "right"]) {
+    await assert.rejects(() => addHeadersFooters(file, { header: "报告", align }), /Latin-1 characters only/);
+  }
+  await assert.rejects(() => addHeadersFooters(file, { footer: "页 {n}" }), /Latin-1 characters only/);
+  await assert.doesNotReject(() => addHeadersFooters(file, { header: "Report", align: "left" }));
+});
+
+test("fillPdfForm raises the friendly Latin-1 error and names the field", async () => {
+  const { fillPdfForm } = await import("../src/services/pdf-edit.service.js");
+  const { PDFDocument } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([300, 300]);
+  const field = doc.getForm().createTextField("full_name");
+  field.addToPage(page, { x: 40, y: 200, width: 200, height: 20 });
+  const file = new File([await doc.save()], "form.pdf", { type: "application/pdf" });
+
+  for (const flatten of [false, true]) {
+    await assert.rejects(() => fillPdfForm(file, { full_name: "名前" }, flatten), /Latin-1 characters only/);
+    await assert.rejects(() => fillPdfForm(file, { full_name: "名前" }, flatten), /"full_name"/);
+  }
+});
+
+test("cleanPdfMetadata removes the XMP packet as well as the Info dictionary", async () => {
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  doc.addPage([200, 200]);
+  doc.setAuthor("Info-Jane");
+  doc.setTitle("Info-Title");
+  const xmp = '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/">'
+    + '<rdf:RDF><rdf:Description dc:creator="XMP-JANE-DOE" xmp:CreatorTool="Word"/></rdf:RDF></x:xmpmeta><?xpacket end="w"?>';
+  doc.catalog.set(PDFName.of("Metadata"), doc.context.register(doc.context.stream(xmp, { Type: "Metadata", Subtype: "XML" })));
+  const original = await doc.save();
+  assert.equal(new TextDecoder("latin1").decode(original).includes("XMP-JANE-DOE"), true);
+
+  const cleanedBytes = await cleanPdfMetadata(new File([original], "xmp.pdf", { type: "application/pdf" }));
+  assert.equal(new TextDecoder("latin1").decode(cleanedBytes).includes("XMP-JANE-DOE"), false);
+
+  const cleaned = await PDFDocument.load(cleanedBytes, { updateMetadata: false });
+  assert.equal(cleaned.catalog.get(PDFName.of("Metadata")), undefined);
+  assert.equal(cleaned.getAuthor(), undefined);
+  assert.equal(cleaned.getTitle(), undefined);
+  assert.equal(cleaned.getPageCount(), 1);
+});
+
+// --- Regression: XML attribute parsing in pptx/epub containers -----------------
+// Attribute ORDER is not significant in XML, either quote style is legal, and
+// EPUB hrefs are URL-encoded per spec. These lock in all three.
+
+test("epubToHtml resolves percent-encoded chapter and image hrefs", async () => {
+  const { zipSync, strToU8 } = await import("fflate");
+  const { epubToHtml } = await import("../src/services/office.service.js");
+  const container = '<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>';
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+
+  // (a) One chapter and one image whose hrefs are percent-encoded while the ZIP
+  // entries carry the literal spaces.
+  const opfOne = '<package xmlns="http://www.idpf.org/2007/opf"><manifest><item id="c1" href="Chapter%2001.xhtml" media-type="application/xhtml+xml"/><item id="img1" href="images/my%20pic.png" media-type="image/png"/></manifest><spine><itemref idref="c1"/></spine></package>';
+  const one = zipSync({
+    "META-INF/container.xml": strToU8(container),
+    "OEBPS/content.opf": strToU8(opfOne),
+    "OEBPS/Chapter 01.xhtml": strToU8('<html><body><p>Encoded chapter text.</p><img src="images/my%20pic.png"/></body></html>'),
+    "OEBPS/images/my pic.png": png,
+  });
+  const htmlOne = await epubToHtml({ name: "one.epub", arrayBuffer: async () => one.slice().buffer });
+  assert.match(htmlOne, /Encoded chapter text/);
+  assert.match(htmlOne, /src="data:image\/png;base64,/);
+
+  // (b) The silent case: only the MIDDLE chapter is encoded, so a miss used to
+  // drop it while still reporting success. All three must come back, in order.
+  const opfThree = '<package xmlns="http://www.idpf.org/2007/opf"><manifest>' +
+    '<item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>' +
+    '<item id="c2" href="ch%202.xhtml" media-type="application/xhtml+xml"/>' +
+    '<item id="c3" href="ch3.xhtml" media-type="application/xhtml+xml"/>' +
+    '</manifest><spine><itemref idref="c1"/><itemref idref="c2"/><itemref idref="c3"/></spine></package>';
+  const three = zipSync({
+    "META-INF/container.xml": strToU8(container),
+    "OEBPS/content.opf": strToU8(opfThree),
+    "OEBPS/ch1.xhtml": strToU8("<html><body><p>Chapter ONE</p></body></html>"),
+    "OEBPS/ch 2.xhtml": strToU8("<html><body><p>Chapter TWO</p></body></html>"),
+    "OEBPS/ch3.xhtml": strToU8("<html><body><p>Chapter THREE</p></body></html>"),
+  });
+  const htmlThree = await epubToHtml({ name: "three.epub", arrayBuffer: async () => three.slice().buffer });
+  assert.match(htmlThree, /Chapter ONE/);
+  assert.match(htmlThree, /Chapter TWO/);
+  assert.match(htmlThree, /Chapter THREE/);
+  assert.ok(htmlThree.indexOf("Chapter ONE") < htmlThree.indexOf("Chapter TWO"));
+  assert.ok(htmlThree.indexOf("Chapter TWO") < htmlThree.indexOf("Chapter THREE"));
+
+  // (c) Non-ASCII names arrive percent-encoded too.
+  const opfAccent = '<package xmlns="http://www.idpf.org/2007/opf"><manifest><item id="c1" href="chap%C3%AEtre.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>';
+  const accent = zipSync({
+    "META-INF/container.xml": strToU8(container),
+    "OEBPS/content.opf": strToU8(opfAccent),
+    "OEBPS/chapître.xhtml": strToU8("<html><body><p>Accented chapter.</p></body></html>"),
+  });
+  const htmlAccent = await epubToHtml({ name: "accent.epub", arrayBuffer: async () => accent.slice().buffer });
+  assert.match(htmlAccent, /Accented chapter/);
+
+  // A literal "%20" in the ZIP entry name must still resolve (raw fallback).
+  const opfLiteral = '<package xmlns="http://www.idpf.org/2007/opf"><manifest><item id="c1" href="ch%2001.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>';
+  const literal = zipSync({
+    "META-INF/container.xml": strToU8(container),
+    "OEBPS/content.opf": strToU8(opfLiteral),
+    "OEBPS/ch%2001.xhtml": strToU8("<html><body><p>Literal percent chapter.</p></body></html>"),
+  });
+  const htmlLiteral = await epubToHtml({ name: "literal.epub", arrayBuffer: async () => literal.slice().buffer });
+  assert.match(htmlLiteral, /Literal percent chapter/);
+});
+
+test("epubToHtml reads <item> in any attribute order and with either quote style", async () => {
+  const { zipSync, strToU8 } = await import("fflate");
+  const { epubToHtml } = await import("../src/services/office.service.js");
+  const container = '<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>';
+  const items = [
+    '<item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>',
+    '<item id="c1" media-type="application/xhtml+xml" href="ch1.xhtml"/>',
+    '<item href="ch1.xhtml" id="c1" media-type="application/xhtml+xml"/>',
+    '<item media-type="application/xhtml+xml" href="ch1.xhtml" id="c1"/>',
+    '<item href="ch1.xhtml" media-type="application/xhtml+xml" id="c1"/>',
+    "<item id='c1' href='ch1.xhtml' media-type='application/xhtml+xml'/>",
+  ];
+  for (const item of items) {
+    const opf = `<package xmlns="http://www.idpf.org/2007/opf"><manifest>${item}</manifest><spine><itemref idref="c1"/></spine></package>`;
+    const zipped = zipSync({
+      "META-INF/container.xml": strToU8(container),
+      "OEBPS/content.opf": strToU8(opf),
+      "OEBPS/ch1.xhtml": strToU8("<html><body><p>Order independent.</p></body></html>"),
+    });
+    const html = await epubToHtml({ name: "order.epub", arrayBuffer: async () => zipped.slice().buffer });
+    assert.match(html, /Order independent/, `failed for ${item}`);
+  }
+});
+
+test("epubToHtml accepts single-quoted container, manifest, and image attributes", async () => {
+  const { zipSync, strToU8 } = await import("fflate");
+  const { epubToHtml } = await import("../src/services/office.service.js");
+  const container = "<?xml version='1.0'?><container xmlns='urn:oasis:names:tc:opendocument:xmlns:container'><rootfiles><rootfile full-path='OEBPS/content.opf' media-type='application/oebps-package+xml'/></rootfiles></container>";
+  const opf = "<package xmlns='http://www.idpf.org/2007/opf'><manifest><item id='c1' href='ch1.xhtml' media-type='application/xhtml+xml'/><item id='img1' href='images/pic.png' media-type='image/png'/></manifest><spine><itemref idref='c1'/></spine></package>";
+  const zipped = zipSync({
+    "META-INF/container.xml": strToU8(container),
+    "OEBPS/content.opf": strToU8(opf),
+    "OEBPS/ch1.xhtml": strToU8("<html><body><p>Single quoted.</p><img src='images/pic.png'/></body></html>"),
+    "OEBPS/images/pic.png": Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 4, 5, 6]),
+  });
+  const html = await epubToHtml({ name: "quotes.epub", arrayBuffer: async () => zipped.slice().buffer });
+  assert.match(html, /Single quoted/);
+  assert.match(html, /src="data:image\/png;base64,/);
+});
+
+test("pptxToSlides parses DrawingML in any attribute order and with either quote style", async () => {
+  const { zipSync, strToU8 } = await import("fflate");
+  const { pptxToSlides } = await import("../src/services/office.service.js");
+  // cy before cx: a 16:9 deck must NOT fall back to the 4:3 default (9144000).
+  const presentation = '<p:presentation xmlns:p="p"><p:sldSz cy="6858000" cx="12192000"/></p:presentation>';
+  const slide = '<p:sld xmlns:p="p" xmlns:a="a" xmlns:r="r"><p:cSld><p:spTree>' +
+    // y before x / cy before cx, plus an <a:extLst><a:ext uri=...> ahead of the
+    // real <a:ext> (PowerPoint writes these) which must not shadow the geometry.
+    '<p:sp><p:nvSpPr><p:cNvPr><a:extLst><a:ext uri="{FF2B5EF4}"/></a:extLst></p:cNvPr><p:nvPr><p:ph type=\'title\'/></p:nvPr></p:nvSpPr>' +
+    '<p:spPr><a:xfrm><a:off y="200" x="100"/><a:ext cy="400" cx="300"/></a:xfrm></p:spPr>' +
+    '<p:txBody><a:p><a:r><a:t>Reversed Title</a:t></a:r></a:p></p:txBody></p:sp>' +
+    // Single-quoted r:embed and geometry.
+    "<p:pic><p:blipFill><a:blip r:embed='rId1'/></p:blipFill><p:spPr><a:xfrm><a:off x='1000000' y='2000000'/><a:ext cx='3000000' cy='2000000'/></a:xfrm></p:spPr></p:pic>" +
+    '</p:spTree></p:cSld></p:sld>';
+  // Id last, exactly as generators other than PowerPoint emit it.
+  const slideRels = '<Relationships xmlns="r"><Relationship Target="../media/image1.png" Type="image" Id="rId1"/></Relationships>';
+  const zipped = zipSync({
+    "ppt/presentation.xml": strToU8(presentation),
+    "ppt/slides/slide1.xml": strToU8(slide),
+    "ppt/slides/_rels/slide1.xml.rels": strToU8(slideRels),
+    "ppt/media/image1.png": Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 8]),
+  });
+  const file = { name: "reversed.pptx", arrayBuffer: async () => zipped.slice().buffer };
+  const { slideWidthEmu, slideHeightEmu, slides } = await pptxToSlides(file);
+  assert.equal(slideWidthEmu, 12192000);
+  assert.equal(slideHeightEmu, 6858000);
+  assert.notEqual(slideWidthEmu, 9144000); // the 4:3 default would be the wrong aspect ratio
+
+  const textElement = slides[0].elements.find((element) => element.type === "text");
+  assert.ok(textElement && textElement.box, "reversed <a:off>/<a:ext> should still give a box");
+  assert.equal(textElement.title, true); // single-quoted <p:ph type='title'/>
+  assert.equal(textElement.paragraphs[0].text, "Reversed Title");
+  assert.ok(Math.abs(textElement.box.x - 100 / 12192000) < 1e-12);
+  assert.ok(Math.abs(textElement.box.y - 200 / 6858000) < 1e-12);
+  assert.ok(Math.abs(textElement.box.w - 300 / 12192000) < 1e-12);
+  assert.ok(Math.abs(textElement.box.h - 400 / 6858000) < 1e-12);
+
+  const imageElement = slides[0].elements.find((element) => element.type === "image");
+  assert.ok(imageElement, "Relationship with Id last should still map to the picture");
+  assert.match(imageElement.dataUrl, /^data:image\/png;base64,/);
+  assert.ok(imageElement.box && Math.abs(imageElement.box.x - 1000000 / 12192000) < 1e-12);
+});
+
+test("readWorkbookSheets rejects binary masquerading as a spreadsheet and still reads csv", async () => {
+  const { readWorkbookSheets } = await import("../src/services/office.service.js");
+  // A PDF renamed .xlsx used to come back as a one-column sheet of PDF source
+  // via SheetJS's plain-text fallback.
+  const pdf = strToU8("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n");
+  await assert.rejects(
+    () => readWorkbookSheets({ name: "report.xlsx", arrayBuffer: async () => pdf.slice().buffer }),
+    /could not be read as a spreadsheet/
+  );
+  const binary = new Uint8Array(512);
+  for (let index = 0; index < binary.length; index += 1) binary[index] = (index * 7) % 256;
+  await assert.rejects(
+    () => readWorkbookSheets({ name: "blob.xlsx", arrayBuffer: async () => binary.slice().buffer }),
+    /could not be read as a spreadsheet/
+  );
+  // Real text input keeps working.
+  const csv = strToU8("Name,Score\nAda,99\n");
+  const sheets = await readWorkbookSheets({ name: "marks.csv", arrayBuffer: async () => csv.slice().buffer });
+  assert.deepEqual(sheets[0].rows[0], ["Name", "Score"]);
+  assert.equal(String(sheets[0].rows[1][0]), "Ada");
+});
+
+test("pdf exports report an actionable error when the file is not a readable PDF", () => {
+  // extractPositionedPages needs pdf.js (browser-only Vite `?worker` import), so
+  // like the pdf.js worker test above this locks the guarantee in at the source
+  // level: the load is wrapped and the raw pdf.js message never reaches the user.
+  const source = fs.readFileSync(new URL("../src/services/export.service.js", import.meta.url), "utf8");
+  assert.match(source, /pdf = await loadPdfDocument\(file\);\s*\}\s*catch/);
+  assert.match(source, /This file could not be read as a PDF\. If it is damaged, try the Repair PDF tool first\./);
+});
+
+// --- Long-token wrapping, workflow ids, filename stems, LLM gate --------------
+
+// Counts how many times `charCode` is actually drawn into a PDF, by inflating
+// every content stream and reading the hex strings pdf-lib feeds to Tj. Used to
+// prove the line breaker neither drops nor duplicates characters.
+async function drawnCharacterCount(bytes, charCode) {
+  const { unzlibSync } = await import("fflate");
+  const buffer = Buffer.from(bytes);
+  let total = 0;
+  let index = 0;
+  for (;;) {
+    const start = buffer.indexOf("\nstream\n", index);
+    if (start === -1) break;
+    const end = buffer.indexOf("\nendstream", start);
+    if (end === -1) break;
+    let content = "";
+    try {
+      content = Buffer.from(unzlibSync(new Uint8Array(buffer.subarray(start + 8, end)))).toString("latin1");
+    } catch {
+      content = "";
+    }
+    for (const [, hex] of content.matchAll(/<([0-9a-fA-F]*)>\s*Tj/g)) {
+      for (let at = 0; at + 1 < hex.length; at += 2) {
+        if (parseInt(hex.slice(at, at + 2), 16) === charCode) total += 1;
+      }
+    }
+    index = end + 1;
+  }
+  return total;
+}
+
+const LONG_TOKEN_BUDGET_MS = 1500;
+
+test("markdownToPdf breaks a very long unbroken token quickly and losslessly", async () => {
+  const token = "x".repeat(8000);
+  const started = performance.now();
+  const bytes = await markdownToPdf(token);
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < LONG_TOKEN_BUDGET_MS, `8000-character token took ${Math.round(elapsed)}ms (budget ${LONG_TOKEN_BUDGET_MS}ms)`);
+  const doc = await window.PDFLib.PDFDocument.load(bytes);
+  assert.ok(doc.getPageCount() >= 1);
+  // Every character survives the break: none dropped, none duplicated.
+  assert.equal(await drawnCharacterCount(bytes, 0x78), 8000);
+});
+
+test("csvToPdf wraps a single very wide cell quickly", async () => {
+  const started = performance.now();
+  const bytes = await csvToPdf(`a,b\n${"x".repeat(4000)},2`);
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < LONG_TOKEN_BUDGET_MS, `4000-character cell took ${Math.round(elapsed)}ms (budget ${LONG_TOKEN_BUDGET_MS}ms)`);
+  assert.ok((await window.PDFLib.PDFDocument.load(bytes)).getPageCount() >= 1);
+  assert.equal(await drawnCharacterCount(bytes, 0x78), 4000);
+});
+
+test("gstInvoicePdf wraps a very long item description quickly and losslessly", async () => {
+  const invoiceFor = (description) => business.computeGstInvoice({
+    seller: { name: "Studio", gstin: SELLER_MH, state: "27" },
+    buyer: { name: "Client", gstin: BUYER_MH },
+    invoiceNo: "INV-LONG-1",
+    items: [{ description, hsn: "998311", qty: 1, unit: "NOS", rate: 100, discountPercent: 0, gstRate: 18 }],
+  });
+  // Baseline: the invoice chrome ("Taxable value" and friends) draws its own
+  // "z"-free text, so measure one description character and compare.
+  const baseline = await drawnCharacterCount(await business.gstInvoicePdf(invoiceFor("z")), 0x7a);
+  const started = performance.now();
+  const bytes = await business.gstInvoicePdf(invoiceFor("z".repeat(8000)));
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < LONG_TOKEN_BUDGET_MS, `8000-character description took ${Math.round(elapsed)}ms (budget ${LONG_TOKEN_BUDGET_MS}ms)`);
+  assert.ok((await window.PDFLib.PDFDocument.load(bytes)).getPageCount() >= 1);
+  assert.equal(await drawnCharacterCount(bytes, 0x7a) - baseline, 7999);
+});
+
+test("workflow steps only accept own workflow op ids", async () => {
+  const source = new File([await textToPdf("workflow guard")], "guard.pdf", { type: "application/pdf" });
+  for (const op of ["__proto__", "constructor", "toString", "valueOf", "hasOwnProperty"]) {
+    // Inherited keys must be rejected up front, not blow up inside the run.
+    await assert.rejects(() => business.runWorkflow(source, [{ op }]), /not a supported workflow step/);
+    const error = assert.throws(() => business.defaultStepOptions(op), /not a supported workflow step/);
+    assert.equal(error instanceof TypeError, false, `${op} raised a TypeError`);
+  }
+  // A real op still resolves.
+  assert.deepEqual(business.defaultStepOptions("watermark"), { text: "DRAFT", size: "48", opacity: "0.18" });
+});
+
+test("safeFilename never returns a dot-only, path-like stem", () => {
+  for (const input of [".", "..", "...", "....", "../..", "./."]) {
+    const result = safeFilename(input);
+    assert.equal(/^\.+$/.test(result), false, `${input} produced "${result}"`);
+    assert.equal(result, "myfilekit-file");
+  }
+  assert.equal(safeFilename("..", "peer-file"), "peer-file");
+  assert.equal(webrtc.sanitizeReceivedFilename(".."), "myfilekit-received");
+  // Unchanged behaviour for ordinary names.
+  assert.equal(safeFilename("../../etc/passwd"), "passwd");
+  assert.equal(webrtc.sanitizeReceivedFilename("<script>alert(1)</script>.png"), "script.png");
+});
+
+test("llm.service refuses to send unless enabled is strictly true", async () => {
+  let calls = 0;
+  const spyFetch = async () => { calls += 1; throw new Error("fetch must not be reached"); };
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = spyFetch;
+  try {
+    for (const enabled of ["true", 1, {}, "false", [], "yes"]) {
+      const settings = { enabled, baseUrl: "https://api.example.com/v1", model: "m", apiKey: "k" };
+      assert.equal(llm.isLlmConfigured(settings), false, `enabled=${JSON.stringify(enabled)} must not count as configured`);
+      await assert.rejects(
+        () => llm.requestChatCompletion({ settings, prompt: "secret document text" }),
+        /switched off/i,
+        `enabled=${JSON.stringify(enabled)} must be refused`
+      );
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+  assert.equal(calls, 0, "no fetch may happen unless the endpoint is explicitly enabled");
+});

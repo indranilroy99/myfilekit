@@ -135,13 +135,28 @@ export async function watermarkPdf(file, text, options = {}) {
 }
 
 export async function cleanPdfMetadata(file) {
+  const { PDFName } = getPdfLib();
   const pdf = await loadPdf(file, { updateMetadata: false });
   const infoReference = pdf.context.trailerInfo.Info;
   if (infoReference) {
     pdf.context.delete(infoReference);
     delete pdf.context.trailerInfo.Info;
   }
+  // The Info dictionary is only half the story: Word/Acrobat/Chrome also write an
+  // XMP packet on the catalog that repeats author/title/CreatorTool, so a file
+  // cleaned above would still carry the same identifying data.
+  removeEntry(pdf, pdf.catalog, PDFName.of("Metadata"));
+  // Private application data (Word, Illustrator, ...) can also name the author.
+  removeEntry(pdf, pdf.catalog, PDFName.of("PieceInfo"));
+  pdf.getPages().forEach((page) => removeEntry(pdf, page.node, PDFName.of("PieceInfo")));
   return pdf.save();
+}
+
+function removeEntry(pdf, dict, key) {
+  const value = dict.get(key);
+  if (!value) return;
+  pdf.context.delete(value);
+  dict.delete(key);
 }
 
 export async function textToPdf(text) {
@@ -153,14 +168,14 @@ export async function textToPdf(text) {
   const margin = 54;
   const fontSize = 11;
   const lineHeight = 16;
-  const maxChars = 86;
+  const maxWidth = pageWidth - margin * 2;
   let page = pdf.addPage([pageWidth, pageHeight]);
   let y = pageHeight - margin;
 
   const value = String(text || "");
   if (!value.trim()) throw new Error("Enter text to create a PDF.");
   value.split(/\r?\n/).forEach((paragraph) => {
-    const lines = wrapText(paragraph || " ", maxChars);
+    const lines = wrapText(paragraph || " ", maxWidth, font, fontSize);
     lines.forEach((line) => {
       if (y < margin) {
         page = pdf.addPage([pageWidth, pageHeight]);
@@ -205,43 +220,79 @@ async function canvasJpegBytes(file) {
   }
 }
 
-function wrapText(text, maxChars) {
+// Wraps on measured text width, not character count: 86 wide glyphs ("WWW...")
+// are far wider than 86 narrow ones, so counting characters clipped uppercase
+// text off the right edge of the page.
+function wrapText(text, maxWidth, font, size) {
+  const measure = (value) => measurePdfText(font, value, size);
   const words = String(text).split(/\s+/);
   const lines = [];
   let line = "";
   words.forEach((word) => {
     let token = word;
-    while (token.length > maxChars) {
+    // An unbroken token wider than the page is split into measured chunks. No
+    // character is ever dropped: every chunk is pushed before the tail moves on.
+    while (measure(token) > maxWidth) {
+      const cut = fittingPrefixLength(token, maxWidth, measure);
+      if (cut >= token.length) break;
       if (line) {
         lines.push(line);
         line = "";
       }
-      lines.push(token.slice(0, maxChars));
-      token = token.slice(maxChars);
+      lines.push(token.slice(0, cut));
+      token = token.slice(cut);
     }
     if (!token) return;
-    if ((line + " " + token).trim().length > maxChars) {
+    const candidate = (line + " " + token).trim();
+    if (measure(candidate) > maxWidth) {
       lines.push(line);
       line = token;
     } else {
-      line = (line + " " + token).trim();
+      line = candidate;
     }
   });
   lines.push(line);
   return lines;
 }
 
+// Longest prefix (at least one character) that still fits maxWidth. Binary
+// search, not a one-character-at-a-time walk back — a linear scan re-measures a
+// long token thousands of times and freezes the tab.
+function fittingPrefixLength(token, maxWidth, measure) {
+  let low = 1;
+  let high = token.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (measure(token.slice(0, middle)) <= maxWidth) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
+
 function drawPdfText(page, text, options) {
   try {
     page.drawText(text, options);
   } catch (error) {
-    // pdf-lib's standard fonts only cover WinAnsi (Latin-1). Turn its cryptic
-    // "WinAnsi cannot encode ..." error into a clear, user-facing message.
-    if (/cannot encode|WinAnsi/i.test(String(error?.message))) {
-      throw new Error("This PDF text tool supports Latin-1 characters only (no CJK/emoji).");
-    }
-    throw error;
+    throw latin1Error(error);
   }
+}
+
+// Measuring throws the same encoding error as drawing, so it needs the same guard.
+function measurePdfText(font, text, size) {
+  try {
+    return font.widthOfTextAtSize(text, size);
+  } catch (error) {
+    throw latin1Error(error);
+  }
+}
+
+// pdf-lib's standard fonts only cover WinAnsi (Latin-1). Turn its cryptic
+// "WinAnsi cannot encode ..." error into a clear, user-facing message.
+function latin1Error(error) {
+  if (/cannot encode|WinAnsi/i.test(String(error?.message))) {
+    return new Error("This PDF text tool supports Latin-1 characters only (no CJK/emoji).");
+  }
+  return error;
 }
 
 function clamp(value, min, max) {
