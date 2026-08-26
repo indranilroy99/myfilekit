@@ -53,6 +53,7 @@ import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetada
 import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip } from "./services/pdf-render.service.js";
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
 import { ALL_PERMISSIONS_ALLOWED, PDF_ENCRYPTION_ALGORITHMS, PDF_PERMISSION_LABELS, decryptPdf, encryptPdf, unlockPdf } from "./services/pdf-crypto.service.js";
+import { CONFIDENCE as PII_CONFIDENCE, PII_TYPE_LABELS, buildPrivacyReportText, confidenceLabel, extractPdfPiiHits, isPersonalType, scanPdfStructure } from "./services/pii.service.js";
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 import { canvasToPdf, canvasesToPdf, csvToPdf, markdownToPdf } from "./services/convert.service.js";
 import { STATE_CODES, computeGstInvoice, computePosBill, defaultStepOptions, formatAmount, gstInvoicePdf, gstr1SummaryCsv, gstr1SummaryPdf, gstr1SummaryXlsx, posReceiptPdf, readInvoiceRows, runWorkflow, summariseGstr1, summarisePosSession, workflowOpList } from "./services/business.service.js";
@@ -1092,6 +1093,8 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "headers-footers-tool") return <HeadersFootersTool tool={tool} />;
   if (tool.id === "fill-pdf-form-tool") return <FillPdfFormTool tool={tool} />;
   if (tool.id === "redact-pdf-tool") return <RedactPdfTool tool={tool} />;
+  if (tool.id === "auto-redact-pii-tool") return <AutoRedactPiiTool tool={tool} />;
+  if (tool.id === "privacy-scanner-tool") return <PrivacyScannerTool tool={tool} />;
   if (tool.id === "create-pdf-tool") return <CreatePdfTool />;
   if (tool.id === "repair-pdf-tool") return <RepairPdfTool tool={tool} />;
   if (tool.id === "fingerprint-pdf-tool") return <FingerprintPdfTool tool={tool} />;
@@ -1916,6 +1919,408 @@ function RedactPdfTool({ tool }: { tool: Tool }) {
       return `Applied ${rects.length} redaction${rects.length === 1 ? "" : "s"} and flattened ${file.name} to images.`;
     })} />
   </ToolForm>;
+}
+
+type PiiRect = { page: number; x: number; y: number; w: number; h: number };
+type PiiHit = { id: string; page: number; type: string; value: string; masked: string; confidence: number; note: string; rects: PiiRect[] };
+type PiiScan = {
+  pages: number;
+  pagesWithText: number;
+  hasTextLayer: boolean;
+  offPageItems: number;
+  hits: PiiHit[];
+  summary: { total: number; high: number; types: Array<{ type: string; label: string; count: number; high: number }> };
+};
+type PdfStructureScan = {
+  pages: number;
+  encrypted: boolean;
+  info: Record<string, string>;
+  xmp: { present: boolean; bytes: number; fields: Array<{ label: string; value: string }> };
+  attachments: Array<{ name: string; type: string; description?: string; size: number }>;
+  embeddedFileStreams: number;
+  embeddedFileBytes: number;
+  signatures: Array<{ name: string; reason: string }>;
+  links: Array<{ page: number; subtype: string; uri: string }>;
+  invisibleText: Array<{ page: number; invisible: number; whiteOnWhite: number }>;
+  contentTruncated: boolean;
+};
+
+// redactPdf accepts { dpi, onProgress }, but the type inferred from that plain
+// JS module only surfaces the defaulted `dpi`, so the progress callback is
+// passed through this typed alias rather than being dropped.
+const redactPdfWithProgress = redactPdf as (
+  file: File,
+  rects: PiiRect[],
+  options: { dpi: number; onProgress: (page: number, total: number) => void }
+) => Promise<Uint8Array>;
+
+// Values are shown masked unless the operator explicitly reveals them, and no
+// PII value is ever written into a status message, a filename, or the console.
+function piiDisplayValue(hit: PiiHit, reveal: boolean) {
+  return reveal ? hit.value : hit.masked;
+}
+
+function confidenceTone(confidence: number) {
+  if (confidence >= PII_CONFIDENCE.HIGH) return "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]";
+  if (confidence >= PII_CONFIDENCE.MEDIUM) return "border-amber-200 bg-amber-50 text-amber-900 [.dark_&]:border-[#7a5a1f] [.dark_&]:bg-[#2a2113] [.dark_&]:text-[#f3d79b]";
+  return "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]";
+}
+
+function ConfidenceTag({ confidence }: { confidence: number }) {
+  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${confidenceTone(confidence)}`}>{confidenceLabel(confidence)}</span>;
+}
+
+function groupHitsByType(hits: PiiHit[]) {
+  const groups = new Map<string, PiiHit[]>();
+  for (const hit of hits) {
+    const list = groups.get(hit.type) || [];
+    list.push(hit);
+    groups.set(hit.type, list);
+  }
+  return [...groups.entries()]
+    .map(([type, list]) => ({ type, label: PII_TYPE_LABELS[type as keyof typeof PII_TYPE_LABELS] || type, hits: list }))
+    .sort((a, b) => b.hits.length - a.hits.length || a.label.localeCompare(b.label));
+}
+
+function AutoRedactPiiTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [scan, setScan] = useState<PiiScan | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [reveal, setReveal] = useState(false);
+  const [dpi, setDpi] = useState("150");
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => {
+    setFiles([]);
+    setScan(null);
+    setSelected(new Set());
+    setReveal(false);
+    setStatus(initialStatus);
+  };
+
+  // Scanning happens page by page as soon as a file is chosen, so a long
+  // document reports progress instead of freezing behind one blocking call.
+  useEffect(() => {
+    let cancelled = false;
+    setScan(null);
+    setSelected(new Set());
+    setReveal(false);
+    if (!files.length) return undefined;
+
+    runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const result = (await extractPdfPiiHits(file, { onProgress: pageProgress(setStatus, "Scanning") })) as PiiScan;
+      if (cancelled) return "Ready.";
+      setScan(result);
+      if (!result.hasTextLayer) {
+        return `No selectable text was found on any of the ${result.pages} page${result.pages === 1 ? "" : "s"}. This looks like a scan, so there is nothing to match patterns against — run OCR / Searchable PDF first, then come back.`;
+      }
+      const preselect = result.hits.filter((hit) => hit.confidence >= PII_CONFIDENCE.HIGH && isPersonalType(hit.type) && hit.rects.length > 0);
+      setSelected(new Set(preselect.map((hit) => hit.id)));
+      return `Scanned ${result.pages} page${result.pages === 1 ? "" : "s"}: ${result.summary.total} pattern match${result.summary.total === 1 ? "" : "es"}, ${result.summary.high} high confidence. ${preselect.length} high-confidence personal value${preselect.length === 1 ? " is" : "s are"} pre-selected — review every box before redacting.`;
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [files, tool.file]);
+
+  const groups = useMemo(() => groupHitsByType(scan?.hits || []), [scan]);
+  const selectedHits = useMemo(() => (scan?.hits || []).filter((hit) => selected.has(hit.id)), [scan, selected]);
+  const selectedRects = useMemo(() => selectedHits.flatMap((hit) => hit.rects), [selectedHits]);
+
+  const toggleHit = (hit: PiiHit, checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (checked) next.add(hit.id);
+      else next.delete(hit.id);
+      return next;
+    });
+  };
+
+  const toggleType = (hits: PiiHit[], checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const hit of hits) {
+        if (!hit.rects.length) continue;
+        if (checked) next.add(hit.id);
+        else next.delete(hit.id);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <ToolForm status={status} onReset={reset}>
+      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+        Finds Aadhaar (Verhoeff-checked), PAN, payment cards (Luhn-checked), GSTIN, IFSC, account numbers, passport numbers, emails, phone numbers, dates of birth, IPs and URLs in the PDF's text layer, then permanently removes the ones you tick. Redaction rasterises every page to an image and paints opaque boxes over the matches, so the text underneath is genuinely gone — the honest trade is that the output is flattened: selectable text, links, and form fields are lost for the whole document. Nothing leaves this browser.
+      </div>
+      <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+
+      {scan && !scan.hasTextLayer && (
+        <div className="surface-card wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+          <p className="font-black text-[var(--foreground)]">No text layer</p>
+          <p className="mt-1">This PDF has no extractable text, so pattern detection has nothing to read. Run <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a> to add a text layer, then scan the OCR'd copy here. If you only need to cover regions you can see, use <a className="underline" href="#redact-pdf-tool">Redact PDF</a> with manual coordinates.</p>
+        </div>
+      )}
+
+      {scan && scan.hasTextLayer && (
+        <div className="surface-card wabi-card-edge grid gap-4 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-black">Matches found</p>
+              <p className="mt-1 text-sm font-semibold text-neutral-500">
+                {scan.summary.total} match{scan.summary.total === 1 ? "" : "es"} across {scan.pagesWithText} page{scan.pagesWithText === 1 ? "" : "s"} with text · {scan.summary.high} high confidence · {selected.size} selected ({selectedRects.length} area{selectedRects.length === 1 ? "" : "s"} to paint)
+              </p>
+            </div>
+            <Checkbox label={reveal ? "Values revealed" : "Reveal full values"} checked={reveal} onChange={setReveal} />
+          </div>
+          {groups.length ? (
+            <div className="grid gap-3">
+              {groups.map((group) => {
+                const selectable = group.hits.filter((hit) => hit.rects.length > 0);
+                const allSelected = selectable.length > 0 && selectable.every((hit) => selected.has(hit.id));
+                return (
+                  <div key={group.type} className="surface-muted wabi-card-edge grid gap-2 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-black text-[var(--foreground)]">{group.label} · {group.hits.length}</p>
+                      <Checkbox label={allSelected ? `Deselect all ${group.label}` : `Select all ${group.label}`} checked={allSelected} onChange={(checked) => toggleType(group.hits, checked)} />
+                    </div>
+                    <div className="grid gap-1">
+                      {group.hits.map((hit) => (
+                        <label key={hit.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-neutral-600">
+                          <input type="checkbox" checked={selected.has(hit.id)} disabled={!hit.rects.length} onChange={(event) => toggleHit(hit, event.target.checked)} />
+                          <span className="text-xs font-black uppercase text-neutral-500">p{hit.page}</span>
+                          <span className="break-all font-mono text-[var(--foreground)]">{piiDisplayValue(hit, reveal)}</span>
+                          <ConfidenceTag confidence={hit.confidence} />
+                          {hit.rects.length ? <span className="text-xs">{hit.rects.length} area{hit.rects.length === 1 ? "" : "s"}</span> : <span className="text-xs text-red-700">no rectangle found — redact this one manually</span>}
+                          {hit.note ? <span className="text-xs text-neutral-500">{hit.note}</span> : null}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm font-semibold text-neutral-500">No known patterns matched. That is not proof the document is clean — names, addresses, and free-text details are not detectable by pattern.</p>
+          )}
+          <div className="surface-muted wabi-card-edge p-3 text-sm font-semibold leading-6 text-neutral-600">
+            A match is located through pdf.js text items, and one item can hold more characters than the match itself. When a match covers only part of an item the WHOLE item rectangle is painted, so neighbouring characters on that run are lost too. That is deliberate: over-redacting beats leaving half an Aadhaar number visible. Check every page of the output before you share it.
+          </div>
+        </div>
+      )}
+
+      <Select label="Output resolution (DPI)" value={dpi} onChange={setDpi} options={["120", "150", "200", "300"]} labels={["120 · smaller", "150 · default", "200 · high", "300 · print"]} />
+      <PrimaryButton label="Redact selected matches" onClick={() => runSafely(setStatus, async () => {
+        const [file] = validateFiles(files, tool.file);
+        if (!scan) throw new Error("Wait for the scan to finish first.");
+        if (!scan.hasTextLayer) throw new Error("This PDF has no text layer to scan. Run OCR / Searchable PDF first.");
+        if (!selectedHits.length) throw new Error("Tick at least one match to redact.");
+        if (!selectedRects.length) throw new Error("The selected matches have no page rectangles, so nothing can be painted. Use Redact PDF with manual coordinates instead.");
+        const bytes = await redactPdfWithProgress(file, selectedRects, { dpi: Number(dpi), onProgress: pageProgress(setStatus, "Rasterising") });
+        downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-redacted`, "pdf"), "application/pdf");
+        const pages = new Set(selectedRects.map((rect) => rect.page)).size;
+        return `Painted ${selectedRects.length} area${selectedRects.length === 1 ? "" : "s"} for ${selectedHits.length} match${selectedHits.length === 1 ? "" : "es"} across ${pages} page${pages === 1 ? "" : "s"}, then rebuilt every page as an image. The covered text is gone from the output, and the whole document is now flattened. Verify the result before sharing.`;
+      })} />
+    </ToolForm>
+  );
+}
+
+function PrivacyScannerTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [scan, setScan] = useState<PiiScan | null>(null);
+  const [structure, setStructure] = useState<PdfStructureScan | null>(null);
+  const [reveal, setReveal] = useState(false);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => {
+    setFiles([]);
+    setScan(null);
+    setStructure(null);
+    setReveal(false);
+    setStatus(initialStatus);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setScan(null);
+    setStructure(null);
+    setReveal(false);
+    if (!files.length) return undefined;
+
+    runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const textScan = (await extractPdfPiiHits(file, { onProgress: pageProgress(setStatus, "Reading") })) as PiiScan;
+      if (cancelled) return "Ready.";
+      const documentScan = (await scanPdfStructure(file, { onProgress: pageProgress(setStatus, "Inspecting") })) as PdfStructureScan;
+      if (cancelled) return "Ready.";
+      setScan(textScan);
+      setStructure(documentScan);
+      const notes: string[] = [];
+      if (!textScan.hasTextLayer) notes.push("no text layer (scanned document — pattern scanning needs OCR first)");
+      if (documentScan.encrypted) notes.push("encrypted");
+      if (documentScan.attachments.length || documentScan.embeddedFileStreams) notes.push("carries embedded files");
+      if (documentScan.invisibleText.length) notes.push("contains hidden or invisible text");
+      return `Scanned ${documentScan.pages} page${documentScan.pages === 1 ? "" : "s"}: ${textScan.summary.high} high-confidence personal-data match${textScan.summary.high === 1 ? "" : "es"} of ${textScan.summary.total} total${notes.length ? `; ${notes.join("; ")}` : ""}. Nothing was uploaded and no file was modified.`;
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [files, tool.file]);
+
+  const groups = useMemo(() => groupHitsByType(scan?.hits || []), [scan]);
+  const destinations = useMemo(() => (scan?.hits || []).filter((hit) => hit.type === "url" || hit.type === "ipv4" || hit.type === "ipv6"), [scan]);
+  const reportText = useMemo(() => {
+    if (!scan || !structure || !files.length) return "";
+    return buildPrivacyReportText({ fileName: files[0].name, fileSize: files[0].size, scan, structure, reveal });
+  }, [scan, structure, files, reveal]);
+
+  return (
+    <ToolForm status={status} onReset={reset}>
+      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+        A read-only privacy audit: personal-data patterns with page numbers, Info-dictionary and XMP metadata leaks, invisible or off-page text, link destinations, embedded files, encryption, and signature entries. Your file is never modified and never leaves this browser. Values are masked until you reveal them.
+      </div>
+      <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+
+      {scan && structure && (
+        <>
+          <div className="surface-card wabi-card-edge grid gap-3 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="font-black">Overview</p>
+              <Checkbox label={reveal ? "Values revealed" : "Reveal full values"} checked={reveal} onChange={setReveal} />
+            </div>
+            <dl className="grid gap-2 text-sm font-semibold text-neutral-600 lg:grid-cols-2">
+              <InfoRow label="Pages" value={String(structure.pages)} />
+              <InfoRow label="Pages with text" value={`${scan.pagesWithText}${scan.hasTextLayer ? "" : " (no text layer — run OCR to scan a scan)"}`} />
+              <InfoRow label="Pattern matches" value={`${scan.summary.total} total · ${scan.summary.high} high confidence`} />
+              <InfoRow label="Encrypted" value={structure.encrypted ? "Yes" : "No"} />
+              <InfoRow label="Signature entries" value={String(structure.signatures.length)} />
+              <InfoRow label="Embedded files" value={`${structure.attachments.length} named · ${structure.embeddedFileStreams} stream${structure.embeddedFileStreams === 1 ? "" : "s"}`} />
+              <InfoRow label="Link annotations" value={String(structure.links.length)} />
+              <InfoRow label="Hidden-text pages" value={String(structure.invisibleText.length)} />
+            </dl>
+            <div className="flex flex-wrap gap-2">
+              <SecondaryButton label="Download .txt report" onClick={() => {
+                if (!reportText) throw new Error("Scan a file first.");
+                downloadText(reportText, `${safeFilename(files[0].name)}-privacy-report`, "txt");
+              }} />
+              <SecondaryButton label="Download .pdf report" onClick={async () => {
+                if (!reportText) throw new Error("Scan a file first.");
+                try {
+                  const bytes = await textToPdf(reportText);
+                  downloadBytes(bytes, withExtension(`${safeFilename(files[0].name)}-privacy-report`, "pdf"), "application/pdf");
+                } catch {
+                  throw new Error("The PDF report supports Latin-1 characters only, and this document contains characters outside it. Download the .txt report instead.");
+                }
+              }} />
+            </div>
+          </div>
+
+          <div className="surface-card wabi-card-edge grid gap-3 p-4">
+            <p className="font-black">1 · Personal data patterns</p>
+            {groups.length ? (
+              <div className="grid gap-3">
+                {groups.map((group) => (
+                  <div key={group.type} className="surface-muted wabi-card-edge grid gap-2 p-3">
+                    <p className="font-black text-[var(--foreground)]">{group.label} · {group.hits.length}</p>
+                    <div className="grid gap-1">
+                      {group.hits.map((hit) => (
+                        <div key={hit.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-neutral-600">
+                          <span className="text-xs font-black uppercase text-neutral-500">p{hit.page}</span>
+                          <span className="break-all font-mono text-[var(--foreground)]">{piiDisplayValue(hit, reveal)}</span>
+                          <ConfidenceTag confidence={hit.confidence} />
+                          {hit.note ? <span className="text-xs text-neutral-500">{hit.note}</span> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm font-semibold text-neutral-500">No known patterns matched.</p>
+            )}
+          </div>
+
+          <div className="surface-card wabi-card-edge grid gap-3 p-4">
+            <p className="font-black">2 · Document metadata</p>
+            <dl className="grid gap-2 text-sm font-semibold text-neutral-600 lg:grid-cols-2">
+              {Object.entries(structure.info).map(([key, value]) => (
+                <InfoRow key={key} label={(key === "Author" || key === "Creator") && value ? `${key} ⚠` : key} value={value || "Not set"} />
+              ))}
+            </dl>
+            {(structure.info.Author || structure.info.Creator) && (
+              <p className="text-sm font-semibold text-neutral-500">Author and Creator name the person and the software that produced this file. Clear them with PDF Metadata Cleaner before sharing externally.</p>
+            )}
+            <p className="font-black">XMP packet</p>
+            {structure.xmp.present ? (
+              <dl className="grid gap-2 text-sm font-semibold text-neutral-600">
+                <InfoRow label="Size" value={`${structure.xmp.bytes} bytes`} />
+                {structure.xmp.fields.length
+                  ? structure.xmp.fields.map((field) => <InfoRow key={field.label} label={field.label} value={field.value} />)
+                  : <InfoRow label="Fields" value="Present, but no common identity field was recognised." />}
+              </dl>
+            ) : (
+              <p className="text-sm font-semibold text-neutral-500">No XMP packet is present.</p>
+            )}
+          </div>
+
+          <div className="surface-card wabi-card-edge grid gap-3 p-4">
+            <p className="font-black">3 · Hidden and invisible text</p>
+            {structure.invisibleText.length ? (
+              <dl className="grid gap-2 text-sm font-semibold text-neutral-600">
+                {structure.invisibleText.map((entry) => (
+                  <InfoRow key={entry.page} label={`Page ${entry.page}`} value={`${entry.invisible} text run(s) in rendering mode 3 (invisible) · ${entry.whiteOnWhite} near-white fill`} />
+                ))}
+              </dl>
+            ) : (
+              <p className="text-sm font-semibold text-neutral-500">The operator scan found no invisible or near-white text.</p>
+            )}
+            {scan.offPageItems > 0 && <p className="text-sm font-semibold text-neutral-600">{scan.offPageItems} text item(s) sit outside the visible page box — content a reader cannot see but a text extractor can.</p>}
+            <p className="text-sm font-semibold text-neutral-500">This is a heuristic: it tracks rendering mode and fill colour through the content stream without evaluating the full graphics state, so it can miss cases and can also flag legitimate ones. An OCR'd document uses invisible text on purpose.{structure.contentTruncated ? " A very large content stream was only partially scanned." : ""}</p>
+          </div>
+
+          <div className="surface-card wabi-card-edge grid gap-3 p-4">
+            <p className="font-black">4 · Destinations: links, URLs and IPs</p>
+            {destinations.length || structure.links.length ? (
+              <dl className="grid gap-2 text-sm font-semibold text-neutral-600">
+                {destinations.map((hit) => <InfoRow key={hit.id} label={`Page ${hit.page} · in text`} value={hit.value} />)}
+                {structure.links.map((link, index) => <InfoRow key={`${link.page}-${index}`} label={`Page ${link.page} · /${link.subtype} annotation`} value={link.uri} />)}
+              </dl>
+            ) : (
+              <p className="text-sm font-semibold text-neutral-500">No URLs, IP addresses, or link annotations were found.</p>
+            )}
+            <p className="text-sm font-semibold text-neutral-500">Destinations are shown in full even when values are masked — you need to read them to judge them. They are not opened or contacted.</p>
+          </div>
+
+          <div className="surface-card wabi-card-edge grid gap-3 p-4">
+            <p className="font-black">5 · Attachments, protection and signatures</p>
+            <dl className="grid gap-2 text-sm font-semibold text-neutral-600">
+              {structure.attachments.map((attachment, index) => (
+                <InfoRow key={`${attachment.name}-${index}`} label={`Attachment · ${attachment.type}`} value={`${attachment.name}${attachment.size ? ` · ${formatBytes(attachment.size)} stored` : ""}${attachment.description ? ` · ${attachment.description}` : ""}`} />
+              ))}
+              {structure.embeddedFileStreams > 0 && <InfoRow label="/EmbeddedFile streams" value={`${structure.embeddedFileStreams} · ${formatBytes(structure.embeddedFileBytes)} stored`} />}
+              {!structure.attachments.length && !structure.embeddedFileStreams && <InfoRow label="Attachments" value="None found" />}
+              <InfoRow label="Encrypted" value={structure.encrypted ? "Yes — this file carries PDF encryption" : "No"} />
+              {structure.signatures.length
+                ? structure.signatures.map((signature, index) => <InfoRow key={`${signature.name}-${index}`} label="Signature entry" value={`${signature.name}${signature.reason ? ` · ${signature.reason}` : ""}`} />)
+                : <InfoRow label="Digital signature" value="No signature entry found" />}
+            </dl>
+            <p className="text-sm font-semibold text-neutral-500">A signature entry means the file claims to be signed. This tool does not verify the cryptography behind it.</p>
+          </div>
+
+          <div className="surface-card wabi-card-edge grid gap-2 p-4 text-sm font-semibold leading-6 text-neutral-600">
+            <p className="font-black text-[var(--foreground)]">6 · What this means</p>
+            <p>{scan.summary.high} match{scan.summary.high === 1 ? "" : "es"} passed a checksum or a context rule, so treat those as real findings. The other {scan.summary.total - scan.summary.high} are medium or low confidence and need your judgement.</p>
+            <p>There is no risk score here on purpose: a single number would hide what actually matters. The findings above are the report.</p>
+            <p className="font-black text-[var(--foreground)]">Limits, plainly stated</p>
+            <p>This finds common patterns only. It cannot guarantee it found every piece of sensitive data. Names, addresses, salary and health details, text inside images, anything inside an attachment, and text in encodings pdf.js cannot map are not detected. Only Aadhaar, payment cards and GSTIN carry a checksum; PAN, IFSC and passport are shape rules, so a part number shaped like one is reported as a match. Passport and bank-account shapes are so generic that low-confidence hits there will include false positives. A dotted quad like 1.2.3.4 is reported as an IP even when it is a version number.</p>
+          </div>
+        </>
+      )}
+    </ToolForm>
+  );
 }
 
 function CreatePdfTool() {

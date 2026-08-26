@@ -2788,3 +2788,501 @@ test("the security tools never write a password into their status text or filena
   assert.equal(section.includes("useEffect(() => forgetPasswords, [])"), true);
   assert.equal(section.includes("useEffect(() => forgetPassword, [])"), true);
 });
+
+
+// --- PII detection, redaction mapping, and the privacy scanner ----------------
+// ESM imports are hoisted, so this import belongs with the block it serves.
+import {
+  CONFIDENCE,
+  buildPrivacyReportText,
+  cardBrand,
+  confidenceLabel,
+  detectPii,
+  isValidIpv4,
+  isValidIpv6,
+  luhnValid,
+  maskPii,
+  maskValue,
+  parseXmpFields,
+  rectsForMatch,
+  sanitiseForReport,
+  scanContentForInvisibleText,
+  scanPdfStructure,
+  summarisePii,
+  validateAadhaar,
+  validateIfsc,
+  validateIndianPassport,
+  validatePan,
+  verhoeffCheckDigit,
+  verhoeffValid,
+} from "../src/services/pii.service.js";
+
+// A fixed "now" keeps the birthdate-plausibility window deterministic.
+const PII_NOW = "2026-08-27T00:00:00Z";
+
+// Aadhaar-shaped numbers whose 12th digit is the real Verhoeff check digit.
+const VALID_AADHAAR = ["234567890124", "789012345674", "998877665548"];
+
+const highConfidence = (matches) => matches.filter((match) => match.confidence >= CONFIDENCE.HIGH);
+const typesOf = (matches) => matches.map((match) => match.type);
+
+test("Verhoeff: valid Aadhaar numbers pass and every single-digit mutation fails", () => {
+  for (const aadhaar of VALID_AADHAAR) {
+    assert.equal(verhoeffValid(aadhaar), true, `${aadhaar} should satisfy Verhoeff`);
+    assert.equal(validateAadhaar(aadhaar).valid, true);
+    // The check digit is genuinely derived, not assumed.
+    assert.equal(String(verhoeffCheckDigit(aadhaar.slice(0, 11))), aadhaar[11]);
+    // Any single-digit change must break the checksum. This is what proves the
+    // checksum is real rather than a 12-digit regex in disguise.
+    for (let index = 0; index < aadhaar.length; index++) {
+      for (let digit = 0; digit <= 9; digit++) {
+        if (String(digit) === aadhaar[index]) continue;
+        const mutated = `${aadhaar.slice(0, index)}${digit}${aadhaar.slice(index + 1)}`;
+        assert.equal(verhoeffValid(mutated), false, `mutation ${mutated} must fail Verhoeff`);
+      }
+    }
+  }
+});
+
+test("Aadhaar rejects reserved leading digits, wrong lengths, and unchecksummed runs", () => {
+  // 0/1 are reserved by UIDAI: even a Verhoeff-valid number is not an Aadhaar.
+  for (const lead of ["0", "1"]) {
+    const payload = `${lead}2345678901`;
+    const number = `${payload}${verhoeffCheckDigit(payload)}`;
+    assert.equal(verhoeffValid(number), true, "the constructed number is checksum-valid");
+    assert.equal(validateAadhaar(number).valid, false);
+    assert.match(validateAadhaar(number).reason, /never starts with 0 or 1/);
+  }
+  assert.equal(validateAadhaar("23456789012").valid, false, "11 digits is not an Aadhaar");
+  assert.equal(validateAadhaar("2345678901245").valid, false, "13 digits is not an Aadhaar");
+  assert.equal(validateAadhaar("234567890123").valid, false, "wrong check digit");
+  // Spaced 4-4-4 input is accepted, which is how Aadhaar is usually printed.
+  assert.equal(validateAadhaar("2345 6789 0124").valid, true);
+});
+
+test("Luhn: known brand test numbers pass with the right brand and mutations fail", () => {
+  const cards = [
+    ["4111111111111111", "Visa"],
+    ["4012888888881", "Visa"],
+    ["5500005555555559", "Mastercard"],
+    ["2223000048410010", "Mastercard"],
+    ["371449635398431", "American Express"],
+    ["6011111111111117", "Discover"],
+    ["6521000000000007", "RuPay"],
+  ];
+  for (const [number, brand] of cards) {
+    assert.equal(luhnValid(number), true, `${number} should pass Luhn`);
+    assert.equal(cardBrand(number), brand, `${number} should be ${brand}`);
+    // Every single-digit mutation must fail Luhn (mod-10 catches all of them).
+    for (let index = 0; index < number.length; index++) {
+      for (let digit = 0; digit <= 9; digit++) {
+        if (String(digit) === number[index]) continue;
+        const mutated = `${number.slice(0, index)}${digit}${number.slice(index + 1)}`;
+        assert.equal(luhnValid(mutated), false, `mutation ${mutated} must fail Luhn`);
+      }
+    }
+  }
+  assert.equal(luhnValid("1234567890123456"), false);
+  assert.equal(cardBrand("9999999999999999"), "", "an unknown IIN reports no brand");
+});
+
+test("card detection accepts printed spacing and reports the brand", () => {
+  const matches = detectPii("Card 4111 1111 1111 1111 charged today.", { now: PII_NOW });
+  const card = matches.find((match) => match.type === "card");
+  assert.ok(card);
+  assert.equal(card.value, "4111 1111 1111 1111");
+  assert.equal(card.confidence, CONFIDENCE.HIGH);
+  assert.match(card.note, /Luhn valid/);
+  assert.match(card.note, /Visa/);
+  // A 16-digit run that fails Luhn is never reported as a card.
+  const notACard = detectPii("Docket 4000123456789012 dispatched.", { now: PII_NOW });
+  assert.equal(notACard.some((match) => match.type === "card"), false);
+});
+
+test("GSTIN reuses the existing validator, and PAN entity type drives confidence", () => {
+  const good = detectPii("GSTIN 27AAPFU0939F1ZV on the invoice.", { now: PII_NOW }).find((match) => match.type === "gstin");
+  assert.ok(good);
+  assert.equal(good.confidence, CONFIDENCE.HIGH);
+  // Same shape, wrong mod-36 checksum character: flagged but demoted.
+  const bad = detectPii("GSTIN 27AAPFU0939F1ZW on the invoice.", { now: PII_NOW }).find((match) => match.type === "gstin");
+  assert.ok(bad);
+  assert.equal(bad.confidence, CONFIDENCE.LOW);
+  assert.match(bad.note, /Checksum character/);
+
+  assert.equal(validatePan("ABCPD1234E").valid, true);
+  assert.equal(validatePan("ABCPD1234E").entity, "Individual");
+  assert.equal(validatePan("ABCFD1234E").entity, "Firm / LLP");
+  assert.equal(validatePan("ABCDE1234Z").valid, false, "D is not a PAN entity type");
+  const pan = detectPii("PAN ABCDE1234Z belongs to nobody.", { now: PII_NOW }).find((match) => match.type === "pan");
+  assert.ok(pan);
+  assert.equal(pan.confidence, CONFIDENCE.LOW);
+  const validPan = detectPii("PAN ABCPD1234E on file.", { now: PII_NOW }).find((match) => match.type === "pan");
+  assert.equal(validPan.confidence, CONFIDENCE.HIGH);
+  assert.match(validPan.note, /Individual/);
+});
+
+test("IFSC, passport, and account-number context rules behave", () => {
+  assert.equal(validateIfsc("HDFC0001234").valid, true);
+  assert.equal(validateIfsc("HDFC1001234").valid, false, "the 5th character must be 0");
+  assert.equal(validateIfsc("HDF0001234").valid, false);
+
+  assert.equal(validateIndianPassport("K1234567").valid, true);
+  assert.equal(validateIndianPassport("Q1234567").valid, false, "Q is not issued");
+  assert.equal(validateIndianPassport("X1234567").valid, false, "X is not issued");
+  assert.equal(validateIndianPassport("K123456").valid, false);
+
+  // Passport shape alone stays low; the keyword lifts it.
+  const bare = detectPii("Token A7654321 was issued.", { now: PII_NOW }).find((match) => match.type === "passport");
+  assert.equal(bare.confidence, CONFIDENCE.LOW);
+  const keyed = detectPii("Passport K1234567 expires soon.", { now: PII_NOW }).find((match) => match.type === "passport");
+  assert.equal(keyed.confidence, CONFIDENCE.HIGH);
+
+  // A digit run near an IFSC or an account keyword is worth more than one alone.
+  const withIfsc = detectPii("A/C 000123456789012 IFSC HDFC0001234", { now: PII_NOW }).find((match) => match.type === "account");
+  assert.equal(withIfsc.confidence, CONFIDENCE.MEDIUM);
+  const alone = detectPii("Reference 000123456789012 logged.", { now: PII_NOW }).find((match) => match.type === "account");
+  assert.equal(alone.confidence, CONFIDENCE.LOW);
+});
+
+test("IP address validation enforces octet bounds and IPv6 grammar", () => {
+  assert.equal(isValidIpv4("10.20.30.40"), true);
+  assert.equal(isValidIpv4("255.255.255.255"), true);
+  assert.equal(isValidIpv4("999.1.1.1"), false);
+  assert.equal(isValidIpv4("256.1.1.1"), false);
+  assert.equal(isValidIpv4("1.2.3"), false);
+  assert.equal(isValidIpv4("1.2.3.4.5"), false);
+  assert.equal(detectPii("Host 999.1.1.1 is invalid.", { now: PII_NOW }).some((match) => match.type === "ipv4"), false);
+  assert.equal(detectPii("Server 10.20.30.40 responded.", { now: PII_NOW }).some((match) => match.type === "ipv4"), true);
+  // A dotted quad after a version word is treated as a version, not an address.
+  assert.equal(detectPii("Upgraded to v10.20.30.40 today.", { now: PII_NOW }).some((match) => match.type === "ipv4"), false);
+
+  assert.equal(isValidIpv6("2001:0db8:85a3:0000:0000:8a2e:0370:7334"), true);
+  assert.equal(isValidIpv6("fe80::1"), true);
+  assert.equal(isValidIpv6("::1"), true);
+  assert.equal(isValidIpv6("2001::85a3::7334"), false, "only one :: run is legal");
+  assert.equal(isValidIpv6("2001:0db8:85a3:0000:0000:8a2e:0370:7334:9999"), false);
+  assert.equal(isValidIpv6("12:34"), false);
+  assert.equal(isValidIpv6("::ffff:10.20.30.40"), true);
+  assert.equal(isValidIpv6("::ffff:999.1.1.1"), false);
+});
+
+test("email and phone edge cases", () => {
+  const emails = detectPii("Write to priya.sharma+tax@example.co.in or ops@sub.domain.example.org.", { now: PII_NOW }).filter((match) => match.type === "email");
+  assert.deepEqual(emails.map((match) => match.value), ["priya.sharma+tax@example.co.in", "ops@sub.domain.example.org"]);
+  assert.equal(detectPii("not-an-email@ or @nope.com or a@b", { now: PII_NOW }).some((match) => match.type === "email"), false);
+
+  // +91 and E.164 are high confidence; a bare 10-digit mobile is only medium
+  // unless a phone word sits next to it.
+  const prefixed = detectPii("Call +91 98765 43210 now.", { now: PII_NOW }).find((match) => match.type === "phone");
+  assert.equal(prefixed.value, "+91 98765 43210");
+  assert.equal(prefixed.confidence, CONFIDENCE.HIGH);
+  const e164 = detectPii("Ring +14155552671 tomorrow.", { now: PII_NOW }).find((match) => match.type === "phone");
+  assert.equal(e164.confidence, CONFIDENCE.HIGH);
+  const bare = detectPii("The batch id is 9876543210 for this run.", { now: PII_NOW }).find((match) => match.type === "phone");
+  assert.equal(bare.confidence, CONFIDENCE.MEDIUM);
+  const keyed = detectPii("Mobile 9876543210", { now: PII_NOW }).find((match) => match.type === "phone");
+  assert.equal(keyed.confidence, CONFIDENCE.HIGH);
+  // A 10-digit run starting below 6 is not an Indian mobile.
+  assert.equal(detectPii("Serial 1234567890 shipped.", { now: PII_NOW }).some((match) => match.type === "phone"), false);
+});
+
+test("date of birth needs an adjacent keyword or a birth-plausible year", () => {
+  const keyed = detectPii("D.O.B: 14/08/1984", { now: PII_NOW }).find((match) => match.type === "dob");
+  assert.equal(keyed.confidence, CONFIDENCE.HIGH);
+  const standalone = detectPii("Signed 14/08/1984 in Pune.", { now: PII_NOW }).find((match) => match.type === "dob");
+  assert.equal(standalone.confidence, CONFIDENCE.MEDIUM);
+  // A keyword earlier in the paragraph must not promote later dates.
+  const later = detectPii("Born on 1984-08-14, joined 2020-01-02.", { now: PII_NOW }).filter((match) => match.type === "dob");
+  assert.deepEqual(later.map((match) => [match.value, match.confidence]), [["1984-08-14", CONFIDENCE.HIGH]]);
+  // Impossible calendar dates are not dates.
+  assert.equal(detectPii("Batch 31/02/1990 failed.", { now: PII_NOW }).some((match) => match.type === "dob"), false);
+});
+
+test("FALSE POSITIVE suite: ordinary business prose yields zero high-confidence PII", () => {
+  const prose = [
+    "Invoice INV-2026-004821 was raised on 12 March 2026 for order number 100200300400.",
+    "Version 4.2.1 of the SDK shipped with build 20260115 and SKU 10.20.30 in release v10.20.30.40.",
+    "Reference 987654321098765 and dispatch docket 4000123456789012 are internal identifiers.",
+    "Purchase order PO/2026/0099 covers part codes ABCDE1234Z and QRST-9876-W.",
+    "Serial numbers 1234567890, 12345678901234567 and 5500005555555550 were rejected by QA.",
+    "The meeting is on 05/06/2026 at 10:30, contract clause 12.4.5 applies, ticket #7654321.",
+    "Warehouse bay 60-11-11 holds 6011111111111116 units of stock keeping unit 371449635398430.",
+  ].join("\n");
+  const matches = detectPii(prose, { now: PII_NOW });
+  const high = highConfidence(matches);
+  assert.deepEqual(high, [], `no high-confidence PII expected, got: ${JSON.stringify(high.map((match) => [match.type, match.value]))}`);
+  // The digit runs are still surfaced, but only as low-confidence candidates.
+  assert.equal(matches.every((match) => match.confidence <= CONFIDENCE.MEDIUM), true);
+  assert.equal(matches.some((match) => match.type === "card"), false, "no Luhn-valid card in this prose");
+  assert.equal(matches.some((match) => match.type === "aadhaar"), false, "no Verhoeff-valid Aadhaar in this prose");
+  assert.equal(matches.some((match) => match.type === "gstin" && match.confidence >= CONFIDENCE.HIGH), false);
+});
+
+test("real PII in a page of text is found once per value with the right label", () => {
+  const page = [
+    `Aadhaar: ${VALID_AADHAAR[0].slice(0, 4)} ${VALID_AADHAAR[0].slice(4, 8)} ${VALID_AADHAAR[0].slice(8)}`,
+    "PAN ABCPD1234E · GSTIN 27AAPFU0939F1ZV · IFSC HDFC0001234 · A/C 000123456789012",
+    "Card 4111 1111 1111 1111 · priya.sharma@example.co.in · Mobile +91 98765 43210",
+    "D.O.B: 14/08/1984 · Passport K1234567 · host 10.20.30.40 · https://example.com/report",
+  ].join("\n");
+  const matches = detectPii(page, { now: PII_NOW });
+  const found = typesOf(matches);
+  for (const type of ["aadhaar", "pan", "gstin", "ifsc", "account", "card", "email", "phone", "dob", "passport", "ipv4", "url"]) {
+    assert.ok(found.includes(type), `${type} should be detected`);
+  }
+  // Overlap resolution: the PAN inside the GSTIN is not double-reported.
+  assert.equal(found.filter((type) => type === "pan").length, 1);
+  assert.equal(found.filter((type) => type === "gstin").length, 1);
+  const summary = summarisePii(matches);
+  assert.equal(summary.total, matches.length);
+  assert.equal(summary.high, highConfidence(matches).length);
+  assert.ok(summary.types.length >= 10);
+  assert.equal(confidenceLabel(CONFIDENCE.HIGH), "high");
+  assert.equal(confidenceLabel(CONFIDENCE.MEDIUM), "medium");
+  assert.equal(confidenceLabel(CONFIDENCE.LOW), "low");
+});
+
+test("masking hides personal values, keeps destinations readable, and never leaks raw PII", () => {
+  assert.equal(maskValue("2345 6789 0124"), "XXXX XXXX 0124");
+  assert.equal(maskValue("4111111111111111"), "XXXXXXXXXXXX1111");
+  assert.equal(maskPii("aadhaar", "2345 6789 0124"), "XXXX XXXX 0124");
+  assert.equal(maskPii("card", "4111 1111 1111 1111"), "XXXX XXXX XXXX 1111");
+  assert.equal(maskPii("dob", "14/08/1984"), "XX/XX/XXXX");
+  assert.equal(maskPii("email", "priya.sharma@example.co.in").includes("priya.sharma"), false);
+  assert.match(maskPii("email", "priya.sharma@example.co.in"), /^p\*+@/);
+  // URLs and IPs stay readable on purpose: the reader has to judge them.
+  assert.equal(maskPii("url", "https://example.com/x"), "https://example.com/x");
+  assert.equal(maskPii("ipv4", "10.20.30.40"), "10.20.30.40");
+  // Untrusted document text cannot forge report structure.
+  assert.equal(sanitiseForReport("Author\n== 7. What this means =="), "Author == 7. What this means ==");
+  assert.equal(sanitiseForReport("bell\u0007and\u001b[31mred"), "bell and [31mred");
+});
+
+test("the default privacy report is masked and contains no raw PII value", () => {
+  const aadhaar = `${VALID_AADHAAR[1].slice(0, 4)} ${VALID_AADHAAR[1].slice(4, 8)} ${VALID_AADHAAR[1].slice(8)}`;
+  const text = `Aadhaar ${aadhaar}, card 4111 1111 1111 1111, mail priya.sharma@example.co.in, mobile +91 98765 43210`;
+  const matches = detectPii(text, { now: PII_NOW });
+  const scan = {
+    pages: 1,
+    pagesWithText: 1,
+    hasTextLayer: true,
+    offPageItems: 0,
+    hits: matches.map((match, index) => ({ id: `h${index}`, page: 1, ...match, masked: maskPii(match.type, match.value) })),
+    summary: summarisePii(matches),
+  };
+  const structure = { pages: 1, encrypted: false, info: { Author: "Priya Sharma" }, xmp: { present: false, bytes: 0, fields: [] }, attachments: [], embeddedFileStreams: 0, embeddedFileBytes: 0, signatures: [], links: [], invisibleText: [], contentTruncated: false };
+
+  const masked = buildPrivacyReportText({ fileName: "salary.pdf", fileSize: 1234, scan, structure, generatedAt: PII_NOW });
+  for (const raw of [aadhaar, VALID_AADHAAR[1], "4111 1111 1111 1111", "4111111111111111", "priya.sharma@example.co.in", "+91 98765 43210"]) {
+    assert.equal(masked.includes(raw), false, `the default report must not contain ${raw.slice(0, 4)}…`);
+  }
+  assert.match(masked, /PII values shown: masked/);
+  assert.match(masked, /XXXX XXXX/);
+  assert.match(masked, /cannot guarantee it found every piece of/);
+  assert.equal(/risk score/i.test(masked), true, "the report says why there is no score");
+
+  // Revealing is explicit, and says so in the header.
+  const revealed = buildPrivacyReportText({ fileName: "salary.pdf", fileSize: 1234, scan, structure, reveal: true, generatedAt: PII_NOW });
+  assert.match(revealed, /PII values shown: REVEALED/);
+  assert.equal(revealed.includes("4111 1111 1111 1111"), true);
+});
+
+test("match-to-rectangle mapping covers whole text items, so redacted text cannot survive", () => {
+  // Simulates one page of pdf.js text items. Rasterising and painting is
+  // browser-only (canvas), so this asserts the layer that decides WHAT gets
+  // painted: after the covered items are dropped, the PII must be unreachable.
+  const parts = ["Aadhaar: ", "2345 6789 0124", " — verified"];
+  let cursor = 0;
+  const items = parts.map((part, index) => {
+    const entry = { start: cursor, end: cursor + part.length, rect: { x: 10 * index, y: 20, w: 12, h: 4 } };
+    cursor += part.length;
+    return entry;
+  });
+  const text = parts.join("");
+  const match = detectPii(text, { now: PII_NOW }).find((hit) => hit.type === "aadhaar");
+  assert.ok(match);
+  const rects = rectsForMatch(items, match.start, match.end);
+  assert.equal(rects.length, 1);
+  assert.deepEqual(rects[0], items[1].rect);
+  const remaining = items.filter((item) => !rects.includes(item.rect)).map((item) => text.slice(item.start, item.end)).join("");
+  assert.equal(remaining.includes("2345 6789 0124"), false, "the redacted value is gone from what is left");
+  assert.equal(remaining.includes("2345"), false);
+
+  // Partial coverage: when a match sits inside a larger item, the WHOLE item is
+  // returned. Over-redaction is the deliberate trade — never leave part of a
+  // PII value visible.
+  const wide = [{ start: 0, end: 30, rect: { x: 1, y: 1, w: 50, h: 5 } }];
+  const wideText = "ID2345 6789 0124 and more text";
+  const wideMatch = detectPii(wideText, { now: PII_NOW }).find((hit) => hit.type === "aadhaar");
+  assert.ok(wideMatch);
+  assert.deepEqual(rectsForMatch(wide, wideMatch.start, wideMatch.end), [wide[0].rect]);
+  // A match spanning two items paints both.
+  const split = [
+    { start: 0, end: 8, rect: { x: 1, y: 1, w: 5, h: 5 } },
+    { start: 8, end: 22, rect: { x: 6, y: 1, w: 5, h: 5 } },
+  ];
+  assert.equal(rectsForMatch(split, 4, 12).length, 2);
+  assert.deepEqual(rectsForMatch(split, 100, 120), [], "a match past the last item maps to nothing");
+  assert.deepEqual(rectsForMatch([], 0, 5), []);
+});
+
+test("content-stream scan finds invisible (Tr 3) and near-white text without being fooled by strings", () => {
+  const invisible = scanContentForInvisibleText("BT /F1 12 Tf 3 Tr 20 150 Td (hidden) Tj ET");
+  assert.equal(invisible.invisible, 1);
+  assert.equal(invisible.whiteOnWhite, 0);
+  const white = scanContentForInvisibleText("BT 1 1 1 rg /F1 12 Tf 20 150 Td (secret) Tj ET");
+  assert.equal(white.whiteOnWhite, 1);
+  const normal = scanContentForInvisibleText("BT 0 g /F1 12 Tf 20 150 Td (visible) Tj ET");
+  assert.equal(normal.invisible, 0);
+  assert.equal(normal.whiteOnWhite, 0);
+  // "3 Tr" inside a shown string must not be read as an operator.
+  const decoy = scanContentForInvisibleText("BT 0 g /F1 12 Tf 20 150 Td (mode 3 Tr explained) Tj ET");
+  assert.equal(decoy.invisible, 0);
+  // q/Q restores the state, so an invisible run does not bleed past its scope.
+  const scoped = scanContentForInvisibleText("q BT 3 Tr (a) Tj ET Q BT (b) Tj ET");
+  assert.equal(scoped.invisible, 1);
+});
+
+test("XMP parsing surfaces author and creator-tool leaks in both element and attribute form", () => {
+  const element = parseXmpFields('<rdf:Description><dc:creator><rdf:Seq><rdf:li>Priya Sharma</rdf:li></rdf:Seq></dc:creator><xmp:CreatorTool>Acme Payroll 9.1</xmp:CreatorTool></rdf:Description>');
+  assert.deepEqual(element.map((field) => field.value), ["Priya Sharma", "Acme Payroll 9.1"]);
+  const attribute = parseXmpFields('<rdf:Description xmp:CreatorTool="Acme Payroll 9.1" pdf:Producer="Acme PDF" />');
+  assert.deepEqual(attribute.map((field) => field.value), ["Acme Payroll 9.1", "Acme PDF"]);
+  assert.deepEqual(parseXmpFields(""), []);
+});
+
+// Builds a PDF that deliberately carries every structural privacy problem the
+// scanner is supposed to report. Pure pdf-lib, so it runs in Node.
+async function buildLeakyPdf() {
+  const { PDFDocument, PDFName, PDFString, StandardFonts, rgb } = window.PDFLib;
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([300, 300]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  page.drawText("Visible line", { x: 20, y: 250, size: 12, font });
+  page.drawText("White secret", { x: 20, y: 200, size: 12, font, color: rgb(1, 1, 1) });
+
+  const hidden = pdf.context.stream("BT /F1 12 Tf 3 Tr 20 150 Td (hidden text) Tj ET");
+  page.node.normalizedEntries().Contents.push(pdf.context.register(hidden));
+
+  const annot = pdf.context.obj({
+    Type: "Annot",
+    Subtype: "Link",
+    Rect: [20, 240, 200, 260],
+    A: { Type: "Action", S: "URI", URI: PDFString.of("https://tracker.example.com/leak?id=42") },
+  });
+  page.node.set(PDFName.of("Annots"), pdf.context.obj([pdf.context.register(annot)]));
+
+  const fileStream = pdf.context.flateStream("secret attachment payload", { Type: "EmbeddedFile", Subtype: "text/plain" });
+  const spec = pdf.context.obj({ Type: "Filespec", F: PDFString.of("payroll.csv"), UF: PDFString.of("payroll.csv"), EF: { F: pdf.context.register(fileStream) } });
+  const specRef = pdf.context.register(spec);
+  pdf.catalog.set(PDFName.of("Names"), pdf.context.obj({ EmbeddedFiles: { Names: [PDFString.of("payroll.csv"), specRef] } }));
+
+  const signature = pdf.context.obj({ Type: "Sig", Name: PDFString.of("Priya Sharma"), Reason: PDFString.of("Approved") });
+  pdf.context.register(signature);
+
+  const xmp = '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xmp="http://ns.adobe.com/xap/1.0/"><rdf:Description><dc:creator><rdf:Seq><rdf:li>Priya Sharma</rdf:li></rdf:Seq></dc:creator><xmp:CreatorTool>Acme Payroll 9.1</xmp:CreatorTool></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>';
+  pdf.catalog.set(PDFName.of("Metadata"), pdf.context.register(pdf.context.stream(xmp, { Type: "Metadata", Subtype: "XML" })));
+  pdf.setTitle("Salary statement");
+  pdf.setAuthor("Priya Sharma");
+  pdf.setCreator("Acme Payroll 9.1");
+  return pdf.save({ updateMetadata: false });
+}
+
+test("privacy scanner reports metadata, XMP, hidden text, links, attachments and signatures", async () => {
+  const structure = await scanPdfStructure(await buildLeakyPdf());
+
+  assert.equal(structure.pages, 1);
+  assert.equal(structure.encrypted, false);
+  assert.equal(structure.info.Author, "Priya Sharma");
+  assert.equal(structure.info.Creator, "Acme Payroll 9.1");
+  assert.equal(structure.info.Title, "Salary statement");
+
+  // XMP author leak is surfaced explicitly.
+  assert.equal(structure.xmp.present, true);
+  const xmpAuthor = structure.xmp.fields.find((field) => /dc:creator/.test(field.label));
+  assert.ok(xmpAuthor, "the XMP author must be surfaced");
+  assert.equal(xmpAuthor.value, "Priya Sharma");
+  assert.ok(structure.xmp.fields.some((field) => field.value === "Acme Payroll 9.1"));
+
+  // Invisible (Tr 3) and near-white text on page 1.
+  assert.equal(structure.invisibleText.length, 1);
+  assert.equal(structure.invisibleText[0].page, 1);
+  assert.equal(structure.invisibleText[0].invisible >= 1, true);
+  assert.equal(structure.invisibleText[0].whiteOnWhite >= 1, true);
+
+  // /URI link destination is listed.
+  assert.deepEqual(structure.links, [{ page: 1, subtype: "Link", uri: "https://tracker.example.com/leak?id=42" }]);
+
+  // The embedded file is reported once by name, plus the raw stream count.
+  assert.equal(structure.attachments.length, 1);
+  assert.equal(structure.attachments[0].name, "payroll.csv");
+  assert.equal(structure.attachments[0].type, "Filespec");
+  assert.ok(structure.attachments[0].size > 0);
+  assert.equal(structure.embeddedFileStreams, 1);
+
+  // Signature entry is reported (its cryptography is NOT verified).
+  assert.equal(structure.signatures.length, 1);
+  assert.equal(structure.signatures[0].name, "Priya Sharma");
+
+  // And the whole thing renders into a report without leaking structure.
+  const report = buildPrivacyReportText({
+    fileName: "leaky.pdf",
+    fileSize: 2048,
+    scan: { pages: 1, pagesWithText: 1, hasTextLayer: true, offPageItems: 0, hits: [], summary: summarisePii([]) },
+    structure,
+    generatedAt: PII_NOW,
+  });
+  assert.match(report, /Author: Priya Sharma/);
+  assert.match(report, /rendering mode 3/);
+  assert.match(report, /tracker\.example\.com/);
+  assert.match(report, /payroll\.csv/);
+  assert.match(report, /Digital signature entries: 1/);
+});
+
+test("a clean PDF scans clean", async () => {
+  const { PDFDocument } = window.PDFLib;
+  const pdf = await PDFDocument.create();
+  pdf.addPage([200, 200]);
+  const structure = await scanPdfStructure(await pdf.save());
+  assert.equal(structure.encrypted, false);
+  assert.deepEqual(structure.attachments, []);
+  assert.equal(structure.embeddedFileStreams, 0);
+  assert.deepEqual(structure.links, []);
+  assert.deepEqual(structure.signatures, []);
+  assert.deepEqual(structure.invisibleText, []);
+  assert.equal(structure.xmp.present, false);
+});
+
+test("Auto-Redact PII and Privacy Scanner are registered, routed, and rendered", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const expected = { "auto-redact-pii-tool": "Auto-Redact PII", "privacy-scanner-tool": "Privacy Scanner" };
+  for (const [id, name] of Object.entries(expected)) {
+    const found = tools.find((tool) => tool.id === id);
+    assert.ok(found, `${id} should be registered`);
+    assert.equal(found.name, name);
+    assert.equal(found.category, "Security & Privacy");
+    assert.equal(found.status, "available");
+    assert.equal(found.localProcessing, true);
+    assert.deepEqual(found.acceptedTypes, ["application/pdf"]);
+    assert.equal(found.file.maxFiles, 1);
+    assert.equal(routeForHash(found.route).tool.id, id);
+    assert.equal(appSource.includes(`"${id}"`), true, `${id} is missing from ToolRenderer`);
+  }
+  // Discoverable by the words a user would actually type.
+  const redact = tools.find((tool) => tool.id === "auto-redact-pii-tool");
+  const searchable = [redact.name, redact.description, ...redact.keywords].join(" ").toLowerCase();
+  for (const query of ["pii", "aadhaar", "redact"]) assert.match(searchable, new RegExp(query));
+
+  // The new components stay local and never log PII.
+  const start = appSource.indexOf("function AutoRedactPiiTool");
+  const end = appSource.indexOf("function CreatePdfTool");
+  assert.ok(start > 0 && end > start);
+  const section = appSource.slice(start, end);
+  for (const forbidden of ["console.", "localStorage", "sessionStorage", "indexedDB", "fetch(", "innerHTML", "dangerouslySetInnerHTML"]) {
+    assert.equal(section.includes(forbidden), false, `the PII tools must not use ${forbidden}`);
+  }
+  // Redaction honesty and the OCR route for scans are both stated in the UI.
+  assert.match(section, /flattened/);
+  assert.match(section, /#ocr-pdf-tool/);
+  assert.match(section, /cannot guarantee it found every piece of sensitive data/);
+});
