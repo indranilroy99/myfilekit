@@ -54,6 +54,7 @@ import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
 import { ALL_PERMISSIONS_ALLOWED, PDF_ENCRYPTION_ALGORITHMS, PDF_PERMISSION_LABELS, decryptPdf, encryptPdf, unlockPdf } from "./services/pdf-crypto.service.js";
 import { CONFIDENCE as PII_CONFIDENCE, PII_TYPE_LABELS, buildPrivacyReportText, confidenceLabel, extractPdfPiiHits, isPersonalType, scanPdfStructure } from "./services/pii.service.js";
+import { analyzePdfBytes, buildAnalyzerReportText } from "./services/pdf-analyzer.service.js";
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 import { canvasToPdf, canvasesToPdf, csvToPdf, markdownToPdf } from "./services/convert.service.js";
 import { STATE_CODES, computeGstInvoice, computePosBill, defaultStepOptions, formatAmount, gstInvoicePdf, gstr1SummaryCsv, gstr1SummaryPdf, gstr1SummaryXlsx, posReceiptPdf, readInvoiceRows, runWorkflow, summariseGstr1, summarisePosSession, workflowOpList } from "./services/business.service.js";
@@ -1095,6 +1096,7 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "redact-pdf-tool") return <RedactPdfTool tool={tool} />;
   if (tool.id === "auto-redact-pii-tool") return <AutoRedactPiiTool tool={tool} />;
   if (tool.id === "privacy-scanner-tool") return <PrivacyScannerTool tool={tool} />;
+  if (tool.id === "pdf-analyzer-tool") return <PdfAnalyzerTool tool={tool} />;
   if (tool.id === "create-pdf-tool") return <CreatePdfTool />;
   if (tool.id === "repair-pdf-tool") return <RepairPdfTool tool={tool} />;
   if (tool.id === "fingerprint-pdf-tool") return <FingerprintPdfTool tool={tool} />;
@@ -2316,6 +2318,158 @@ function PrivacyScannerTool({ tool }: { tool: Tool }) {
             <p>There is no risk score here on purpose: a single number would hide what actually matters. The findings above are the report.</p>
             <p className="font-black text-[var(--foreground)]">Limits, plainly stated</p>
             <p>This finds common patterns only. It cannot guarantee it found every piece of sensitive data. Names, addresses, salary and health details, text inside images, anything inside an attachment, and text in encodings pdf.js cannot map are not detected. Only Aadhaar, payment cards and GSTIN carry a checksum; PAN, IFSC and passport are shape rules, so a part number shaped like one is reported as a match. Passport and bank-account shapes are so generic that low-confidence hits there will include false positives. A dotted quad like 1.2.3.4 is reported as an IP even when it is a version number.</p>
+          </div>
+        </>
+      )}
+    </ToolForm>
+  );
+}
+
+type AnalyzerFinding = { id: number; indicator: string; severity: string; where: string | null; why: string; evidence: string };
+type AnalyzerReport = {
+  fileSize: number; sha256: string; version: string; pageCount: number | null; objectCount: number;
+  linearized: boolean; hasSignature: boolean; encrypted: boolean; objStmCount: number; startxrefCount: number;
+  eofCount: number; parseError: string | null; truncated: boolean; findings: AnalyzerFinding[];
+  embeddedFiles: { objNum: number; name: string; size: number; magic: string; executable: boolean }[];
+  verdict: { level: string; headline: string; summary: string; counts: { critical: number; high: number; medium: number; low: number; info: number } };
+};
+
+function severityTone(severity: string) {
+  if (severity === "Critical") return "border-red-300 bg-red-100 text-red-900 [.dark_&]:border-[#8f2323] [.dark_&]:bg-[#33141a] [.dark_&]:text-[#ffb3b3]";
+  if (severity === "High") return "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]";
+  if (severity === "Medium") return "border-amber-200 bg-amber-50 text-amber-900 [.dark_&]:border-[#7a5a1f] [.dark_&]:bg-[#2a2113] [.dark_&]:text-[#f3d79b]";
+  if (severity === "Low") return "border-sky-200 bg-sky-50 text-sky-900 [.dark_&]:border-[#245a7a] [.dark_&]:bg-[#132330] [.dark_&]:text-[#9bd0f3]";
+  return "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]";
+}
+
+function SeverityTag({ severity }: { severity: string }) {
+  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${severityTone(severity)}`}>{severity}</span>;
+}
+
+function verdictTone(level: string) {
+  if (level === "suspicious") return "border-red-200 bg-red-50 text-red-900 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]";
+  if (level === "caution") return "border-amber-200 bg-amber-50 text-amber-900 [.dark_&]:border-[#7a5a1f] [.dark_&]:bg-[#2a2113] [.dark_&]:text-[#f3d79b]";
+  return "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f] [.dark_&]:border-[#3f5136] [.dark_&]:bg-[#16241a] [.dark_&]:text-[#bfe3b0]";
+}
+
+function PdfAnalyzerTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [report, setReport] = useState<AnalyzerReport | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => {
+    setFiles([]);
+    setReport(null);
+    setStatus(initialStatus);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setReport(null);
+    if (!files.length) return undefined;
+
+    runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const result = (await analyzePdfBytes(bytes, {
+        onProgress: (step: number, total: number) => setStatus({ tone: "idle", message: `Analysing ${file.name} — step ${step} of ${total}…` }),
+      })) as AnalyzerReport;
+      if (cancelled) return "Ready.";
+      setReport(result);
+      const c = result.verdict.counts;
+      return `${result.verdict.headline}. ${c.critical} critical, ${c.high} high, ${c.medium} medium indicator(s). Nothing was uploaded and the file was never executed.`;
+    });
+
+    return () => { cancelled = true; };
+  }, [files, tool.file]);
+
+  const reportText = useMemo(() => {
+    if (!report || !files.length) return "";
+    return buildAnalyzerReportText(report, { fileName: files[0].name });
+  }, [report, files]);
+
+  return (
+    <ToolForm status={status} onReset={reset}>
+      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+        Static, byte-level triage of a suspicious PDF. It reads the raw bytes — it never opens, renders, executes, or evals anything in the file, and nothing leaves this browser. Built for the case where a PDF must NOT be sent to any online scanner. This is triage to guide your judgement, not a malware verdict.
+      </div>
+      <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+
+      {report && (
+        <>
+          <div className={`wabi-card-edge grid gap-2 rounded-2xl border p-4 ${verdictTone(report.verdict.level)}`}>
+            <p className="text-xs font-black uppercase tracking-wide">Triage verdict</p>
+            <p className="text-lg font-black">{report.verdict.headline}</p>
+            <p className="text-sm font-semibold leading-6">{report.verdict.summary}</p>
+          </div>
+
+          <div className="surface-card wabi-card-edge grid gap-3 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="font-black">Structure (facts, not verdicts)</p>
+            </div>
+            <dl className="grid gap-2 text-sm font-semibold text-neutral-600 lg:grid-cols-2">
+              <InfoRow label="SHA-256" value={report.sha256} />
+              <InfoRow label="Size" value={formatBytes(report.fileSize)} />
+              <InfoRow label="PDF version" value={report.version} />
+              <InfoRow label="Pages (best-effort)" value={report.pageCount == null ? "unknown" : String(report.pageCount)} />
+              <InfoRow label="Objects" value={String(report.objectCount)} />
+              <InfoRow label="Object streams (/ObjStm)" value={String(report.objStmCount)} />
+              <InfoRow label="Linearized" value={report.linearized ? "Yes" : "No"} />
+              <InfoRow label="Encrypted" value={report.encrypted ? "Yes" : "No"} />
+              <InfoRow label="Digital signature" value={report.hasSignature ? "Present (cryptography not verified)" : "None"} />
+              <InfoRow label="startxref / %%EOF" value={`${report.startxrefCount} / ${report.eofCount}`} />
+            </dl>
+            {report.parseError && <p className="text-sm font-semibold text-amber-700 [.dark_&]:text-[#f3d79b]">{report.parseError}</p>}
+            {report.truncated && <p className="text-sm font-semibold text-amber-700 [.dark_&]:text-[#f3d79b]">The file does not end cleanly at %%EOF — it may be truncated or carry data appended after the PDF.</p>}
+            <div className="flex flex-wrap gap-2">
+              <SecondaryButton label="Download .txt report" onClick={() => {
+                if (!reportText) throw new Error("Analyse a file first.");
+                downloadText(reportText, `${safeFilename(files[0].name)}-analysis`, "txt");
+              }} />
+              <SecondaryButton label="Download .pdf report" onClick={async () => {
+                if (!reportText) throw new Error("Analyse a file first.");
+                try {
+                  const bytes = await textToPdf(reportText);
+                  downloadBytes(bytes, withExtension(`${safeFilename(files[0].name)}-analysis`, "pdf"), "application/pdf");
+                } catch {
+                  throw new Error("The PDF report supports Latin-1 characters only, and this analysis contains characters outside it. Download the .txt report instead.");
+                }
+              }} />
+            </div>
+          </div>
+
+          <div className="surface-card wabi-card-edge grid gap-3 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="font-black">Findings</p>
+              <p className="text-xs font-black uppercase text-neutral-500">
+                {report.verdict.counts.critical}C · {report.verdict.counts.high}H · {report.verdict.counts.medium}M · {report.verdict.counts.low}L · {report.verdict.counts.info}I
+              </p>
+            </div>
+            {report.findings.length ? (
+              <div className="grid gap-2">
+                {report.findings.map((finding) => (
+                  <div key={finding.id} className="surface-muted wabi-card-edge grid gap-2 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <SeverityTag severity={finding.severity} />
+                      <span className="font-black text-[var(--foreground)]">{finding.indicator}</span>
+                      {finding.where ? <span className="text-xs font-semibold text-neutral-500">{finding.where}</span> : null}
+                    </div>
+                    <p className="text-sm font-semibold leading-6 text-neutral-600">{finding.why}</p>
+                    {finding.evidence ? (
+                      <pre className="max-h-64 overflow-auto rounded-xl border border-[var(--border)] bg-[var(--paper-soft)] px-3 py-2 text-xs leading-5 text-[var(--foreground)] whitespace-pre-wrap break-all">{finding.evidence}</pre>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm font-semibold text-neutral-500">No indicators were detected by the static byte-level scan. That is not proof of safety — see the limits below.</p>
+            )}
+            <p className="text-sm font-semibold text-neutral-500">Extracted evidence — scripts, commands, URLs, attachment names — is shown as inert, escaped text. It is never executed, opened, or contacted.</p>
+          </div>
+
+          <div className="surface-card wabi-card-edge grid gap-2 p-4 text-sm font-semibold leading-6 text-neutral-600">
+            <p className="font-black text-[var(--foreground)]">Limits, plainly stated</p>
+            <p>This reads bytes; it does not run the file. It will miss novel or heavy obfuscation, payloads behind unsupported filters or encryption, exploits that live inside malformed object internals, and anything that only reveals itself when the PDF is opened in a real reader. There is deliberately no numeric "threat score": the findings above are the report, and the call is yours. When in doubt, detonate the file in an isolated sandbox.</p>
           </div>
         </>
       )}

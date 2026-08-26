@@ -15,6 +15,8 @@ import * as webrtc from "../src/services/webrtc.service.js";
 import * as whiteboard from "../src/services/whiteboard.service.js";
 import * as pdfCrypto from "../src/services/pdf-crypto.service.js";
 import { deflateSync, strToU8 } from "fflate";
+import nodeCrypto from "node:crypto";
+import { analyzePdfBytes, buildAnalyzerReportText, classifyMagic, decodePdfName, findObfuscatedNames, sha256Hex } from "../src/services/pdf-analyzer.service.js";
 
 const pdfLibCode = fs.readFileSync(new URL("../assets/vendor/pdf-lib.min.js", import.meta.url), "utf8");
 const loadPdfLib = new Function(`${pdfLibCode}; return PDFLib;`);
@@ -3285,4 +3287,187 @@ test("Auto-Redact PII and Privacy Scanner are registered, routed, and rendered",
   assert.match(section, /flattened/);
   assert.match(section, /#ocr-pdf-tool/);
   assert.match(section, /cannot guarantee it found every piece of sensitive data/);
+});
+
+// --- PDF Analyser (static malware/threat triage) ------------------------------
+
+const latin1 = (text) => Uint8Array.from(text, (ch) => ch.charCodeAt(0) & 0xff);
+const paBytes = (...parts) => {
+  const arrays = parts.map((part) => (typeof part === "string" ? latin1(part) : part));
+  const total = arrays.reduce((sum, arr) => sum + arr.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const arr of arrays) { out.set(arr, offset); offset += arr.length; }
+  return out;
+};
+const paStream = (num, dict, dataBytes) => paBytes(`${num} 0 obj ${dict}\nstream\n`, dataBytes, "\nendstream endobj\n");
+
+test("PDF Analyser: /OpenAction + literal /JavaScript is extracted and flagged High", async () => {
+  const pdf = latin1(`%PDF-1.7
+1 0 obj << /Type /Catalog /OpenAction 2 0 R /Pages 3 0 R >> endobj
+2 0 obj << /S /JavaScript /JS (app.alert\\("pwned"\\); this.exportDataObject\\({cName:"x"\\});) >> endobj
+3 0 obj << /Type /Pages /Kids [4 0 R] /Count 1 >> endobj
+4 0 obj << /Type /Page /Parent 3 0 R >> endobj
+startxref
+0
+%%EOF`);
+  const report = await analyzePdfBytes(pdf);
+  const js = report.findings.find((f) => f.indicator.includes("JavaScript"));
+  assert.ok(js, "JavaScript indicator present");
+  assert.equal(js.severity, "High");
+  assert.match(js.evidence, /app\.alert/);
+  assert.ok(report.findings.some((f) => f.indicator === "/OpenAction" && f.severity === "High"));
+  assert.equal(report.verdict.level, "suspicious");
+  assert.match(report.verdict.headline, /Suspicious/);
+});
+
+test("PDF Analyser: JavaScript inside a FlateDecode stream is inflated and shown", async () => {
+  const script = "var payload = 'flate-hidden'; app.launchURL('http://c2.example');";
+  const compressed = deflateSync(strToU8(script));
+  const pdf = paBytes(
+    `%PDF-1.7\n1 0 obj << /Type /Catalog /OpenAction 2 0 R >> endobj\n2 0 obj << /S /JavaScript /JS 5 0 R >> endobj\n`,
+    paStream(5, `<< /Filter /FlateDecode /Length ${compressed.length} >>`, compressed),
+    `4 0 obj << /Type /Page >> endobj\nstartxref\n0\n%%EOF`,
+  );
+  const report = await analyzePdfBytes(pdf);
+  const js = report.findings.find((f) => f.indicator.includes("JavaScript") && /flate-hidden/.test(f.evidence));
+  assert.ok(js, "flate-decoded JS extracted");
+  assert.equal(js.severity, "High");
+});
+
+test("PDF Analyser: /Launch action is Critical and shows the command", async () => {
+  const pdf = latin1(`%PDF-1.5
+1 0 obj << /Type /Catalog /OpenAction 2 0 R >> endobj
+2 0 obj << /Type /Action /S /Launch /Win << /F (cmd.exe /c calc.exe) >> >> endobj
+4 0 obj << /Type /Page >> endobj
+startxref
+0
+%%EOF`);
+  const report = await analyzePdfBytes(pdf);
+  const launch = report.findings.find((f) => f.indicator === "/Launch action");
+  assert.ok(launch, "launch detected");
+  assert.equal(launch.severity, "Critical");
+  assert.match(launch.evidence, /calc\.exe/);
+});
+
+test("PDF Analyser: name obfuscation /J#61vaScript is decoded and flagged", async () => {
+  assert.equal(decodePdfName("J#61vaScript"), "JavaScript");
+  const obf = findObfuscatedNames("<< /S /J#61vaScript /JS (x()) >>");
+  assert.ok(obf.some((n) => n.decoded === "/JavaScript"));
+  const pdf = latin1(`%PDF-1.4
+1 0 obj << /Type /Catalog /OpenAction 2 0 R >> endobj
+2 0 obj << /S /J#61vaScript /JS (evil();) >> endobj
+4 0 obj << /Type /Page >> endobj
+%%EOF`);
+  const report = await analyzePdfBytes(pdf);
+  const obfFinding = report.findings.find((f) => f.indicator.includes("Name obfuscation"));
+  assert.ok(obfFinding, "obfuscation flagged");
+  assert.equal(obfFinding.severity, "High");
+  assert.match(obfFinding.evidence, /JavaScript/);
+  // The obfuscated keyword is still resolved to real JS.
+  assert.ok(report.findings.some((f) => f.indicator.includes("JavaScript") && /evil/.test(f.evidence)));
+});
+
+test("PDF Analyser: an embedded file starting with MZ is flagged as an executable", async () => {
+  const exe = latin1("MZ\x90\x00\x03\x00\x00\x00This-is-a-fake-pe");
+  const pdf = paBytes(
+    `%PDF-1.6\n1 0 obj << /Type /Catalog /Names 2 0 R >> endobj\n2 0 obj << /Type /Filespec /F (invoice.exe) /EF << /F 5 0 R >> >> endobj\n`,
+    paStream(5, `<< /Type /EmbeddedFile /Length ${exe.length} >>`, exe),
+    `4 0 obj << /Type /Page >> endobj\nstartxref\n0\n%%EOF`,
+  );
+  const report = await analyzePdfBytes(pdf);
+  assert.equal(report.embeddedFiles.length, 1);
+  assert.equal(report.embeddedFiles[0].executable, true);
+  assert.match(report.embeddedFiles[0].magic, /MZ|PE/);
+  assert.equal(report.embeddedFiles[0].name, "invoice.exe");
+  const finding = report.findings.find((f) => f.indicator.includes("Embedded file"));
+  assert.equal(finding.severity, "Critical");
+  assert.equal(classifyMagic(exe).executable, true);
+});
+
+test("PDF Analyser: /URI action lists its destination", async () => {
+  const pdf = latin1(`%PDF-1.7
+1 0 obj << /Type /Catalog >> endobj
+6 0 obj << /S /URI /URI (http://phish.example/login) >> endobj
+4 0 obj << /Type /Page >> endobj
+%%EOF`);
+  const report = await analyzePdfBytes(pdf);
+  const uri = report.findings.find((f) => f.indicator === "/URI actions");
+  assert.ok(uri, "URI detected");
+  assert.match(uri.evidence, /phish\.example/);
+});
+
+test("PDF Analyser: stacked stream filters are flagged", async () => {
+  const pdf = paBytes(
+    `%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n`,
+    paStream(5, `<< /Filter [/ASCIIHexDecode /FlateDecode] /Length 8 >>`, latin1("garbage!")),
+    `4 0 obj << /Type /Page >> endobj\n%%EOF`,
+  );
+  const report = await analyzePdfBytes(pdf);
+  assert.ok(report.findings.some((f) => f.indicator === "Stacked stream filters"));
+});
+
+test("PDF Analyser: multiple %%EOF / startxref markers are flagged as appended data", async () => {
+  const pdf = latin1(`%PDF-1.7
+1 0 obj << /Type /Catalog >> endobj
+4 0 obj << /Type /Page >> endobj
+startxref
+9
+%%EOF
+5 0 obj << /Type /Page >> endobj
+startxref
+120
+%%EOF`);
+  const report = await analyzePdfBytes(pdf);
+  assert.ok(report.eofCount >= 2);
+  assert.ok(report.findings.some((f) => f.indicator.includes("Multiple %%EOF")));
+});
+
+test("PDF Analyser: a plain benign PDF yields no high-risk indicators (false-positive guard)", async () => {
+  const { PDFDocument } = window.PDFLib;
+  const pdf = await PDFDocument.create();
+  pdf.addPage([300, 300]);
+  pdf.addPage([300, 300]);
+  const report = await analyzePdfBytes(await pdf.save());
+  assert.equal(report.verdict.counts.critical, 0);
+  assert.equal(report.verdict.counts.high, 0);
+  assert.notEqual(report.verdict.level, "suspicious");
+  assert.match(report.verdict.headline, /No high-risk indicators|Caution/);
+  assert.equal(report.findings.some((f) => f.severity === "Critical" || f.severity === "High"), false);
+});
+
+test("PDF Analyser: truncated and garbage input never throw and still report", async () => {
+  const garbage = latin1("this is definitely not a pdf \x00\x01\x02 <<>> stream");
+  const g = await analyzePdfBytes(garbage);
+  assert.ok(g.parseError, "missing header noted");
+  assert.equal(typeof g.sha256, "string");
+  assert.equal(g.sha256.length, 64);
+
+  const truncated = latin1("%PDF-1.7\n1 0 obj << /S /JavaScript /JS (app.alert('unterminated");
+  const t = await analyzePdfBytes(truncated);
+  assert.ok(t.truncated, "no clean EOF noted");
+  assert.ok(t.findings.some((f) => f.indicator.includes("JavaScript")));
+  assert.equal(typeof buildAnalyzerReportText(t, { fileName: "x.pdf" }), "string");
+});
+
+test("PDF Analyser: SHA-256 matches node:crypto", async () => {
+  const data = latin1("The quick brown fox");
+  const expected = nodeCrypto.createHash("sha256").update(Buffer.from(data)).digest("hex");
+  assert.equal(await sha256Hex(data), expected);
+});
+
+test("PDF Analyser is registered, routed, and rendered", () => {
+  const found = tools.find((tool) => tool.id === "pdf-analyzer-tool");
+  assert.ok(found, "pdf-analyzer-tool registered");
+  assert.equal(found.name, "PDF Analyser");
+  assert.equal(found.category, "Security & Privacy");
+  assert.equal(found.status, "available");
+  assert.equal(found.localProcessing, true);
+  assert.deepEqual(found.acceptedTypes, ["application/pdf"]);
+  assert.equal(found.file.maxFiles, 1);
+  assert.equal(routeForHash(found.route).tool.id, "pdf-analyzer-tool");
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.equal(appSource.includes('"pdf-analyzer-tool"'), true);
+  const searchable = [found.name, found.description, ...found.keywords].join(" ").toLowerCase();
+  for (const query of ["malware", "javascript", "triage"]) assert.match(searchable, new RegExp(query));
 });
