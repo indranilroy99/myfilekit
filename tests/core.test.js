@@ -480,3 +480,153 @@ test("PDF text tools raise a friendly error for non-Latin-1 input", async () => 
   const latinPdf = new File([await textToPdf("ok")], "p.pdf", { type: "application/pdf" });
   await assert.rejects(() => watermarkPdf(latinPdf, "秘密"), /Latin-1 characters only/);
 });
+
+// --- Phase 2: pdf-edit.service.js -----------------------------------------
+// Pure pdf-lib logic is unit-tested here. The redact and repair-fallback paths
+// rely on pdf.js canvas rasterising, so they are browser-only and covered by
+// the manual test checklist instead.
+
+test("parsePageOrder handles reorder, ranges, duplication, and validates bounds", async () => {
+  const { parsePageOrder } = await import("../src/services/pdf-edit.service.js");
+  assert.deepEqual(parsePageOrder("3,1,2,5-7", 7), [2, 0, 1, 4, 5, 6]);
+  assert.deepEqual(parsePageOrder("3-1", 3), [2, 1, 0]);
+  assert.deepEqual(parsePageOrder("2,2,2", 3), [1, 1, 1]);
+  assert.throws(() => parsePageOrder("", 3), /Enter a page order/);
+  assert.throws(() => parsePageOrder("9", 3), /outside 1–3/);
+  assert.throws(() => parsePageOrder("1-9", 3), /outside 1–3/);
+  assert.throws(() => parsePageOrder("x", 3), /not a valid page/);
+});
+
+test("organizePdfPages rebuilds a PDF in the requested order", async () => {
+  const { organizePdfPages } = await import("../src/services/pdf-edit.service.js");
+  const { PDFDocument } = window.PDFLib;
+  const source = await PDFDocument.create();
+  for (let i = 0; i < 3; i += 1) source.addPage([200, 200]);
+  const file = new File([await source.save()], "src.pdf", { type: "application/pdf" });
+
+  const reordered = await PDFDocument.load(await organizePdfPages(file, "3,1"));
+  assert.equal(reordered.getPageCount(), 2);
+  const duplicated = await PDFDocument.load(await organizePdfPages(file, "1,1,1,2"));
+  assert.equal(duplicated.getPageCount(), 4);
+});
+
+test("createPdf builds blank pages and text pages locally", async () => {
+  const { createPdf, PAGE_SIZES } = await import("../src/services/pdf-edit.service.js");
+  const { PDFDocument } = window.PDFLib;
+
+  const blank = await PDFDocument.load(await createPdf({ mode: "blank", size: "A4", count: 3 }));
+  assert.equal(blank.getPageCount(), 3);
+  const { width } = blank.getPage(0).getSize();
+  assert.ok(Math.abs(width - PAGE_SIZES.A4[0]) < 0.01);
+
+  const fromText = await PDFDocument.load(await createPdf({ mode: "text", text: "Hello local PDF" }));
+  assert.ok(fromText.getPageCount() >= 1);
+
+  await assert.rejects(() => createPdf({ mode: "blank", count: 0 }), /at least 1/);
+  await assert.rejects(() => createPdf({ mode: "blank", count: 999 }), /200 pages or fewer/);
+});
+
+test("cropResizePdf resizes to a preset and crops a margin", async () => {
+  const { cropResizePdf, PAGE_SIZES } = await import("../src/services/pdf-edit.service.js");
+  const { PDFDocument } = window.PDFLib;
+  const source = await PDFDocument.create();
+  source.addPage([200, 200]);
+  const file = new File([await source.save()], "src.pdf", { type: "application/pdf" });
+
+  const resized = await PDFDocument.load(await cropResizePdf(file, { mode: "resize", size: "Letter" }));
+  const size = resized.getPage(0).getSize();
+  assert.ok(Math.abs(size.width - PAGE_SIZES.Letter[0]) < 0.01);
+  assert.ok(Math.abs(size.height - PAGE_SIZES.Letter[1]) < 0.01);
+
+  const cropped = await PDFDocument.load(await cropResizePdf(file, { mode: "crop", marginMm: 10 }));
+  assert.ok(cropped.getPage(0).getSize().width < 200);
+  await assert.rejects(() => cropResizePdf(file, { mode: "crop", marginMm: 100 }), /Margin is too large/);
+});
+
+test("addHeadersFooters draws on every page and requires some text", async () => {
+  const { addHeadersFooters } = await import("../src/services/pdf-edit.service.js");
+  const { PDFDocument } = window.PDFLib;
+  const source = await PDFDocument.create();
+  source.addPage([400, 400]);
+  source.addPage([400, 400]);
+  const file = new File([await source.save()], "src.pdf", { type: "application/pdf" });
+
+  const stamped = await PDFDocument.load(await addHeadersFooters(file, { header: "Report", footer: "Page {n} of {total}", align: "right" }));
+  assert.equal(stamped.getPageCount(), 2);
+  await assert.rejects(() => addHeadersFooters(file, { header: "", footer: "" }), /header and\/or footer/);
+});
+
+test("readPdfFormFields and fillPdfForm read, fill, and flatten an AcroForm", async () => {
+  const { readPdfFormFields, fillPdfForm } = await import("../src/services/pdf-edit.service.js");
+  const { PDFDocument } = window.PDFLib;
+
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([300, 300]);
+  const form = doc.getForm();
+  const nameField = form.createTextField("full_name");
+  nameField.addToPage(page, { x: 40, y: 200, width: 200, height: 20 });
+  const agree = form.createCheckBox("agree");
+  agree.addToPage(page, { x: 40, y: 160, width: 15, height: 15 });
+  const formFile = new File([await doc.save()], "form.pdf", { type: "application/pdf" });
+
+  const fields = await readPdfFormFields(formFile);
+  assert.equal(fields.length, 2);
+  assert.deepEqual(fields.find((f) => f.name === "full_name"), { name: "full_name", type: "text", value: "" });
+  assert.deepEqual(fields.find((f) => f.name === "agree"), { name: "agree", type: "checkbox", checked: false });
+
+  const filled = await PDFDocument.load(await fillPdfForm(formFile, { full_name: "Ada Lovelace", agree: true }, false));
+  assert.equal(filled.getForm().getTextField("full_name").getText(), "Ada Lovelace");
+  assert.equal(filled.getForm().getCheckBox("agree").isChecked(), true);
+
+  const flattened = await PDFDocument.load(await fillPdfForm(formFile, { full_name: "Ada" }, true));
+  assert.equal(flattened.getForm().getFields().length, 0);
+
+  const plain = new File([await (await PDFDocument.create()).save()], "plain.pdf", { type: "application/pdf" });
+  assert.deepEqual(await readPdfFormFields(plain), []);
+  await assert.rejects(() => fillPdfForm(plain, {}, false), /no fillable form fields/);
+});
+
+test("fingerprintPdf embeds a traceable id in metadata without changing pages", async () => {
+  const { fingerprintPdf, generateFingerprintId } = await import("../src/services/pdf-edit.service.js");
+  const { PDFDocument } = window.PDFLib;
+
+  assert.match(generateFingerprintId(), /^[0-9a-f]{32}$/);
+
+  const source = await PDFDocument.create();
+  source.addPage([200, 200]);
+  const file = new File([await source.save()], "src.pdf", { type: "application/pdf" });
+
+  const { bytes, id } = await fingerprintPdf(file);
+  assert.match(id, /^[0-9a-f]{32}$/);
+  // Keywords survive any reload; the Producer is only preserved when the reader
+  // does not re-stamp metadata (pdf-lib overwrites Producer when updateMetadata
+  // is left at its default true).
+  const stamped = await PDFDocument.load(bytes);
+  assert.equal(stamped.getPageCount(), 1);
+  assert.match(stamped.getKeywords(), new RegExp(`mfk-fpid:${id}`));
+  const preserved = await PDFDocument.load(bytes, { updateMetadata: false });
+  assert.match(preserved.getProducer(), new RegExp(id));
+});
+
+test("Phase 2 PDF tools are registered under sensible categories with renderers", () => {
+  const expected = {
+    "organize-pages-tool": "PDF Tools",
+    "crop-resize-pdf-tool": "PDF Tools",
+    "headers-footers-tool": "PDF Tools",
+    "fill-pdf-form-tool": "PDF Tools",
+    "redact-pdf-tool": "PDF Tools",
+    "create-pdf-tool": "PDF Tools",
+    "repair-pdf-tool": "PDF Tools",
+    "fingerprint-pdf-tool": "Privacy Tools",
+  };
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  for (const [id, category] of Object.entries(expected)) {
+    const found = tools.find((tool) => tool.id === id);
+    assert.ok(found, `${id} should be registered`);
+    assert.equal(found.category, category);
+    assert.ok(categories.includes(category));
+    assert.equal(found.status, "available");
+    assert.equal(found.localProcessing, true);
+    assert.equal(appSource.includes(`"${id}"`), true, `${id} is missing from ToolRenderer`);
+  }
+});

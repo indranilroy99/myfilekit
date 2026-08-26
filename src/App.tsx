@@ -48,6 +48,7 @@ import { addSignatureToImage, addTextToImage, cleanImageMetadata, compressImage,
 import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.service.js";
 import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
 import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip } from "./services/pdf-render.service.js";
+import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 
 type Tool = (typeof tools)[number];
@@ -1063,6 +1064,14 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "flatten-pdf-tool") return <FlattenPdfTool tool={tool} />;
   if (tool.id === "invert-pdf-tool") return <InvertPdfTool tool={tool} />;
   if (tool.id === "images-to-pdf-tool") return <PdfFileTool tool={tool} action="Create PDF" multiple accept="image/jpeg,image/png,image/webp" run={(files) => imagesToPdf(files).then((bytes) => downloadBytes(bytes, "myfilekit-images.pdf", "application/pdf"))} />;
+  if (tool.id === "organize-pages-tool") return <OrganizePagesTool tool={tool} />;
+  if (tool.id === "crop-resize-pdf-tool") return <CropResizePdfTool tool={tool} />;
+  if (tool.id === "headers-footers-tool") return <HeadersFootersTool tool={tool} />;
+  if (tool.id === "fill-pdf-form-tool") return <FillPdfFormTool tool={tool} />;
+  if (tool.id === "redact-pdf-tool") return <RedactPdfTool tool={tool} />;
+  if (tool.id === "create-pdf-tool") return <CreatePdfTool />;
+  if (tool.id === "repair-pdf-tool") return <RepairPdfTool tool={tool} />;
+  if (tool.id === "fingerprint-pdf-tool") return <FingerprintPdfTool tool={tool} />;
   if (["compress-image-tool", "convert-image-tool"].includes(tool.id)) return <ImageOutputTool tool={tool} mode={tool.id === "compress-image-tool" ? "compress" : "convert"} />;
   if (tool.id === "batch-compress-images-tool") return <BatchImageTool tool={tool} mode="compress" />;
   if (tool.id === "batch-resize-images-tool") return <BatchImageTool tool={tool} mode="resize" />;
@@ -1432,6 +1441,188 @@ function InvertPdfTool({ tool }: { tool: Tool }) {
       const bytes = await invertPdf(file, { dpi: Number(dpi) });
       downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-inverted`, "pdf"), "application/pdf");
       return `Inverted the colours of ${file.name}.`;
+    })} />
+  </ToolForm>;
+}
+
+function OrganizePagesTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [order, setOrder] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setOrder(""); setStatus(initialStatus); }}>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Input label="Page order" value={order} onChange={setOrder} placeholder="Example: 3,1,2,5-7" helper="List pages/ranges in the order you want. Repeat to duplicate, omit to delete. Descending ranges (7-5) reverse pages." />
+    <PrimaryButton label="Organize pages" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = await organizePdfPages(file, order);
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-organized`, "pdf"), "application/pdf");
+      return `Rebuilt ${file.name} in the requested page order.`;
+    })} />
+  </ToolForm>;
+}
+
+function CropResizePdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [mode, setMode] = useState("resize");
+  const [size, setSize] = useState("A4");
+  const [customWidth, setCustomWidth] = useState("210");
+  const [customHeight, setCustomHeight] = useState("297");
+  const [margin, setMargin] = useState("10");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Select label="Action" value={mode} onChange={setMode} options={["resize", "crop"]} labels={["Resize pages to a target size", "Crop a uniform margin"]} />
+    {mode === "resize" && <Select label="Page size" value={size} onChange={setSize} options={["A4", "A3", "A5", "Letter", "Legal", "custom"]} labels={["A4", "A3", "A5", "US Letter", "US Legal", "Custom (mm)"]} />}
+    {mode === "resize" && size === "custom" && (
+      <div className="grid gap-3 sm:grid-cols-2"><Input label="Width (mm)" value={customWidth} onChange={setCustomWidth} type="number" /><Input label="Height (mm)" value={customHeight} onChange={setCustomHeight} type="number" /></div>
+    )}
+    {mode === "crop" && <Input label="Margin (mm)" value={margin} onChange={setMargin} type="number" helper="Trims this margin from every edge via the page crop and media boxes." />}
+    <PrimaryButton label={mode === "crop" ? "Crop PDF" : "Resize PDF"} onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = await cropResizePdf(file, { mode, size, customWidthMm: Number(customWidth), customHeightMm: Number(customHeight), marginMm: Number(margin) });
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-${mode === "crop" ? "cropped" : "resized"}`, "pdf"), "application/pdf");
+      return mode === "crop" ? `Cropped a ${margin}mm margin from ${file.name}.` : `Resized ${file.name}${size === "custom" ? ` to ${customWidth}×${customHeight}mm` : ` to ${size}`}.`;
+    })} />
+  </ToolForm>;
+}
+
+function HeadersFootersTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [header, setHeader] = useState("");
+  const [footer, setFooter] = useState("Page {n} of {total}");
+  const [align, setAlign] = useState("center");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Use the tokens {"{n}"} for the current page number and {"{total}"} for the page count. Text supports Latin-1 characters only.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Input label="Header text" value={header} onChange={setHeader} placeholder="Leave blank for no header" />
+    <Input label="Footer text" value={footer} onChange={setFooter} placeholder="Leave blank for no footer" />
+    <Select label="Alignment" value={align} onChange={setAlign} options={["left", "center", "right"]} labels={["Left", "Center", "Right"]} />
+    <PrimaryButton label="Add headers & footers" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = await addHeadersFooters(file, { header, footer, align });
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-headers`, "pdf"), "application/pdf");
+      return `Applied headers/footers to ${file.name}.`;
+    })} />
+  </ToolForm>;
+}
+
+type FormFieldDescriptor = { name: string; type: "text" | "checkbox" | "unsupported"; value?: string; checked?: boolean };
+
+function FillPdfFormTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [fields, setFields] = useState<FormFieldDescriptor[]>([]);
+  const [values, setValues] = useState<Record<string, string | boolean>>({});
+  const [flatten, setFlatten] = useState(false);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => { setFiles([]); setFields([]); setValues({}); setFlatten(false); setStatus(initialStatus); };
+
+  return <ToolForm status={status} onReset={reset}>
+    <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setFields([]); setValues({}); }} />
+    <PrimaryButton label="Read form fields" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const found = await readPdfFormFields(file);
+      setFields(found);
+      const initial: Record<string, string | boolean> = {};
+      for (const field of found) initial[field.name] = field.type === "checkbox" ? Boolean(field.checked) : (field.value || "");
+      setValues(initial);
+      return found.length ? `Found ${found.length} form field${found.length === 1 ? "" : "s"}.` : "This PDF has no fillable form fields.";
+    })} />
+    {fields.length > 0 && (
+      <div className="grid gap-3">
+        {fields.map((field) => field.type === "checkbox" ? (
+          <Checkbox key={field.name} label={field.name} checked={Boolean(values[field.name])} onChange={(checked) => setValues((prev) => ({ ...prev, [field.name]: checked }))} />
+        ) : field.type === "text" ? (
+          <Input key={field.name} label={field.name} value={String(values[field.name] ?? "")} onChange={(next) => setValues((prev) => ({ ...prev, [field.name]: next }))} />
+        ) : (
+          <p key={field.name} className="text-xs font-semibold text-neutral-500">{field.name}: unsupported field type (left unchanged).</p>
+        ))}
+        <Checkbox label="Flatten form after filling (values become permanent)" checked={flatten} onChange={setFlatten} />
+        <PrimaryButton label="Fill & download PDF" onClick={() => runSafely(setStatus, async () => {
+          const [file] = validateFiles(files, tool.file);
+          const bytes = await fillPdfForm(file, values, flatten);
+          downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-filled`, "pdf"), "application/pdf");
+          return `Filled ${fields.length} field${fields.length === 1 ? "" : "s"}${flatten ? " and flattened the form" : ""}.`;
+        })} />
+      </div>
+    )}
+  </ToolForm>;
+}
+
+function RedactPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [areas, setAreas] = useState("1, 10, 10, 40, 8");
+  const [dpi, setDpi] = useState("150");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Redaction rasterises the whole PDF to images and paints opaque black boxes on the listed areas, so covered content is permanently removed — not just hidden. Selectable text is lost.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Textarea label="Redaction areas — one per line: page, x, y, width, height (in %)" value={areas} onChange={setAreas} rows={5} />
+    <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["120", "150", "200", "300"]} labels={["120 · smaller", "150 · default", "200 · high", "300 · print"]} />
+    <PrimaryButton label="Redact PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const rects = parseRedactionAreas(areas);
+      const bytes = await redactPdf(file, rects, { dpi: Number(dpi) });
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-redacted`, "pdf"), "application/pdf");
+      return `Applied ${rects.length} redaction${rects.length === 1 ? "" : "s"} and flattened ${file.name} to images.`;
+    })} />
+  </ToolForm>;
+}
+
+function CreatePdfTool() {
+  const [mode, setMode] = useState("text");
+  const [size, setSize] = useState("A4");
+  const [count, setCount] = useState("1");
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setText(""); setCount("1"); setStatus(initialStatus); }}>
+    <Select label="Build from" value={mode} onChange={setMode} options={["text", "blank"]} labels={["Pasted text", "Blank pages"]} />
+    {mode === "blank" && <Select label="Page size" value={size} onChange={setSize} options={["A4", "A3", "A5", "Letter", "Legal"]} labels={["A4", "A3", "A5", "US Letter", "US Legal"]} />}
+    {mode === "blank" && <Input label="Page count" value={count} onChange={setCount} type="number" helper="1 to 200 pages." />}
+    {mode === "text" && <Textarea label="Text content" value={text} onChange={setText} rows={12} />}
+    <PrimaryButton label="Create PDF" onClick={() => runSafely(setStatus, async () => {
+      const bytes = await createPdf({ mode, size, count: Number(count), text });
+      downloadBytes(bytes, withExtension("myfilekit-created", "pdf"), "application/pdf");
+      return mode === "text" ? "Created a PDF from your text." : `Created a ${count}-page ${size} PDF.`;
+    })} />
+  </ToolForm>;
+}
+
+function RepairPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Best-effort repair: the PDF is loaded leniently and re-saved in a normalised form. If it cannot be parsed at all, pages are rebuilt from rendered images (text becomes non-selectable).
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <PrimaryButton label="Repair PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const { bytes, message } = await repairPdf(file);
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-repaired`, "pdf"), "application/pdf");
+      return message;
+    })} />
+  </ToolForm>;
+}
+
+function FingerprintPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Embeds a unique, invisible identifier in the PDF metadata (Producer, Keywords, and a custom field) so a leaked copy can be traced back. Visible page content is not changed.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <PrimaryButton label="Fingerprint PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const { bytes, id } = await fingerprintPdf(file);
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-fingerprinted`, "pdf"), "application/pdf");
+      return `Embedded fingerprint id:\n${id}\nKeep this id to identify this copy later.`;
     })} />
   </ToolForm>;
 }
@@ -2392,4 +2583,17 @@ async function copyText(value: string) {
 
 function imageExt(type: string) {
   return type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
+}
+
+function parseRedactionAreas(input: string) {
+  const lines = String(input || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) throw new Error("Add at least one redaction area (page, x, y, width, height).");
+  return lines.map((line) => {
+    const parts = line.split(/[,\s]+/).map(Number);
+    if (parts.length !== 5 || parts.some((value) => !Number.isFinite(value))) {
+      throw new Error(`"${line}" is not a valid area. Use: page, x, y, width, height.`);
+    }
+    const [page, x, y, w, h] = parts;
+    return { page, x, y, w, h };
+  });
 }

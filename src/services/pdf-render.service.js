@@ -45,7 +45,7 @@ function pagePointSize(srcPage) {
  * rebuilds a flat (non-interactive) PDF sized to the original page points.
  * Shared by compress / flatten / invert.
  */
-async function rasterRebuild(file, { dpi = 150, format = "png", quality = 0.92, transform, onProgress } = {}) {
+export async function rasterRebuild(file, { dpi = 150, format = "png", quality = 0.92, transform, onProgress } = {}) {
   const { PDFDocument } = getPdfLib();
   const { loadPdfDocument, renderPdfPageToCanvas } = await getPdfjs();
   const scale = Math.max(0.1, dpi / 72);
@@ -66,7 +66,7 @@ async function rasterRebuild(file, { dpi = 150, format = "png", quality = 0.92, 
         context.globalCompositeOperation = "source-over";
       }
 
-      if (transform) transform(canvas, context);
+      if (transform) transform(canvas, context, pageNum);
 
       const embedded =
         format === "png"
