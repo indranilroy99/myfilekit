@@ -1012,3 +1012,390 @@ test("Phase 4b tools are registered, routable, and discoverable", () => {
   const ocr = tools.find((item) => item.id === "ocr-pdf-tool");
   assert.deepEqual(ocr.acceptedTypes, ["application/pdf", "image/jpeg", "image/png", "image/webp"]);
 });
+
+// --- Phase 5: Business tools --------------------------------------------------
+
+const business = await import("../src/services/business.service.js");
+const SELLER_MH = "27AAAAA0000A1Z2";
+const BUYER_MH = "27BBBBB1111B1ZN";
+const BUYER_KA = "29AAAAA0000A1ZY";
+
+const gstItems = [
+  { description: "Design retainer", hsn: "998311", qty: 3, unit: "NOS", rate: 111.11, discountPercent: 0, gstRate: 5 },
+  { description: "Support plan", hsn: "998313", qty: 1, unit: "NOS", rate: 1000, discountPercent: 0, gstRate: 18 },
+];
+
+test("GSTIN validation checks shape, state code, and checksum without blocking", () => {
+  const good = business.validateGstin(SELLER_MH);
+  assert.equal(good.valid, true);
+  assert.equal(good.stateCode, "27");
+
+  const badChecksum = business.validateGstin("27AAAAA0000A1Z0");
+  assert.equal(badChecksum.valid, false);
+  assert.match(badChecksum.reason, /Checksum character should be "2"/);
+
+  assert.match(business.validateGstin("27AAAAA0000A1Z").reason, /15 characters \(got 14\)/);
+  assert.match(business.validateGstin("2AAAAA0000A1Z25").reason, /format looks wrong/);
+  assert.match(business.validateGstin("77AAAAA0000A1Z2").reason, /not a known GST state code/);
+
+  const absent = business.validateGstin("");
+  assert.equal(absent.present, false);
+  assert.equal(absent.valid, false);
+
+  // Lower case input is normalised, not rejected.
+  assert.equal(business.validateGstin(SELLER_MH.toLowerCase()).valid, true);
+  assert.equal(business.resolveStateCode("", "27 - Maharashtra"), "27");
+  assert.equal(business.resolveStateCode("", "Karnataka"), "29");
+  assert.equal(business.resolveStateCode("", ""), "");
+});
+
+test("amount in words uses Indian numbering (lakh / crore)", () => {
+  assert.equal(business.amountInWords(125000), "One Lakh Twenty Five Thousand");
+  assert.equal(business.amountInWords(0), "Zero");
+  assert.equal(business.amountInWords(7), "Seven");
+  assert.equal(business.amountInWords(100), "One Hundred");
+  assert.equal(business.amountInWords(1530), "One Thousand Five Hundred Thirty");
+  assert.equal(business.amountInWords(101000000), "Ten Crore Ten Lakh");
+  assert.equal(business.amountInWords(1234.56), "One Thousand Two Hundred Thirty Four and Fifty Six Paise");
+  assert.equal(business.amountInWords(-50.5), "Minus Fifty and Fifty Paise");
+  assert.throws(() => business.amountInWords("abc"), /valid number/);
+});
+
+test("GST invoice splits intra-state supplies into CGST + SGST at half the rate", () => {
+  const invoice = business.computeGstInvoice({
+    seller: { name: "Acme Studio", address: "Pune", gstin: SELLER_MH },
+    buyer: { name: "Beta Retail", address: "Mumbai", gstin: BUYER_MH },
+    invoiceNo: "INV-2026-001",
+    invoiceDate: "2026-04-01",
+    placeOfSupply: "27",
+    items: gstItems,
+  });
+
+  assert.equal(invoice.interState, false);
+  assert.equal(invoice.supplyType, "Intra-state (CGST + SGST)");
+  assert.equal(invoice.totals.igst, 0);
+  // Half the slab each: 5% -> 2.5 + 2.5, 18% -> 9 + 9.
+  assert.equal(invoice.lines[0].cgstRate, 2.5);
+  assert.equal(invoice.lines[1].sgstRate, 9);
+  assert.equal(invoice.totals.taxable, 1333.33);
+  assert.equal(invoice.totals.cgst, 98.33);
+  assert.equal(invoice.totals.sgst, 98.33);
+  assert.equal(invoice.totals.tax, 196.66);
+  assert.equal(invoice.totals.beforeRound, 1529.99);
+  assert.equal(invoice.totals.roundOff, 0.01);
+  assert.equal(invoice.totals.grandTotal, 1530);
+  assert.equal(invoice.amountInWords, "INR One Thousand Five Hundred Thirty Only");
+});
+
+test("GST invoice charges IGST at the full rate for inter-state supplies", () => {
+  const invoice = business.computeGstInvoice({
+    seller: { name: "Acme Studio", gstin: SELLER_MH },
+    buyer: { name: "Gamma Traders", gstin: BUYER_KA },
+    invoiceNo: "INV-2026-002",
+    placeOfSupply: "29",
+    items: gstItems,
+  });
+
+  assert.equal(invoice.interState, true);
+  assert.equal(invoice.supplyType, "Inter-state (IGST)");
+  assert.equal(invoice.totals.cgst, 0);
+  assert.equal(invoice.totals.sgst, 0);
+  assert.equal(invoice.lines[0].igstRate, 5);
+  assert.equal(invoice.totals.igst, 196.67);
+  assert.equal(invoice.totals.taxable, 1333.33);
+  assert.equal(invoice.totals.beforeRound, 1530);
+  assert.equal(invoice.totals.roundOff, 0);
+  assert.equal(invoice.totals.grandTotal, 1530);
+});
+
+test("GST invoice components reconcile with the printed total at 2dp", () => {
+  const invoice = business.computeGstInvoice({
+    seller: { name: "Acme", gstin: SELLER_MH },
+    buyer: { name: "Beta", gstin: BUYER_MH },
+    invoiceNo: "R-1",
+    placeOfSupply: "27",
+    // Deliberately awkward money: 7 x 33.335 with a 7.5% discount at 12% GST.
+    items: [
+      { description: "Odd unit", qty: 7, rate: 33.33, discountPercent: 7.5, gstRate: 12 },
+      { description: "Third", qty: 3, rate: 33.33, discountPercent: 0, gstRate: 5 },
+      { description: "Exempt", qty: 1, rate: 99.99, discountPercent: 0, gstRate: 0 },
+    ],
+  });
+
+  const paise = (value) => Math.round(value * 100);
+  // Every line: taxable + tax == total, and the tax components add to the tax.
+  for (const line of invoice.lines) {
+    assert.equal(paise(line.cgst) + paise(line.sgst) + paise(line.igst), paise(line.tax));
+    assert.equal(paise(line.taxable) + paise(line.tax), paise(line.total));
+    assert.equal(paise(line.gross) - paise(line.discount), paise(line.taxable));
+  }
+  // Totals are the exact sums of the lines (no 0.01 drift).
+  assert.equal(paise(invoice.totals.taxable), invoice.lines.reduce((sum, line) => sum + paise(line.taxable), 0));
+  assert.equal(paise(invoice.totals.cgst), invoice.lines.reduce((sum, line) => sum + paise(line.cgst), 0));
+  assert.equal(paise(invoice.totals.tax), paise(invoice.totals.cgst) + paise(invoice.totals.sgst) + paise(invoice.totals.igst));
+  assert.equal(paise(invoice.totals.beforeRound), paise(invoice.totals.taxable) + paise(invoice.totals.tax));
+  assert.equal(paise(invoice.totals.grandTotal), paise(invoice.totals.beforeRound) + paise(invoice.totals.roundOff));
+  // Round-off never exceeds half a rupee, and the grand total is a whole rupee.
+  assert.ok(Math.abs(invoice.totals.roundOff) <= 0.5);
+  assert.equal(paise(invoice.totals.grandTotal) % 100, 0);
+});
+
+test("GST invoice warns on suspicious GSTINs and rejects impossible inputs", () => {
+  const invoice = business.computeGstInvoice({
+    seller: { name: "Acme", gstin: "27AAAAA0000A1Z0" },
+    buyer: { name: "Walk-in customer" },
+    invoiceNo: "INV-3",
+    placeOfSupply: "27",
+    items: [{ description: "Item", qty: 1, rate: 100, gstRate: 7 }],
+  });
+  assert.match(invoice.warnings.join(" "), /Seller GSTIN .* looks wrong/);
+  assert.match(invoice.warnings.join(" "), /not a standard GST slab/);
+  // No buyer GSTIN: the place of supply decides intra vs inter-state.
+  assert.equal(invoice.interState, false);
+
+  const base = { seller: { name: "A", gstin: SELLER_MH }, buyer: { name: "B" }, invoiceNo: "X", placeOfSupply: "27" };
+  assert.throws(() => business.computeGstInvoice({ ...base, items: [] }), /at least one line item/);
+  assert.throws(() => business.computeGstInvoice({ ...base, seller: { name: "" }, items: gstItems }), /seller \(your business\) name/);
+  assert.throws(() => business.computeGstInvoice({ ...base, invoiceNo: "", items: gstItems }), /invoice number/);
+  assert.throws(() => business.computeGstInvoice({ ...base, items: [{ description: "x", qty: 0, rate: 10, gstRate: 5 }] }), /quantity must be greater than zero/);
+  assert.throws(() => business.computeGstInvoice({ ...base, items: [{ description: "x", qty: 1, rate: 10, gstRate: 120 }] }), /GST rate must be between 0 and 100/);
+  assert.throws(() => business.computeGstInvoice({ ...base, items: [{ description: "x", qty: 1, rate: 10, discountPercent: 150, gstRate: 5 }] }), /discount must be between 0 and 100/);
+});
+
+test("GST invoice PDF renders as a real PDF", async () => {
+  const invoice = business.computeGstInvoice({
+    seller: { name: "Acme Studio", address: "12 Hill Road\nPune 411001", gstin: SELLER_MH },
+    buyer: { name: "Gamma Traders", address: "Bengaluru", gstin: BUYER_KA },
+    invoiceNo: "INV-2026-002",
+    invoiceDate: "2026-04-01",
+    placeOfSupply: "29",
+    items: gstItems,
+  });
+  const bytes = await business.gstInvoicePdf(invoice);
+  assert.equal(new TextDecoder().decode(bytes.slice(0, 5)), "%PDF-");
+  const pdf = await window.PDFLib.PDFDocument.load(bytes);
+  assert.ok(pdf.getPageCount() >= 1);
+});
+
+test("POS bill totals, discount allocation, and cash change are exact", () => {
+  const bill = business.computePosBill({
+    items: [
+      { name: "Filter coffee", price: 120, taxPercent: 5, qty: 2 },
+      { name: "Cake slice", price: 250, taxPercent: 18, qty: 1 },
+    ],
+    discountPercent: 10,
+    paymentMode: "cash",
+    cashTendered: 500,
+    billNo: "B0001",
+  });
+
+  assert.equal(bill.totals.subtotal, 490);
+  assert.equal(bill.totals.discount, 49);
+  assert.equal(bill.totals.taxable, 441);
+  assert.equal(bill.totals.tax, 51.3);
+  assert.equal(bill.totals.beforeRound, 492.3);
+  assert.equal(bill.totals.roundOff, -0.3);
+  assert.equal(bill.totals.payable, 492);
+  assert.equal(bill.totals.tendered, 500);
+  assert.equal(bill.totals.change, 8);
+  assert.equal(bill.itemCount, 3);
+
+  const paise = (value) => Math.round(value * 100);
+  // The allocated line discounts add back up to the bill discount exactly.
+  assert.equal(bill.lines.reduce((sum, line) => sum + paise(line.discount), 0), paise(bill.totals.discount));
+  assert.equal(bill.lines.reduce((sum, line) => sum + paise(line.taxable), 0), paise(bill.totals.taxable));
+  assert.equal(paise(bill.totals.taxable) + paise(bill.totals.tax), paise(bill.totals.beforeRound));
+  assert.equal(paise(bill.totals.payable), paise(bill.totals.beforeRound) + paise(bill.totals.roundOff));
+
+  // Card and UPI bills never ask for cash, and short cash is refused.
+  const card = business.computePosBill({ items: [{ name: "Tea", price: 20, taxPercent: 0, qty: 1 }], paymentMode: "card" });
+  assert.equal(card.totals.change, null);
+  assert.equal(card.totals.payable, 20);
+  assert.throws(() => business.computePosBill({ items: [{ name: "Tea", price: 20, qty: 1 }], paymentMode: "cash", cashTendered: 10 }), /short by INR 10\.00/);
+  assert.throws(() => business.computePosBill({ items: [], paymentMode: "card" }), /at least one item/);
+  assert.throws(() => business.computePosBill({ items: [{ name: "Tea", price: 20, qty: 1 }], paymentMode: "cheque" }), /cash, card, or UPI/);
+
+  const session = business.summarisePosSession([bill, card]);
+  assert.equal(session.bills, 2);
+  assert.equal(session.total, 512);
+  assert.equal(session.byMode.cash, 492);
+  assert.equal(session.byMode.card, 20);
+});
+
+test("POS receipt PDF is an 80mm thermal-width page", async () => {
+  const bill = business.computePosBill({
+    items: [{ name: "Filter coffee", price: 120, taxPercent: 5, qty: 2 }],
+    discountPercent: 0,
+    paymentMode: "cash",
+    cashTendered: 300,
+    billNo: "B0001",
+    createdAt: "2026-04-01 10:00",
+  });
+  const bytes = await business.posReceiptPdf(bill, { shopName: "Corner Cafe", gstin: SELLER_MH });
+  const pdf = await window.PDFLib.PDFDocument.load(bytes);
+  assert.equal(pdf.getPageCount(), 1);
+  assert.equal(Math.round(pdf.getPage(0).getSize().width), 227);
+});
+
+const gstr1Rows = [
+  ["Invoice No", "Invoice Date", "Buyer GSTIN", "Place of Supply", "Taxable Value", "GST Rate", "CGST", "SGST", "IGST"],
+  ["INV-1", "01/04/2026", BUYER_MH, "27", 1000, 18, 90, 90, 0],
+  ["INV-2", "02/04/2026", BUYER_KA, "29", 2000, 18, 0, 0, 360],
+  ["INV-3", "03/04/2026", "", "27", 500, 5, 12.5, 12.5, 0],
+  ["INV-4", "04/04/2026", BUYER_MH, "27", 1000, 18, 50, 50, 0],
+  ["INV-5", "32/04/2026", "27INVALIDGST", "27", 100, 5, 2.5, 2.5, 0],
+];
+
+test("GSTR-1 prep splits B2B/B2C, aggregates rate-wise, and flags rows needing review", () => {
+  const summary = business.summariseGstr1(gstr1Rows);
+
+  assert.equal(summary.rowCount, 5);
+  assert.equal(summary.invoiceCount, 5);
+
+  // B2B = buyer GSTIN present (even when malformed); B2C = no GSTIN at all.
+  assert.equal(summary.b2b.rows, 4);
+  assert.equal(summary.b2b.taxable, 4100);
+  assert.equal(summary.b2b.cgst, 142.5);
+  assert.equal(summary.b2b.sgst, 142.5);
+  assert.equal(summary.b2b.igst, 360);
+  assert.equal(summary.b2b.tax, 645);
+  assert.equal(summary.b2c.rows, 1);
+  assert.equal(summary.b2c.taxable, 500);
+  assert.equal(summary.b2c.tax, 25);
+  assert.equal(summary.totals.taxable, 4600);
+  assert.equal(summary.totals.tax, 670);
+  assert.equal(summary.totals.total, 5270);
+
+  // Rate-wise summary, ascending by slab.
+  assert.deepEqual(summary.rateWise.map((slab) => slab.rate), [5, 18]);
+  assert.equal(summary.rateWise[0].taxable, 600);
+  assert.equal(summary.rateWise[0].tax, 30);
+  assert.equal(summary.rateWise[1].taxable, 4000);
+  assert.equal(summary.rateWise[1].tax, 640);
+  // Rate-wise totals must reconcile with the overall totals.
+  assert.equal(
+    summary.rateWise.reduce((sum, slab) => sum + Math.round(slab.taxable * 100), 0),
+    Math.round(summary.totals.taxable * 100)
+  );
+
+  // Needs review: the mismatched-tax row and the bad-date + malformed-GSTIN row.
+  assert.equal(summary.needsReview.length, 2);
+  assert.equal(summary.needsReview[0].row, 5);
+  assert.equal(summary.needsReview[0].invoiceNo, "INV-4");
+  assert.match(summary.needsReview[0].issues.join(" "), /does not match taxable x rate/);
+  assert.equal(summary.needsReview[1].row, 6);
+  assert.match(summary.needsReview[1].issues.join(" "), /malformed/);
+  assert.match(summary.needsReview[1].issues.join(" "), /out-of-range day or month/);
+  assert.match(summary.disclaimer, /does not file anything with the government/);
+
+  assert.throws(() => business.summariseGstr1([["Invoice No"]]), /header row and at least one invoice row/);
+  assert.throws(() => business.summariseGstr1([["Invoice No", "Date"], ["INV-1", "01/04/2026"]]), /Could not find a taxable and rate column/);
+});
+
+test("invoice date parsing accepts the formats a sales register uses", () => {
+  assert.equal(business.normaliseInvoiceDate("01/04/2026").iso, "2026-04-01");
+  assert.equal(business.normaliseInvoiceDate("2026-04-01").iso, "2026-04-01");
+  assert.equal(business.normaliseInvoiceDate("1-4-26").iso, "2026-04-01");
+  assert.equal(business.normaliseInvoiceDate(new Date(Date.UTC(2026, 3, 1))).iso, "2026-04-01");
+  assert.equal(business.normaliseInvoiceDate(46113).iso, "2026-04-01");
+  assert.equal(business.normaliseInvoiceDate("").ok, false);
+  assert.equal(business.normaliseInvoiceDate("31/02/2026").ok, false);
+  assert.match(business.normaliseInvoiceDate("last Tuesday").reason, /not a recognised date/);
+});
+
+test("GSTR-1 summary exports CSV, XLSX, and PDF locally", async () => {
+  const summary = business.summariseGstr1(gstr1Rows);
+
+  const csv = business.gstr1SummaryCsv(summary);
+  assert.match(csv, /B2B \(buyer GSTIN present\),4,4,4100/);
+  assert.match(csv, /B2C \(no buyer GSTIN\),1,1,500/);
+  assert.match(csv, /Needs review,2/);
+  assert.match(csv, /5,INV-4,27BBBBB1111B1ZN,Tax 100\.00 does not match taxable x rate \(180\.00\)\./);
+  // Free-text issues quote the GSTIN they echo back, so the cell must be escaped.
+  assert.match(csv, /,"Buyer GSTIN ""27INVALIDGST"" is malformed/);
+
+  const xlsx = await business.gstr1SummaryXlsx(summary);
+  assert.equal(xlsx.constructor.name, "Uint8Array");
+  assert.deepEqual([...xlsx.slice(0, 2)], [0x50, 0x4b]); // ZIP container
+  const { loadXlsx } = await import("../src/services/office.service.js");
+  const XLSX = await loadXlsx();
+  const workbook = XLSX.read(xlsx, { type: "array" });
+  assert.deepEqual(workbook.SheetNames, ["Summary", "Needs review"]);
+
+  const pdfBytes = await business.gstr1SummaryPdf(summary, { sourceName: "sales.csv" });
+  assert.equal(new TextDecoder().decode(pdfBytes.slice(0, 5)), "%PDF-");
+  assert.ok((await window.PDFLib.PDFDocument.load(pdfBytes)).getPageCount() >= 1);
+});
+
+test("workflow builder chains PDF operations, piping bytes between steps", async () => {
+  const source = new File([await textToPdf("Workflow source\nSecond line")], "report.pdf", { type: "application/pdf" });
+
+  const ok = await business.runWorkflow(source, [
+    { op: "page-numbers", options: { prefix: "Page ", fontSize: "10" } },
+    { op: "watermark", options: { text: "DRAFT", size: "40", opacity: "0.2" } },
+    { op: "metadata-clean", options: {} },
+  ]);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.failed, null);
+  assert.deepEqual(ok.completed.map((step) => step.op), ["page-numbers", "watermark", "metadata-clean"]);
+  assert.equal(new TextDecoder().decode(ok.bytes.slice(0, 5)), "%PDF-");
+  const chained = await window.PDFLib.PDFDocument.load(ok.bytes, { updateMetadata: false });
+  assert.equal(chained.getPageCount(), 1);
+  assert.equal(chained.getTitle(), undefined);
+
+  // Each step really sees the previous step's output: extracting page 2 of a
+  // 3-page organize result only works if the bytes were piped through.
+  const organized = await business.runWorkflow(source, [
+    { op: "organize", options: { order: "1,1,1" } },
+    { op: "extract-pages", options: { pages: "2-3" } },
+    { op: "rotate", options: { degrees: "90" } },
+  ]);
+  assert.equal(organized.ok, true);
+  const rotated = await window.PDFLib.PDFDocument.load(organized.bytes);
+  assert.equal(rotated.getPageCount(), 2);
+  assert.equal(rotated.getPage(0).getRotation().angle, 90);
+});
+
+test("workflow builder reports the failing step and keeps the prior output", async () => {
+  const source = new File([await textToPdf("Only one page")], "one.pdf", { type: "application/pdf" });
+  const result = await business.runWorkflow(source, [
+    { op: "page-numbers", options: { prefix: "Page ", fontSize: "10" } },
+    { op: "extract-pages", options: { pages: "99" } },
+    { op: "watermark", options: { text: "NEVER RUNS" } },
+  ]);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failed.step, 2);
+  assert.equal(result.failed.op, "extract-pages");
+  assert.match(result.failed.message, /outside/);
+  assert.equal(result.completed.length, 1);
+  // The output of step 1 is still a loadable PDF the user can download.
+  assert.equal((await window.PDFLib.PDFDocument.load(result.bytes)).getPageCount(), 1);
+
+  await assert.rejects(() => business.runWorkflow(source, []), /at least one step/);
+  await assert.rejects(() => business.runWorkflow(source, [{ op: "encrypt" }]), /not a supported workflow step/);
+  assert.deepEqual(business.defaultStepOptions("watermark"), { text: "DRAFT", size: "48", opacity: "0.18" });
+  assert.equal(business.workflowOpList().some((op) => op.id === "merge"), false);
+  assert.equal(business.workflowOpList().every((op) => typeof op.label === "string" && Array.isArray(op.fields)), true);
+});
+
+test("Phase 5 business tools are registered, routable, and discoverable", () => {
+  const expected = {
+    "gst-invoice-tool": "Business Tools",
+    "pos-billing-tool": "Business Tools",
+    "gst-filing-prep-tool": "Business Tools",
+    "workflow-builder-tool": "PDF Tools",
+  };
+  for (const [id, category] of Object.entries(expected)) {
+    const entry = tools.find((item) => item.id === id);
+    assert.ok(entry, `missing tool ${id}`);
+    assert.equal(entry.category, category);
+    assert.equal(entry.status, "available");
+    assert.equal(entry.localProcessing, true);
+    assert.equal(routeForHash(entry.route).tool.id, id);
+  }
+  assert.deepEqual(tools.find((item) => item.id === "gst-filing-prep-tool").file.extensions, ["csv", "xlsx", "xls"]);
+  assert.deepEqual(tools.find((item) => item.id === "workflow-builder-tool").acceptedTypes, ["application/pdf"]);
+  const gst = tools.find((item) => item.id === "gst-invoice-tool");
+  assert.match([gst.name, gst.description, ...gst.keywords].join(" ").toLowerCase(), /cgst sgst/);
+});

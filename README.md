@@ -22,8 +22,9 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-[![Version](https://img.shields.io/badge/version-3.2.4-2563eb)](./package.json)
-[![Tests](https://img.shields.io/badge/tests-15%20passing-16a34a)](./tests/core.test.js)
+[![Version](https://img.shields.io/badge/version-3.3.0-2563eb)](./package.json)
+[![Tests](https://img.shields.io/badge/tests-70%20passing-16a34a)](./tests/core.test.js)
+[![Tools](https://img.shields.io/badge/tools-73%20local-2563eb)](./src/registry/tools.registry.js)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20known%20vulnerabilities-16a34a)](./SECURITY.md)
 
 MyFileKit is a local-first browser toolkit for common file workflows. It combines 38 working tools in one searchable interface and processes selected files in the browser wherever the underlying format allows it.
@@ -139,7 +140,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md), run `npm run preflight`, and keep eve
 
 ## Versioning
 
-The current version is `3.2.4`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
+The current version is `3.3.0`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
 
 ```bash
 npm run version:patch
