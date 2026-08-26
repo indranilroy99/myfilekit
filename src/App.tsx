@@ -54,6 +54,7 @@ import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPd
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 import { canvasToPdf, canvasesToPdf, csvToPdf, markdownToPdf } from "./services/convert.service.js";
 import { captureVideoFrame, enhanceCanvas, getHtml2Canvas, startCameraStream, stopCameraStream } from "./services/capture.service.js";
+import { docxToHtml, epubToHtml, pptxToSlides, readWorkbookSheets, sanitizeHtmlForOffline, sheetsToHtml } from "./services/office.service.js";
 
 type Tool = (typeof tools)[number];
 type Status = { tone: "idle" | "success" | "error"; message: string };
@@ -1092,6 +1093,10 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "markdown-to-pdf-tool") return <MarkdownToPdfTool />;
   if (tool.id === "csv-to-pdf-tool") return <CsvToPdfTool />;
   if (tool.id === "html-to-pdf-tool") return <HtmlToPdfTool />;
+  if (tool.id === "word-to-pdf-tool") return <WordToPdfTool tool={tool} />;
+  if (tool.id === "excel-to-pdf-tool") return <ExcelToPdfTool tool={tool} />;
+  if (tool.id === "powerpoint-to-pdf-tool") return <PowerpointToPdfTool tool={tool} />;
+  if (tool.id === "ebook-to-pdf-tool") return <EbookToPdfTool tool={tool} />;
   if (tool.id === "equation-to-image-tool") return <EquationToImageTool />;
   if (tool.id === "handwriting-to-pdf-tool") return <HandwritingToPdfTool tool={tool} />;
   if (tool.id === "scan-to-pdf-tool") return <ScanToPdfTool />;
@@ -2197,6 +2202,152 @@ function HtmlToPdfTool() {
       const canvas = await html2canvas(doc.body, { backgroundColor: "#ffffff", scale: 2, useCORS: false, logging: false });
       downloadBytes(await canvasToPdf(canvas), "myfilekit-html.pdf", "application/pdf");
       return "HTML PDF downloaded.";
+    })} />
+  </ToolForm>;
+}
+
+// Shared base styles for the offscreen document render (Word/Excel/eBook).
+const OFFICE_RENDER_CSS = "html,body{margin:0}body{padding:36px;font-family:'Helvetica Neue',Arial,system-ui,sans-serif;color:#111;line-height:1.55;font-size:14px;background:#fff;-webkit-font-smoothing:antialiased}img{max-width:100%;height:auto}h1{font-size:26px;margin:0 0 12px}h2{font-size:20px;margin:24px 0 10px}h3{font-size:16px;margin:18px 0 8px}p{margin:0 0 10px}ul,ol{margin:0 0 10px 22px;padding:0}li{margin:2px 0}table{border-collapse:collapse;width:100%;margin:0 0 14px;font-size:12px}th,td{border:1px solid #c4c4c4;padding:5px 8px;text-align:left;vertical-align:top}th{background:#eef0f2;font-weight:700}section.sheet{margin:0 0 28px}.chapter-break{border:0;border-top:1px solid #ddd;margin:28px 0}.empty-sheet{color:#777;font-style:italic}";
+
+// Render sanitized HTML in an offscreen, scriptless sandboxed iframe and capture
+// it with html2canvas. The iframe is always removed, even on failure, so no
+// render container leaks. Remote resources cannot load (no allow-scripts, plus
+// the page CSP), and callers pass HTML already stripped of remote refs.
+async function renderHtmlToCanvas(bodyHtml: string, { widthPx = 794, scale = 2 }: { widthPx?: number; scale?: number } = {}) {
+  const html2canvas = getHtml2Canvas();
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("sandbox", "allow-same-origin");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText = `position:fixed;left:-10000px;top:0;border:0;width:${widthPx}px;height:1200px`;
+  document.body.appendChild(iframe);
+  try {
+    const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><style>${OFFICE_RENDER_CSS}</style></head><body>${bodyHtml}</body></html>`;
+    await new Promise<void>((resolve) => {
+      iframe.onload = () => resolve();
+      iframe.srcdoc = srcDoc;
+    });
+    const doc = iframe.contentDocument;
+    if (!doc?.body) throw new Error("Could not prepare the document for rendering.");
+    await doc.fonts?.ready?.catch(() => {});
+    const height = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight, 1);
+    iframe.style.height = `${height}px`;
+    return await html2canvas(doc.body, {
+      backgroundColor: "#ffffff",
+      scale,
+      useCORS: false,
+      logging: false,
+      width: widthPx,
+      windowWidth: widthPx,
+    });
+  } finally {
+    iframe.remove();
+  }
+}
+
+function WordToPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Converts a Word .docx locally: styles, headings, bold/italic, lists, tables, and embedded images are preserved as faithfully as possible, then rendered to a PDF in your browser. Legacy .doc files must be re-saved as .docx first.
+    </div>
+    <FileControl accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" files={files} setFiles={setFiles} label="Choose or drop a Word file" />
+    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      setStatus({ tone: "idle", message: "Reading document…" });
+      const html = sanitizeHtmlForOffline(await docxToHtml(file));
+      setStatus({ tone: "idle", message: "Rendering PDF…" });
+      const canvas = await renderHtmlToCanvas(html);
+      downloadBytes(await canvasToPdf(canvas), withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
+      return "Word document converted to PDF.";
+    })} />
+  </ToolForm>;
+}
+
+function ExcelToPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Reads .xlsx, .xls, or .csv locally with SheetJS and renders every sheet as a table in one PDF. Wide sheets are scaled to fit the page width, so very large tables render smaller.
+    </div>
+    <FileControl accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" files={files} setFiles={setFiles} label="Choose or drop a spreadsheet" />
+    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      setStatus({ tone: "idle", message: "Reading workbook…" });
+      const sheets = await readWorkbookSheets(file);
+      setStatus({ tone: "idle", message: `Rendering ${sheets.length} sheet${sheets.length === 1 ? "" : "s"}…` });
+      const canvas = await renderHtmlToCanvas(sheetsToHtml(sheets));
+      downloadBytes(await canvasToPdf(canvas), withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
+      return `Converted ${sheets.length} sheet${sheets.length === 1 ? "" : "s"} to PDF.`;
+    })} />
+  </ToolForm>;
+}
+
+function PowerpointToPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Best-effort .pptx conversion: slide text and images are extracted and positioned locally, one PDF page per slide. Complex layouts, charts, SmartArt, and animations are approximated. Legacy .ppt files aren't supported.
+    </div>
+    <FileControl accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" files={files} setFiles={setFiles} label="Choose or drop a PowerPoint file" />
+    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      setStatus({ tone: "idle", message: "Reading slides…" });
+      const { slideWidthEmu, slideHeightEmu, slides } = await pptxToSlides(file);
+      const widthPx = 960;
+      const aspect = slideHeightEmu / slideWidthEmu;
+      const canvases: HTMLCanvasElement[] = [];
+      for (const slide of slides) {
+        setStatus({ tone: "idle", message: `Rendering slide ${slide.index} of ${slides.length}…` });
+        const html = sanitizeHtmlForOffline(slideToHtml(slide, widthPx, Math.round(widthPx * aspect)));
+        canvases.push(await renderHtmlToCanvas(html, { widthPx, scale: 2 }));
+      }
+      downloadBytes(await canvasesToPdf(canvases), withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
+      return `Converted ${slides.length} slide${slides.length === 1 ? "" : "s"} to PDF.`;
+    })} />
+  </ToolForm>;
+}
+
+// Build one absolutely-positioned slide "canvas" div. Elements with an EMU box
+// are placed by percentage; anything without geometry stacks in a fallback flow.
+function slideToHtml(slide: { index: number; elements: any[] }, widthPx: number, heightPx: number) {
+  const positioned: string[] = [];
+  const flow: string[] = [];
+  for (const element of slide.elements) {
+    const inner = element.type === "image"
+      ? `<img src="${element.dataUrl}" style="width:100%;height:100%;object-fit:contain"/>`
+      : `<div style="font-size:${element.title ? 26 : 16}px;font-weight:${element.title ? 700 : 400};line-height:1.3">${element.paragraphs.map((p: any) => `<div style="margin:2px 0;padding-left:${p.level * 18}px">${p.level > 0 && p.text ? "• " : ""}${escapeText(p.text)}</div>`).join("")}</div>`;
+    if (element.box) {
+      positioned.push(`<div style="position:absolute;left:${(element.box.x * 100).toFixed(2)}%;top:${(element.box.y * 100).toFixed(2)}%;width:${(element.box.w * 100).toFixed(2)}%;height:${(element.box.h * 100).toFixed(2)}%;overflow:hidden">${inner}</div>`);
+    } else {
+      flow.push(`<div style="margin:6px 0">${inner}</div>`);
+    }
+  }
+  return `<div style="position:relative;width:${widthPx}px;height:${heightPx}px;background:#fff;overflow:hidden;padding:0">${positioned.join("")}${flow.length ? `<div style="position:absolute;inset:24px">${flow.join("")}</div>` : ""}</div>`;
+}
+
+function escapeText(value: string) {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function EbookToPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Converts an .epub eBook locally: chapters are read in spine order, referenced images are inlined, scripts and remote references are stripped for offline safety, then rendered to a paginated PDF.
+    </div>
+    <FileControl accept=".epub,application/epub+zip" files={files} setFiles={setFiles} label="Choose or drop an eBook (.epub)" />
+    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      setStatus({ tone: "idle", message: "Reading eBook…" });
+      const html = await epubToHtml(file);
+      setStatus({ tone: "idle", message: "Rendering PDF…" });
+      const canvas = await renderHtmlToCanvas(html);
+      downloadBytes(await canvasToPdf(canvas), withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
+      return "eBook converted to PDF.";
     })} />
   </ToolForm>;
 }

@@ -1,6 +1,6 @@
 {
   "name": "myfilekit",
-  "version": "3.2.2",
+  "version": "3.2.3",
   "type": "module",
   "private": true,
   "license": "MIT",
@@ -27,6 +27,7 @@
     "framer-motion": "^12.40.0",
     "katex": "^0.18.4",
     "lucide-react": "^1.18.0",
+    "mammoth": "^1.12.1",
     "pdfjs-dist": "^4.10.38",
     "qrcode": "^1.5.4",
     "react": "^19.2.7",

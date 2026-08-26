@@ -686,3 +686,145 @@ test("Phase 2 PDF tools are registered under sensible categories with renderers"
     assert.equal(appSource.includes(`"${id}"`), true, `${id} is missing from ToolRenderer`);
   }
 });
+
+// --- Phase 4a: office.service.js (Word/Excel/PowerPoint/eBook -> PDF) ----------
+// docx/xlsx parsing and pptx/epub unzip+parse run in Node here. The html2canvas
+// render + PDF paginate paths are browser-only (they need a DOM/canvas) and are
+// covered by the manual test checklist instead.
+
+test("Phase 4a office tools are registered under PDF Tools with renderers", () => {
+  const expected = ["word-to-pdf-tool", "excel-to-pdf-tool", "powerpoint-to-pdf-tool", "ebook-to-pdf-tool"];
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  for (const id of expected) {
+    const found = tools.find((tool) => tool.id === id);
+    assert.ok(found, `${id} should be registered`);
+    assert.equal(found.category, "PDF Tools");
+    assert.equal(found.status, "available");
+    assert.equal(found.localProcessing, true);
+    assert.equal(appSource.includes(`"${id}"`), true, `${id} is missing from ToolRenderer`);
+  }
+});
+
+test("sanitizeHtmlForOffline strips scripts, event handlers, and remote references", async () => {
+  const { sanitizeHtmlForOffline } = await import("../src/services/office.service.js");
+  const dirty = '<p onclick="steal()">hi</p><script>alert(1)</script><img src="https://evil.com/x.png"><a href="//cdn.example/x">y</a><link rel="stylesheet" href="http://x/y.css">';
+  const clean = sanitizeHtmlForOffline(dirty);
+  assert.doesNotMatch(clean, /<script/i);
+  assert.doesNotMatch(clean, /onclick/i);
+  assert.doesNotMatch(clean, /evil\.com/);
+  assert.doesNotMatch(clean, /cdn\.example/);
+  assert.doesNotMatch(clean, /<link/i);
+  assert.match(clean, /hi<\/p>/);
+});
+
+test("readWorkbookSheets reads a generated workbook to rows and sheetsToHtml builds tables", async () => {
+  // SheetJS is vendored (assets/vendor/xlsx.full.min.js, v0.20.3) instead of the
+  // npm package, which is frozen at a version with unfixed advisories. Load the
+  // same vendored bundle here, mirroring how pdf-lib is loaded above.
+  const xlsxCode = fs.readFileSync(new URL("../assets/vendor/xlsx.full.min.js", import.meta.url), "utf8");
+  const XLSX = new Function(`${xlsxCode}; return XLSX;`)();
+  const { readWorkbookSheets, sheetsToHtml } = await import("../src/services/office.service.js");
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["Name", "Score"], ["Ada", 99], ["Alan", 87]]), "Marks");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["City"], ["Pune"]]), "Cities");
+  // XLSX.write with type "array" returns an ArrayBuffer directly.
+  const out = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+  const file = { name: "book.xlsx", arrayBuffer: async () => out };
+
+  const sheets = await readWorkbookSheets(file);
+  assert.equal(sheets.length, 2);
+  assert.equal(sheets[0].name, "Marks");
+  assert.deepEqual(sheets[0].rows[0], ["Name", "Score"]);
+  assert.equal(String(sheets[0].rows[1][0]), "Ada");
+  assert.equal(sheets[1].name, "Cities");
+
+  const html = sheetsToHtml(sheets);
+  assert.match(html, /<h2>Marks<\/h2>/);
+  assert.match(html, /<th>Name<\/th>/);
+  assert.match(html, /<td>Ada<\/td>/);
+  assert.match(html, /<h2>Cities<\/h2>/);
+});
+
+test("docxToHtml converts a minimal docx to semantic HTML and rejects legacy .doc", async () => {
+  const { zipSync, strToU8 } = await import("fflate");
+  const { docxToHtml } = await import("../src/services/office.service.js");
+  const contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>';
+  const rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>';
+  const document = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hello Title</w:t></w:r></w:p><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Bold text</w:t></w:r></w:p></w:body></w:document>';
+  const zipped = zipSync({
+    "[Content_Types].xml": strToU8(contentTypes),
+    "_rels/.rels": strToU8(rels),
+    "word/document.xml": strToU8(document),
+  });
+  const file = { name: "sample.docx", arrayBuffer: async () => zipped.slice().buffer };
+  const html = await docxToHtml(file);
+  assert.match(html, /Hello Title/);
+  assert.match(html, /<strong>Bold text<\/strong>/);
+
+  await assert.rejects(() => docxToHtml({ name: "old.doc", arrayBuffer: async () => new ArrayBuffer(0) }), /Legacy \.doc/);
+});
+
+test("pptxToSlides extracts slide size, title text, and inlined images", async () => {
+  const { zipSync, strToU8 } = await import("fflate");
+  const { pptxToSlides } = await import("../src/services/office.service.js");
+  const presentation = '<p:presentation xmlns:p="p"><p:sldSz cx="12192000" cy="6858000"/></p:presentation>';
+  const slide = '<p:sld xmlns:p="p" xmlns:a="a" xmlns:r="r"><p:cSld><p:spTree>' +
+    '<p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="838200" y="365125"/><a:ext cx="7772400" cy="1470025"/></a:xfrm></p:spPr><p:txBody><a:p><a:r><a:t>Slide Title</a:t></a:r></a:p></p:txBody></p:sp>' +
+    '<p:pic><p:blipFill><a:blip r:embed="rId1"/></p:blipFill><p:spPr><a:xfrm><a:off x="1000000" y="2000000"/><a:ext cx="3000000" cy="2000000"/></a:xfrm></p:spPr></p:pic>' +
+    '</p:spTree></p:cSld></p:sld>';
+  const slideRels = '<Relationships xmlns="r"><Relationship Id="rId1" Type="image" Target="../media/image1.png"/></Relationships>';
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+  const zipped = zipSync({
+    "ppt/presentation.xml": strToU8(presentation),
+    "ppt/slides/slide1.xml": strToU8(slide),
+    "ppt/slides/_rels/slide1.xml.rels": strToU8(slideRels),
+    "ppt/media/image1.png": png,
+  });
+  const file = { name: "deck.pptx", arrayBuffer: async () => zipped.slice().buffer };
+  const { slideWidthEmu, slides } = await pptxToSlides(file);
+  assert.equal(slideWidthEmu, 12192000);
+  assert.equal(slides.length, 1);
+
+  const textElement = slides[0].elements.find((element) => element.type === "text");
+  assert.ok(textElement);
+  assert.equal(textElement.title, true);
+  assert.equal(textElement.paragraphs[0].text, "Slide Title");
+  assert.ok(textElement.box && Math.abs(textElement.box.x - 838200 / 12192000) < 1e-9);
+
+  const imageElement = slides[0].elements.find((element) => element.type === "image");
+  assert.ok(imageElement);
+  assert.match(imageElement.dataUrl, /^data:image\/png;base64,/);
+
+  await assert.rejects(() => pptxToSlides({ name: "old.ppt", arrayBuffer: async () => new ArrayBuffer(0) }), /Legacy \.ppt/);
+});
+
+test("epubToHtml concatenates spine chapters, inlines images, and strips scripts/remote refs", async () => {
+  const { zipSync, strToU8 } = await import("fflate");
+  const { epubToHtml } = await import("../src/services/office.service.js");
+  const container = '<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>';
+  const opf = '<package xmlns="http://www.idpf.org/2007/opf"><manifest><item id="chap1" href="chapter1.xhtml" media-type="application/xhtml+xml"/><item id="chap2" href="chapter2.xhtml" media-type="application/xhtml+xml"/><item id="img1" href="images/pic.png" media-type="image/png"/></manifest><spine><itemref idref="chap1"/><itemref idref="chap2"/></spine></package>';
+  const chapter1 = '<html><body><h1>Chapter One</h1><p>First chapter text.</p><img src="images/pic.png"/><script>alert("x")</script><a href="http://evil.com/track">remote</a></body></html>';
+  const chapter2 = '<html><body><h1>Chapter Two</h1><p>Second chapter text.</p></body></html>';
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 9, 9, 9]);
+  const zipped = zipSync({
+    "mimetype": strToU8("application/epub+zip"),
+    "META-INF/container.xml": strToU8(container),
+    "OEBPS/content.opf": strToU8(opf),
+    "OEBPS/chapter1.xhtml": strToU8(chapter1),
+    "OEBPS/chapter2.xhtml": strToU8(chapter2),
+    "OEBPS/images/pic.png": png,
+  });
+  const file = { name: "book.epub", arrayBuffer: async () => zipped.slice().buffer };
+  const html = await epubToHtml(file);
+  assert.match(html, /Chapter One/);
+  assert.match(html, /First chapter text/);
+  assert.match(html, /Chapter Two/);
+  // Chapters kept in spine order.
+  assert.ok(html.indexOf("Chapter One") < html.indexOf("Chapter Two"));
+  // Image inlined, script and remote link stripped for offline safety.
+  assert.match(html, /src="data:image\/png;base64,/);
+  assert.doesNotMatch(html, /<script/i);
+  assert.doesNotMatch(html, /evil\.com/);
+
+  await assert.rejects(() => epubToHtml({ name: "notepub.txt", arrayBuffer: async () => new ArrayBuffer(0) }), /Only \.epub/);
+});

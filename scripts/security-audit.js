@@ -12,6 +12,7 @@ const developmentDependencyCount = Object.keys(packageJson.devDependencies || {}
 const requiredLocalAssets = {
   "assets/vendor/pdf-lib.min.js": "0f9a5cad07941f0826586c94e089d89b918c46e5c17cf2d5a3c6f666e3bc694f",
   "assets/vendor/html2canvas.min.js": "e87e550794322e574a1fda0c1549a3c70dae5a93d9113417a429016838eab8cb",
+  "assets/vendor/xlsx.full.min.js": "cc015130aa8521e7f088f88898eba949ccdcbfb38df0bd129b44b7273c3a6f41",
 };
 let failed = false;
 
