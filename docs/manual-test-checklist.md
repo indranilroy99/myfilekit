@@ -16,7 +16,7 @@ Open the URL printed by Vite, normally `http://localhost:4173`.
 - Confirm the text-only MyFileKit wordmark appears without a separate logo icon.
 - Confirm the public UI contains no framework, release milestone, placeholder, AI, or coming-soon copy.
 - Confirm the landing page shows the hero search, quick actions, Popular Tools, optional Recently Used, category links, privacy strip, product highlights, and footer.
-- Confirm the full 38-tool library is available from Browse tools rather than being repeated on the landing page.
+- Confirm the full 73-tool library is available from Browse tools rather than being repeated on the landing page.
 - Press `Cmd+K` on macOS or `Ctrl+K` on Windows/Linux and confirm the hero search receives focus.
 - Search `metadata`, `invoice`, `merge pdf`, `compress image`, `signature`, `json`, and `hash`; confirm relevant results appear directly under the search.
 - Press `Escape` and confirm the search clears.
@@ -97,10 +97,55 @@ Open the URL printed by Vite, normally `http://localhost:4173`.
 - Encode and decode URL and Unicode Base64 text.
 - Compare two text blocks and download the diff.
 - Confirm empty text reports zero reading time.
+- Extract text from a text PDF page by page; confirm a scanned PDF reports no selectable text and points at OCR.
+- Convert Markdown to PDF and CSV to PDF; confirm headings, lists, and table pagination look right.
+- Render a LaTeX equation to PNG and JPG with Equation to Image; confirm invalid LaTeX is rejected clearly.
 - Generate and compare SHA-256 hashes.
 - Generate passwords across selected character groups and copy the result.
 - Generate and download a QR code; reject empty input.
-- Clean unsafe filenames and download the generated list.
+
+## Page And Render PDF Workflows
+
+- Render a PDF to JPG, PNG, and WebP with PDF to Image; confirm one image per page at the chosen DPI.
+- Compress a PDF and confirm the output is smaller; confirm the note that rasterised output loses selectable text.
+- Run PDF to ZIP and confirm the ZIP holds one single-page PDF per page, uniquely named.
+- Flatten a PDF containing form fields and annotations; confirm the output is non-interactive.
+- Invert PDF colours and confirm the whole page inverts, not just the text.
+- Organize Pages: reorder, duplicate, and delete via a page-order string; confirm out-of-bounds input is rejected.
+- Crop & Resize PDF: scale to A4 and to Letter, then apply a uniform margin crop.
+- Headers & Footers: draw text on every page and confirm page-number tokens resolve.
+- Fill PDF Form: confirm AcroForm fields are listed, filled, and optionally flattened.
+- Redact PDF: cover an area, download, and confirm the covered text cannot be selected or searched in a PDF reader.
+- Create PDF: build blank pages and a text page from scratch.
+- HTML to PDF: paste HTML with a script tag and a remote image; confirm both are stripped and the render still succeeds offline.
+- Scan to PDF and Handwriting to PDF: capture or upload page photos, apply cleanup, and confirm page count and order.
+- Repair PDF: feed a truncated or damaged PDF and confirm either a re-saved copy or a clear failure message.
+- Workflow Builder: chain three PDF steps, run them, and confirm the output reflects every step in order. Then make a middle step fail and confirm the failing step is named and the prior output is kept.
+
+## Office And eBook To PDF
+
+- Convert a `.docx` with headings, lists, a table, and an image; confirm each survives in the PDF.
+- Convert a `.xlsx` with multiple sheets and a `.csv`; confirm one paginated table per sheet.
+- Convert a `.pptx` and confirm one page per slide, with the caveat that complex layouts are approximated.
+- Convert an `.epub` and confirm chapter order and images are preserved.
+- Feed a legacy `.doc` and a legacy `.ppt`; confirm each is rejected with the "re-save as .docx/.pptx" message rather than a crash.
+- Paste text containing non-Latin-1 characters into a PDF text tool; confirm the friendly Latin-1-only message appears.
+
+## Business Workflows (GST, POS, Filing)
+
+- GST Invoice: build an intra-state invoice and confirm the CGST + SGST split is half the rate each; build an inter-state invoice and confirm IGST at the full rate.
+- Confirm the tax components reconcile with the printed grand total, and that amount in words uses Indian numbering (lakh / crore).
+- Enter a malformed GSTIN and confirm validation flags it; enter a structurally valid but suspicious GSTIN and confirm it warns without blocking.
+- Download the GST invoice PDF and confirm it opens as a real PDF with the round-off and totals intact.
+- POS Billing: add catalogue items, apply a discount and tax, take cash over the payable amount, and confirm the change is exact. Confirm short cash is rejected.
+- Download the POS receipt and confirm it is 80mm thermal width.
+- GST Filing Prep: upload a sales-register CSV and an XLSX; confirm B2B/B2C split, rate-wise aggregation, and that rows needing review are flagged.
+- Export the filing summary as CSV, XLSX, and PDF, all with the network disconnected.
+- Confirm the tool does not imply it files anything with the government.
+
+## PDF Fingerprint
+
+- Fingerprint a PDF, confirm the page content is unchanged, and confirm the identifier is present in the output metadata.
 
 ## PDF Export Workflows (Word, Excel, HTML, EPUB)
 

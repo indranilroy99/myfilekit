@@ -3,6 +3,8 @@
 Status: Complete
 Scope: Expand and harden the current product before the next public release.
 
+> Historical record. This plan covers the 38-tool readiness pass that shipped as 3.0.x/3.1.x, and the counts and out-of-scope items below are preserved as they were at that time. The product has since grown to 73 tools, and Office/eBook conversion, PDF export, and local OCR — listed here as out of scope pending a reliable format engine — have shipped. Password-protected PDF workflows are still out of scope. See [README.md](../README.md) for the current tool list and boundaries.
+
 ## Product Premise
 
 MyFileKit should be a trustworthy local-first file workspace, not a catalogue of partially working utilities. Every visible tool must complete its advertised workflow in a modern browser, provide a clear result, and expose a reliable preview, download, copy, or print action where the output type supports it.

@@ -12,6 +12,11 @@ Security fixes are applied to the latest release on the `main` branch.
 - The app does not intentionally transmit selected files to a backend.
 - PDF processing uses a local vendored copy of `pdf-lib`.
 - Invoice capture uses a local vendored copy of `html2canvas`.
+- Spreadsheet reading and writing use a local vendored copy of SheetJS `0.20.3`. The npm `xlsx` package is not used: it is frozen at `0.18.5`, which carries unfixed prototype-pollution and ReDoS advisories.
+- OCR uses a local vendored copy of the tesseract engine and English model (about 14 MB on disk, loaded only when an OCR tool runs). It is configured with explicit local worker, core, and language paths and `workerBlobURL: false`, so recognition never reaches a CDN.
+- PDF rasterising uses the pdf.js worker bundled from the local build output, not a CDN.
+- Every vendored asset above has its SHA-256 pinned in `scripts/security-audit.js`, which `npm run security:audit` verifies.
+- Camera (Scan to PDF) and microphone (Audio to PDF dictation) are used only after an explicit user action, and the media tracks are released on stop, reset, and unmount.
 - Generated object URLs are short-lived and revoked when replaced, reset, or unmounted.
 - Theme and recently used tool identifiers may be stored in `localStorage`; file contents are not.
 
@@ -34,7 +39,7 @@ Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 Referrer-Policy: no-referrer
-Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+Permissions-Policy: camera=(self), microphone=(self), geolocation=(), payment=(), usb=()
 ```
 
 Serve production deployments over HTTPS. Hosts that manage TLS should also enable an appropriate `Strict-Transport-Security` policy after confirming every subdomain is HTTPS-ready.

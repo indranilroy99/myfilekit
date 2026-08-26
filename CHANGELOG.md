@@ -2,6 +2,67 @@
 
 All notable MyFileKit changes are documented here. The project uses semantic versioning.
 
+## 3.3.0 - 2026-08-26
+
+### Added
+
+- **GST Invoice**: Indian tax invoice with correct intra-state CGST+SGST versus inter-state IGST split (state code derived from GSTIN), HSN/SAC codes, round-off, and amount in words using Indian lakh/crore grouping. All money is held as integer paise, so the displayed components always reconcile with the total. GSTIN validation (shape, state code, checksum) warns rather than blocks.
+- **POS Billing**: counter billing with a `localStorage` item catalogue, bill-level discount, payment mode with cash-change calculation, an 80 mm thermal-style receipt PDF, and a daily session roll-up.
+- **GST Filing Prep**: imports a CSV/XLSX of sales invoices and produces a GSTR-1-style B2B/B2C and rate-wise summary, plus a needs-review list for malformed GSTIN values, unparseable dates, and tax figures that do not match taxable value × rate. It prepares a summary for filing; it does not file anything with the government.
+- **Workflow Builder**: chains PDF operations over a single input, piping bytes from one step to the next, with per-step progress and a failure report that keeps the output of the steps that already succeeded.
+
+### Changed
+
+- README rebuilt against the registry: the tool table, per-category counts, architecture tree, and badges now reflect all 73 tools. The "Current Boundaries" section previously claimed OCR and Office conversion were not supported, which stopped being true in 3.2.3/3.2.4; it now states the real remaining limits.
+- SECURITY.md documented `Permissions-Policy: camera=(), microphone=()`, which would have blocked Scan to PDF and dictation in production. It now matches the shipped `public/_headers` (`camera=(self), microphone=(self)`) and lists every vendored engine.
+
+## 3.2.4 - 2026-08-26
+
+### Added
+
+- PDF to Word (real `.docx` with page breaks), PDF to Excel (coordinate clustering into table rows), PDF to HTML (self-contained, escaped, no remote references), and PDF to EPUB (valid EPUB 3 with `mimetype` stored first, OPF spine, and nav).
+- OCR / Searchable PDF using a fully offline tesseract engine, with a searchable-PDF output.
+- PDF to Audio using the browser speech synthesiser, and Audio to PDF using browser dictation with an always-available manual transcript path.
+
+### Fixed
+
+- OCR could hang forever when the engine failed to initialise, because tesseract.js swallows that error. The worker now surfaces a clear failure instead.
+- An experimental `SpeechRecognition` availability probe could wedge the renderer; replaced with a synchronous capability check plus an explicit "require on-device recognition" option.
+
+### Security
+
+- The OCR engine and English model are vendored locally (about 14 MB, SHA-256 pinned, `workerBlobURL: false`, explicit local worker/core/language paths) so recognition never contacts a CDN. Verified by removing the local assets and confirming a clean local-path error with no CDN fallback.
+- `font-src 'self' data:` added to the CSP, because pdf.js hands the browser embedded PDF fonts as `data:` URLs while rasterising. `Permissions-Policy` now scopes camera and microphone to `(self)` so Scan to PDF and dictation work in production; geolocation stays denied.
+
+## 3.2.3 - 2026-08-26
+
+### Added
+
+- Word to PDF (mammoth), Excel to PDF (per-sheet tables), PowerPoint to PDF (pptx unzip with best-effort slide layout), and eBook to PDF (EPUB spine order, images inlined, remote references stripped). Heavy parsers are lazily loaded, so the eager bundle grows by roughly 18 KB.
+
+### Security
+
+- SheetJS is vendored locally at `0.20.3` instead of the npm `xlsx` package, which is frozen at `0.18.5` with unfixed prototype-pollution and ReDoS advisories. `npm audit` is back to zero vulnerabilities.
+
+## 3.2.2 - 2026-08-26
+
+### Added
+
+- Markdown to PDF (vector text layout), CSV to PDF (paginated table with repeating header), HTML to PDF (sandboxed iframe capture), Equation to Image (KaTeX with locally bundled fonts), Handwriting to PDF, and Scan to PDF using the device camera. Camera tracks are always released on stop, reset, and unmount.
+
+## 3.2.1 - 2026-08-26
+
+### Added
+
+- Organize Pages, Crop & Resize PDF, Headers & Footers, Fill PDF Form, Redact PDF (true removal by rasterising, not just drawing boxes), Create PDF, Repair PDF, and PDF Fingerprint.
+
+## 3.2.0 - 2026-08-26
+
+### Added
+
+- PDF to Image, Extract Text from PDF, Compress PDF, PDF to ZIP, Flatten PDF, and Invert PDF Colours.
+- pdf.js support with the worker bundled locally through Vite (`?worker` plus an eagerly assigned `workerPort` and `worker.format: "es"`). Without the explicit worker port, pdf.js guesses the worker type, spawns a classic worker against an ESM file, and hangs.
+
 ## 3.1.1 - 2026-08-03
 
 ### Changed
