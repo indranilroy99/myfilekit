@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { tools, categories } from "../src/registry/tools.registry.js";
+import { filterTools } from "../src/lib/search.js";
 import { csvToJson, jsonToCsv } from "../src/services/csv.service.js";
 import { addPdfPageNumbers, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "../src/services/pdf.service.js";
 import { validateFiles } from "../src/services/file-validator.js";
@@ -96,15 +97,14 @@ test("React shell does not use dangerous user-controlled HTML injection", () => 
   assert.doesNotMatch(appSource, /dangerouslySetInnerHTML|\\.innerHTML\\s*=/);
 });
 
-test("spotlight cards are reusable, wired into tool cards, and avoid inline HTML injection", () => {
+test("tool cards use the plain tool-card shell (no cursor-follow GlowCard) and avoid inline HTML injection", () => {
   const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  const spotlightSource = fs.readFileSync(new URL("../src/components/ui/spotlight-card.tsx", import.meta.url), "utf8");
 
-  assert.match(appSource, /import \{ GlowCard/);
-  assert.match(appSource, /<GlowCard customSize/);
-  assert.match(spotlightSource, /export function GlowCard/);
-  assert.match(spotlightSource, /glowColor/);
-  assert.doesNotMatch(spotlightSource, /dangerouslySetInnerHTML|\\.innerHTML\\s*=/);
+  // GlowCard / spotlight-card was removed as dead decorative machinery.
+  assert.doesNotMatch(appSource, /GlowCard/);
+  assert.doesNotMatch(appSource, /spotlight-card/);
+  assert.match(appSource, /<div className=\{`tool-card group/);
+  assert.doesNotMatch(appSource, /dangerouslySetInnerHTML|\\.innerHTML\\s*=/);
 });
 
 test("liquid buttons provide standard button semantics without SVG filter effects", () => {
@@ -3470,4 +3470,24 @@ test("PDF Analyser is registered, routed, and rendered", () => {
   assert.equal(appSource.includes('"pdf-analyzer-tool"'), true);
   const searchable = [found.name, found.description, ...found.keywords].join(" ").toLowerCase();
   for (const query of ["malware", "javascript", "triage"]) assert.match(searchable, new RegExp(query));
+});
+
+test("search strips stopwords and resolves natural security queries to the right tool", () => {
+  const cases = [
+    ["unlock my pdf", "unlock-pdf-tool"],
+    ["check this pdf for malware", "pdf-analyzer-tool"],
+    ["remove pii", "auto-redact-pii-tool"],
+    ["password protect", "encrypt-pdf-tool"],
+  ];
+  for (const [query, expectedId] of cases) {
+    const results = filterTools(query);
+    assert.ok(results.length > 0, `"${query}" should return results`);
+    const topIds = results.slice(0, 3).map((tool) => tool.id);
+    assert.ok(topIds.includes(expectedId), `"${query}" should surface ${expectedId} in the top results, got ${topIds.join(", ")}`);
+    assert.equal(results[0].id, expectedId, `"${query}" should rank ${expectedId} first, got ${results[0].id}`);
+  }
+});
+
+test("search stopword-only queries fall back to the full tool list", () => {
+  assert.equal(filterTools("how do i").length, tools.length);
 });

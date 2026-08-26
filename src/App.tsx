@@ -33,15 +33,12 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { FlowButton } from "@/components/ui/flow-button";
 import { Icons } from "@/components/ui/icons";
-import { LimelightNav, type NavItem } from "@/components/ui/limelight-nav";
 import { NumberedPagination } from "@/components/ui/pagination";
-import { GlowCard, type GlowColor } from "@/components/ui/spotlight-card";
-import AnimatedDownloadButton from "@/components/ui/download-hover-button";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
+import { filterTools, searchableText } from "./lib/search.js";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "./utils/format.js";
 import { safeFilename, withExtension } from "./utils/safe-filename.js";
 import { validateFiles } from "./services/file-validator.js";
@@ -69,7 +66,7 @@ import { FRAME_KIND, MAX_TRANSFER_BYTES, createAssembler, createPeerLink, decode
 import { MAX_STROKES, addStrokePoint, createStroke, deserializeStrokeChunk, drawStrokeSegment, exportBoardCanvas, mergeStrokeChunk, pointFromEvent, prepareCanvas, renderBoard, serializeStrokeChunk } from "./services/whiteboard.service.js";
 
 type Tool = (typeof tools)[number];
-type Status = { tone: "idle" | "success" | "error"; message: string };
+type Status = { tone: "idle" | "success" | "error"; message: string; progress?: { value: number; total: number; label: string } };
 type ThemeMode = "light" | "dark";
 type PdfOutput = { url: string; blob: Blob; filename: string; pages: number; sourceName: string };
 type DownloadReady = { filename: string; mimeType: string; size: number; url: string };
@@ -117,15 +114,15 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
   "Business Tools": { description: "Invoices, Indian GST tax invoices, counter billing, and GSTR-1 filing prep.", accent: "Business" },
   "Signature Tools": { description: "Draw or type signatures and export them as PNG files.", accent: "Signature" },
   "Text & Data Tools": { description: "Format JSON, convert CSV, preview Markdown, and create PDFs from text.", accent: "Data" },
-  "Security & Privacy": { description: "Encrypt and unlock PDFs, and clean document and image metadata, locally in your browser.", accent: "Privacy" },
+  "Security & Privacy": { description: "Redact PII, run a privacy audit, and triage suspicious PDFs for malware — plus encrypt, unlock, and clean metadata, all locally in your browser.", accent: "Privacy" },
   "Developer Utilities": { description: "Handle hashes, Base64, and small file checks without leaving the page.", accent: "Utility" },
   "Sharing & Collaboration": { description: "Send files browser-to-browser and sketch together over a direct connection — still no server.", accent: "Sharing" },
 };
 
-const quickSearches = ["Merge PDF", "Compress Image", "Invoice", "Signature", "JSON", "File Hash"];
+const quickSearches = ["Redact PII", "Check for malware", "Encrypt PDF", "Merge PDF", "Compress Image", "Invoice", "File Hash"];
 const recentToolsStorageKey = "myfilekit:recentTools";
 const themeStorageKey = "myfilekit:theme";
-const popularToolIds = ["merge-pdf-tool", "compress-image-tool", "resize-image-tool", "invoice-generator-tool", "json-formatter-tool", "file-hash-tool"];
+const popularToolIds = ["auto-redact-pii-tool", "pdf-analyzer-tool", "merge-pdf-tool", "compress-image-tool", "invoice-generator-tool", "file-hash-tool"];
 const browseToolsPageSize = 10;
 
 // Set by Cmd/Ctrl+K when it navigates to the dashboard from another route, so the
@@ -192,17 +189,13 @@ export default function App() {
 function Shell({ children, hash, theme, onToggleTheme }: { children: React.ReactNode; hash: string; theme: ThemeMode; onToggleTheme: () => void }) {
   const [isScrolled, setIsScrolled] = useState(() => window.scrollY > 4);
   const [menuOpen, setMenuOpen] = useState(false);
-  const primaryNavItems = useMemo<NavItem[]>(() => [
-    { id: "dashboard", icon: <LayoutDashboard />, label: "Dashboard", onClick: () => { window.location.hash = "#dashboard"; } },
-    ...categories.map((category) => {
-      const Icon = categoryIcons[category] || Sparkles;
-      return {
-        id: category,
-        icon: <Icon />,
-        label: category.replace(" Tools", ""),
-        onClick: () => { window.location.hash = categoryRoute(category); },
-      };
-    }),
+  const primaryNavItems = useMemo(() => [
+    { id: "dashboard", label: "Dashboard", href: "#dashboard" },
+    ...categories.map((category) => ({
+      id: category,
+      label: category.replace(" Tools", ""),
+      href: categoryRoute(category),
+    })),
   ], []);
   const activeNavIndex = activePrimaryNavIndex(hash);
 
@@ -245,17 +238,24 @@ function Shell({ children, hash, theme, onToggleTheme }: { children: React.React
               <span className="block text-xs font-bold uppercase text-neutral-500">Local-first tools</span>
             </span>
           </a>
-          <LimelightNav
-            className="hidden lg:inline-flex"
-            items={primaryNavItems}
-            activeIndex={activeNavIndex}
-            limelightClassName="bg-[var(--primary)]"
-          />
+          <nav className="hidden items-center gap-1 lg:flex" aria-label="Primary navigation">
+            {primaryNavItems.map((item, index) => {
+              const active = index === activeNavIndex;
+              return (
+                <a
+                  key={item.id}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  className={`rounded-full px-3 py-2 text-sm no-underline transition hover:bg-[var(--paper-soft)] ${active ? "font-black text-[var(--ink)] underline decoration-2 underline-offset-8" : "font-semibold text-neutral-500 hover:text-[var(--ink)]"}`}
+                >
+                  {item.label}
+                </a>
+              );
+            })}
+          </nav>
           <div className="flex items-center gap-2">
             <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-            <div className="hidden lg:block">
-              <FlowButton text="Browse tools" onClick={() => { window.location.hash = "#browse-tools"; }} />
-            </div>
+            <a className="secondary-button hidden w-fit no-underline lg:inline-flex" href="#browse-tools">Browse tools</a>
             <button
               className="grid h-11 w-11 place-items-center rounded-2xl border border-[var(--line)] bg-[var(--paper-soft)] text-[var(--ink)] lg:hidden"
               type="button"
@@ -329,7 +329,7 @@ function MobileNav({ open, onClose, activeHash }: { open: boolean; onClose: () =
 
   if (!open) return null;
 
-  const linkClass = "flex min-h-11 items-center rounded-2xl px-4 py-3 text-sm font-black text-[var(--ink)] no-underline transition hover:bg-[var(--paper-soft)]";
+  const linkClass = "flex min-h-11 items-center rounded-2xl px-4 py-3 text-sm font-medium text-[var(--ink)] no-underline transition hover:bg-[var(--paper-soft)]";
 
   return (
     <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Site navigation" onClick={onClose}>
@@ -342,7 +342,7 @@ function MobileNav({ open, onClose, activeHash }: { open: boolean; onClose: () =
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-2 flex items-center justify-between">
-          <span className="font-display text-lg font-black">Menu</span>
+          <span className="font-display text-lg font-medium">Menu</span>
           <button className="grid h-11 w-11 place-items-center rounded-2xl border border-[var(--line)] text-[var(--ink)]" type="button" aria-label="Close navigation menu" onClick={onClose}>
             <X size={20} />
           </button>
@@ -666,9 +666,8 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
   const visibleBadges = (tool.badges || []).filter((badge: string) => !["Local", "Local processing", categoryDetails[tool.category]?.accent].includes(badge)).slice(0, 2);
   const multiFile = multiFileLabel(tool);
   const primaryBadge = categoryDetails[tool.category]?.accent || tool.category.replace(" Tools", "");
-  const categoryClass = `category-${tool.category.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
   return (
-    <GlowCard customSize glowColor={glowColorForTool(tool)} className={`tool-card ${categoryClass} group p-0 transition hover:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
+    <div className={`tool-card group p-0 transition hover:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
       <a href={tool.route} className={`tool-card-link gap-4 rounded-3xl p-5 transition focus-visible:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
         <div className="flex items-start justify-between gap-3">
           <span className="icon-tile grid h-12 w-12 place-items-center rounded-2xl transition group-hover:rotate-3">
@@ -687,7 +686,7 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
           {!compact && fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
         </div>
       </a>
-    </GlowCard>
+    </div>
   );
 }
 
@@ -862,6 +861,7 @@ function ToolMetaPanel({ status, onReset, children }: { status: Status; onReset:
       <div>
         <p className="text-xs font-black uppercase text-neutral-500">Status</p>
         <StatusBox status={status} />
+        {status.progress ? <ProgressBar value={status.progress.value} total={status.progress.total} label={status.progress.label} /> : null}
       </div>
       {children}
       {downloadReady ? (
@@ -903,6 +903,22 @@ function ToolForm({ children, status, onReset }: { children: React.ReactNode; st
   );
 }
 
+/** Shared determinate progress bar: accessible, single-accent fill, matches the P2P transfer bar. */
+function ProgressBar({ value, total, label }: { value: number; total: number; label: string }) {
+  const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((value / total) * 100))) : 0;
+  return (
+    <div className="mt-3 grid gap-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs font-bold text-neutral-500">
+        <span className="min-w-0 break-words">{label}</span>
+        <span className="tabular-nums">{percent}% · {value}/{total}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-[var(--paper-soft)]" role="progressbar" aria-label={label} aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+        <div className="h-full rounded-full bg-[var(--moss)] transition-[width] duration-200" style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function StatusBox({ status }: { status: Status }) {
   const tone = status.tone === "error"
     ? "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]"
@@ -910,6 +926,16 @@ function StatusBox({ status }: { status: Status }) {
       ? "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f] [.dark_&]:border-[#3f5136] [.dark_&]:bg-[#16241a] [.dark_&]:text-[#bfe3b0]"
       : "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]";
   return <p role="status" aria-live="polite" className={`min-h-12 whitespace-pre-line rounded-2xl border px-4 py-3 text-sm font-bold ${tone}`}>{status.message}</p>;
+}
+
+/** A persistent, result-attached consequence note — survives the transient status message. */
+function ResultConsequenceNote({ children }: { children: React.ReactNode }) {
+  return (
+    <div role="note" className="grid gap-1 rounded-2xl border border-[var(--line)] bg-[var(--paper-soft)] p-4 text-sm font-semibold leading-6 text-neutral-600">
+      <p className="text-xs font-black uppercase text-neutral-500">Keep in mind</p>
+      <p className="text-[var(--foreground)]">{children}</p>
+    </div>
+  );
 }
 
 function FileControl({ accept, multiple = false, files, setFiles, label }: { accept: string; multiple?: boolean; files: File[]; setFiles: (files: File[]) => void; label?: string }) {
@@ -983,18 +1009,15 @@ function usePendingHandler(onClick: () => unknown) {
   return { pending, handleClick };
 }
 
-function PrimaryButton({ label, onClick }: { label: string; onClick: () => unknown }) {
+function PrimaryButton({ label, onClick, disabled = false }: { label: string; onClick: () => unknown; disabled?: boolean }) {
   const { pending, handleClick } = usePendingHandler(onClick);
   const isDownload = label.toLowerCase().startsWith("download");
   const busyLabel = isDownload ? "Downloading…" : "Working…";
-
-  if (isDownload) {
-    return <AnimatedDownloadButton label={pending ? busyLabel : label} onClick={handleClick} disabled={pending} />;
-  }
+  const Idle = isDownload ? Download : Zap;
 
   return (
-    <LiquidButton className="primary-button" onClick={handleClick} disabled={pending} aria-busy={pending}>
-      {pending ? <Loader2 className="animate-spin" size={17} /> : <Zap size={17} />}
+    <LiquidButton className="primary-button" onClick={handleClick} disabled={pending || disabled} aria-busy={pending}>
+      {pending ? <Loader2 className="animate-spin" size={17} /> : <Idle size={17} />}
       {pending ? busyLabel : label}
     </LiquidButton>
   );
@@ -1505,7 +1528,7 @@ function HighlightedPassage({ text, terms }: { text: string; terms: string[] }) 
     <p className="text-sm font-semibold leading-6 text-[var(--foreground)]">
       {highlightSegments(text, terms).map((segment, position) => (
         segment.match
-          ? <mark key={position} className="rounded bg-[#f2e5b0] px-0.5 text-[#33301f] [.dark_&]:bg-[#4a4222] [.dark_&]:text-[#f5e9c0]">{segment.text}</mark>
+          ? <mark key={position} className="rounded bg-[color-mix(in_srgb,var(--primary)_22%,transparent)] px-0.5 text-[var(--foreground)]">{segment.text}</mark>
           : <span key={position}>{segment.text}</span>
       ))}
     </p>
@@ -1677,7 +1700,7 @@ function ChatWithPdfTool({ tool }: { tool: Tool }) {
     })} />
     <Input label="Your question" value={question} onChange={setQuestion} placeholder="What is the payment deadline?" helper={index ? `${index.count} passages indexed. Follow-up questions re-search the same index.` : "Index a PDF first."} />
     <Select label="Passages to return" value={topN} onChange={setTopN} options={["3", "5", "8"]} labels={["Top 3", "Top 5", "Top 8"]} />
-    <PrimaryButton label="Find answer passages" onClick={() => runSafely(setStatus, async () => {
+    <PrimaryButton label="Find answer passages" disabled={!index} onClick={() => runSafely(setStatus, async () => {
       if (!index) throw new Error("Index a PDF before asking a question.");
       if (!question.trim()) throw new Error("Type a question first.");
       const hits = searchPassages(index, question, { limit: Number(topN) });
@@ -1990,6 +2013,7 @@ function AutoRedactPiiTool({ tool }: { tool: Tool }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [reveal, setReveal] = useState(false);
   const [dpi, setDpi] = useState("150");
+  const [redacted, setRedacted] = useState(false);
   const [status, setStatus] = useState(initialStatus);
 
   const reset = () => {
@@ -1997,6 +2021,7 @@ function AutoRedactPiiTool({ tool }: { tool: Tool }) {
     setScan(null);
     setSelected(new Set());
     setReveal(false);
+    setRedacted(false);
     setStatus(initialStatus);
   };
 
@@ -2007,6 +2032,7 @@ function AutoRedactPiiTool({ tool }: { tool: Tool }) {
     setScan(null);
     setSelected(new Set());
     setReveal(false);
+    setRedacted(false);
     if (!files.length) return undefined;
 
     runSafely(setStatus, async () => {
@@ -2123,8 +2149,10 @@ function AutoRedactPiiTool({ tool }: { tool: Tool }) {
         const bytes = await redactPdfWithProgress(file, selectedRects, { dpi: Number(dpi), onProgress: pageProgress(setStatus, "Rasterising") });
         downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-redacted`, "pdf"), "application/pdf");
         const pages = new Set(selectedRects.map((rect) => rect.page)).size;
-        return `Painted ${selectedRects.length} area${selectedRects.length === 1 ? "" : "s"} for ${selectedHits.length} match${selectedHits.length === 1 ? "" : "es"} across ${pages} page${pages === 1 ? "" : "s"}, then rebuilt every page as an image. The covered text is gone from the output, and the whole document is now flattened. Verify the result before sharing.`;
+        setRedacted(true);
+        return `Painted ${selectedRects.length} area${selectedRects.length === 1 ? "" : "s"} for ${selectedHits.length} match${selectedHits.length === 1 ? "" : "es"} across ${pages} page${pages === 1 ? "" : "s"}, then rebuilt every page as an image.`;
       })} />
+      {redacted && <ResultConsequenceNote>The covered text is gone from the output, and the whole document is now flattened. Verify the result before sharing.</ResultConsequenceNote>}
     </ToolForm>
   );
 }
@@ -2338,7 +2366,7 @@ function severityTone(severity: string) {
   if (severity === "Critical") return "border-red-300 bg-red-100 text-red-900 [.dark_&]:border-[#8f2323] [.dark_&]:bg-[#33141a] [.dark_&]:text-[#ffb3b3]";
   if (severity === "High") return "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]";
   if (severity === "Medium") return "border-amber-200 bg-amber-50 text-amber-900 [.dark_&]:border-[#7a5a1f] [.dark_&]:bg-[#2a2113] [.dark_&]:text-[#f3d79b]";
-  if (severity === "Low") return "border-sky-200 bg-sky-50 text-sky-900 [.dark_&]:border-[#245a7a] [.dark_&]:bg-[#132330] [.dark_&]:text-[#9bd0f3]";
+  // Low + Info are neutral — chroma is reserved for danger (Critical/High=red, Medium=amber).
   return "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]";
 }
 
@@ -2372,7 +2400,7 @@ function PdfAnalyzerTool({ tool }: { tool: Tool }) {
       const [file] = validateFiles(files, tool.file);
       const bytes = new Uint8Array(await file.arrayBuffer());
       const result = (await analyzePdfBytes(bytes, {
-        onProgress: (step: number, total: number) => setStatus({ tone: "idle", message: `Analysing ${file.name} — step ${step} of ${total}…` }),
+        onProgress: (step: number, total: number) => setStatus({ tone: "idle", message: `Analysing ${file.name} — step ${step} of ${total}…`, progress: { value: step, total, label: "Analysing…" } }),
       })) as AnalyzerReport;
       if (cancelled) return "Ready.";
       setReport(result);
@@ -2606,8 +2634,9 @@ function EncryptPdfTool({ tool }: { tool: Tool }) {
       const result = await encryptPdf(file, { userPassword: password, ownerPassword, algorithm, permissions });
       downloadBytes(result.bytes, withExtension(`${safeFilename(file.name)}-encrypted`, "pdf"), "application/pdf");
       const blocked = listPermissions(result.permissions as Record<string, boolean>, false);
-      return `Encrypted with ${result.algorithm}.\n${blocked.length ? `Not allowed: ${blocked.join(", ")}.` : "All permissions allowed."}\nStore the password somewhere safe — it cannot be recovered.`;
+      return `Encrypted with ${result.algorithm}.\n${blocked.length ? `Not allowed: ${blocked.join(", ")}.` : "All permissions allowed."}`;
     })} />
+    {status.tone === "success" && <ResultConsequenceNote>Store the password somewhere safe — it cannot be recovered.</ResultConsequenceNote>}
   </ToolForm>;
 }
 
@@ -2630,8 +2659,9 @@ function RemovePasswordTool({ tool }: { tool: Tool }) {
       if (!password) throw new Error("Enter the PDF's current password.");
       const result = await decryptPdf(file, password);
       downloadBytes(result.bytes, withExtension(`${safeFilename(file.name)}-no-password`, "pdf"), "application/pdf");
-      return `Removed ${result.algorithm} encryption from ${file.name}.\nThe copy you just downloaded opens without a password.`;
+      return `Removed ${result.algorithm} encryption from ${file.name}.`;
     })} />
+    {status.tone === "success" && <ResultConsequenceNote>The copy you just downloaded opens without a password.</ResultConsequenceNote>}
   </ToolForm>;
 }
 
@@ -2650,6 +2680,7 @@ function UnlockPdfTool({ tool }: { tool: Tool }) {
       const restored = listPermissions(result.permissionsBefore as Record<string, boolean>, false);
       return `Removed ${result.algorithm} owner-password restrictions from ${file.name}.\n${restored.length ? `Restored: ${restored.join(", ")}.` : "That PDF was encrypted but had no restrictions set."}`;
     })} />
+    {status.tone === "success" && <ResultConsequenceNote>The copy you downloaded has its owner-password restrictions removed — printing, copying, and editing are open to anyone who has it.</ResultConsequenceNote>}
   </ToolForm>;
 }
 
@@ -3367,7 +3398,11 @@ function EbookToPdfTool({ tool }: { tool: Tool }) {
 
 // Shared per-page progress reporter for the export tools below.
 function pageProgress(setStatus: (status: Status) => void, verb: string) {
-  return (page: number, total: number) => setStatus({ tone: "idle", message: `${verb} page ${page} of ${total}…` });
+  return (page: number, total: number) => setStatus({
+    tone: "idle",
+    message: `${verb} page ${page} of ${total}…`,
+    progress: { value: page, total, label: `${verb}…` },
+  });
 }
 
 function PdfToWordTool({ tool }: { tool: Tool }) {
@@ -5523,36 +5558,6 @@ function MissingPage() {
   return <div className="surface-panel wabi-edge p-10 text-center"><h1 className="font-display text-4xl font-black">Page not found</h1><a className="primary-button mx-auto mt-5 w-fit" href="#dashboard">Return to dashboard</a></div>;
 }
 
-function filterTools(query: string) {
-  const parts = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return tools;
-  const scored: Array<{ tool: Tool; score: number }> = [];
-  for (const tool of tools) {
-    const name = tool.name.toLowerCase();
-    const keywords = (tool.keywords || []).join(" ").toLowerCase();
-    const description = tool.description.toLowerCase();
-    const haystack = searchableText(tool);
-    let score = 0;
-    let matchedAll = true;
-    for (const part of parts) {
-      if (!haystack.includes(part)) { matchedAll = false; break; }
-      if (name === part) score += 100;
-      else if (name.startsWith(part)) score += 60;
-      else if (name.includes(part)) score += 40;
-      else if (keywords.includes(part)) score += 20;
-      else if (description.includes(part)) score += 10;
-      else score += 5;
-    }
-    if (matchedAll) scored.push({ tool, score });
-  }
-  scored.sort((a, b) => b.score - a.score);
-  return scored.map((entry) => entry.tool);
-}
-
-function searchableText(tool: Tool) {
-  return [tool.name, tool.category, tool.description, ...(tool.keywords || []), ...(tool.badges || []), ...(tool.acceptedTypes || [])].join(" ").toLowerCase();
-}
-
 function findToolById(id: string) {
   return tools.find((tool: Tool) => tool.id === id);
 }
@@ -5626,10 +5631,6 @@ function fileTypeLabel(tool: Tool) {
 function multiFileLabel(tool: Tool) {
   const file = tool.file as { maxFiles?: number };
   return file.maxFiles && file.maxFiles > 1 ? "Multiple files" : "";
-}
-
-function glowColorForTool(_tool: Tool): GlowColor {
-  return "blue";
 }
 
 function iconForTool(tool: Tool) {

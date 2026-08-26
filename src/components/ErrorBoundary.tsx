@@ -41,12 +41,12 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
           padding: "2rem",
           textAlign: "center",
           fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif",
-          color: "#101828",
-          background: "#ffffff"
+          color: "var(--foreground)",
+          background: "var(--card)"
         }}
       >
         <h1 style={{ fontSize: "1.25rem", fontWeight: 700, margin: 0 }}>Something went wrong</h1>
-        <p style={{ margin: 0, color: "#6b665e", maxWidth: "28rem" }}>
+        <p style={{ margin: 0, color: "var(--muted-foreground)", maxWidth: "28rem" }}>
           MyFileKit hit an unexpected error. Your files stay on this device; reloading starts a fresh
           session.
         </p>
@@ -55,10 +55,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
           onClick={() => location.reload()}
           style={{
             appearance: "none",
-            border: "1px solid #101828",
+            border: "1px solid var(--primary)",
             borderRadius: "8px",
-            background: "#101828",
-            color: "#ffffff",
+            background: "var(--primary)",
+            color: "var(--primary-foreground)",
             padding: "0.5rem 1.25rem",
             fontSize: "0.95rem",
             fontWeight: 600,

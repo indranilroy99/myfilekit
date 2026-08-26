@@ -69,15 +69,35 @@
   --sidebar-primary-foreground: #fafafa;
   --app-bg: var(--background);
   --ink: var(--foreground);
-  --paper: var(--card);
   --paper-soft: var(--muted);
   --stone: var(--muted-foreground);
   --line: var(--border);
   --moss: var(--primary);
-  --indigo: #171717;
-  --clay: var(--primary);
   --shadow-soft: 0 24px 70px rgba(15, 23, 42, .08);
   --shadow-lift: 0 30px 90px rgba(15, 23, 42, .14);
+  /* Canonical semantic status tokens (danger/warning/success), each a border/bg/fg
+     trio. These reproduce the colours currently hard-coded in App.tsx
+     (StatusBox / severityTone / verdictTone / confidenceTone) so future work can
+     reference one source of truth instead of duplicating literals. danger/warning
+     light values mirror Tailwind red-200/50/800 and amber-200/50/900. */
+  --danger: oklch(88.5% 0.062 18.334);
+  --danger-bg: oklch(97.1% 0.013 17.38);
+  --danger-fg: oklch(44.4% 0.177 26.899);
+  --warning: oklch(92.4% 0.12 95.746);
+  --warning-bg: oklch(98.7% 0.022 95.277);
+  --warning-fg: oklch(41.4% 0.112 45.904);
+  --success: #b9c6a7;
+  --success-bg: #edf4e3;
+  --success-fg: #31412f;
+  /* Named radius scale matching the current ad-hoc values (cards 6px, search 12px).
+     --radius is intentionally left untouched above: it already renders live at
+     1.15rem in light for skip-link, pdf panels and the rounded-* normalization, so
+     redefining it would change the look. */
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+  /* Common transition durations used across the file. */
+  --dur-fast: 150ms;
+  --dur: 180ms;
   font-family: var(--font-sans);
   color: var(--ink);
   background: var(--app-bg);
@@ -97,7 +117,6 @@ body {
   min-height: 100vh;
   background:
     radial-gradient(circle at 16% 8%, rgba(59, 130, 246, .08), transparent 32%),
-    radial-gradient(circle at 86% 2%, rgba(20, 184, 166, .08), transparent 28%),
     linear-gradient(180deg, #ffffff 0%, #f8fafc 42%, #f3f6fa 100%),
     var(--app-bg);
   background-size: auto;
@@ -120,7 +139,6 @@ body::before {
 html.dark body {
   background:
     radial-gradient(circle at 14% 8%, rgba(59, 130, 246, .16), transparent 30%),
-    radial-gradient(circle at 86% 4%, rgba(45, 212, 191, .12), transparent 28%),
     linear-gradient(180deg, #0b1020 0%, #080c14 46%, #05070d 100%),
     var(--app-bg);
 }
@@ -204,10 +222,6 @@ button {
 
 .moss-text {
   color: var(--moss);
-}
-
-.clay-text {
-  color: var(--clay);
 }
 
 .ink-button,
@@ -784,14 +798,6 @@ button {
   box-shadow: 0 18px 44px rgba(16, 24, 40, .18);
 }
 
-.animated-download-button {
-  min-height: 48px;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: inherit;
-}
-
 .secondary-button,
 .nav-action,
 .side-link {
@@ -974,37 +980,6 @@ button {
   height: 24px;
 }
 
-.flow-button {
-  border-color: rgba(51, 51, 51, .4);
-  color: #111;
-}
-
-.flow-button-arrow {
-  stroke: #111;
-}
-
-.flow-button-fill {
-  background: #111;
-}
-
-.flow-button:hover {
-  color: #fff;
-}
-
-.flow-button:hover .flow-button-arrow {
-  stroke: #fff;
-}
-
-.limelight-nav {
-  border: 1px solid rgba(255, 255, 255, .8);
-  background: rgba(255, 255, 255, .7);
-}
-
-.limelight-nav-item:hover,
-.limelight-nav-item:focus-visible {
-  background: rgba(255, 255, 255, .62);
-}
-
 .pagination-shell {
   border-radius: 2rem;
   background: rgba(255, 255, 255, .55);
@@ -1121,27 +1096,6 @@ html.dark .category-filter {
   background: linear-gradient(145deg, rgba(15, 23, 42, .76), rgba(30, 41, 59, .52));
 }
 
-html.dark .tool-card {
-  --backdrop: rgba(12, 18, 32, .86);
-  --backup-border: rgba(148, 163, 184, .16);
-  --outer: .34;
-  background-color: rgba(12, 18, 32, .76) !important;
-  background-image:
-    radial-gradient(
-      260px 240px at calc(var(--x, 0) * 1px) calc(var(--y, 0) * 1px),
-      hsl(var(--hue, 210) 92% 68% / .09),
-      transparent 72%
-    ),
-    radial-gradient(circle at 20% 10%, rgba(148, 197, 255, .12), transparent 34%),
-    linear-gradient(145deg, rgba(16, 24, 40, .88), rgba(11, 18, 32, .72)) !important;
-  border-color: transparent !important;
-  border-radius: 1.75rem !important;
-  color: #f8fafc !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .06),
-    0 24px 68px rgba(0, 0, 0, .28);
-}
-
 html.dark .tool-card-link {
   color: #f8fafc !important;
 }
@@ -1237,37 +1191,6 @@ html.dark .pagination-page-button[data-selected] {
   color: var(--primary-foreground);
 }
 
-html.dark .flow-button {
-  border-color: rgba(219, 234, 254, .36);
-  color: var(--ink);
-}
-
-html.dark .flow-button-arrow {
-  stroke: var(--ink);
-}
-
-html.dark .flow-button-fill {
-  background: var(--primary);
-}
-
-html.dark .flow-button:hover {
-  color: var(--primary-foreground);
-}
-
-html.dark .flow-button:hover .flow-button-arrow {
-  stroke: var(--primary-foreground);
-}
-
-html.dark .limelight-nav {
-  border-color: rgba(148, 163, 184, .16);
-  background: rgba(15, 23, 42, .7);
-}
-
-html.dark .limelight-nav-item:hover,
-html.dark .limelight-nav-item:focus-visible {
-  background: rgba(30, 41, 59, .72);
-}
-
 html.dark .text-neutral-400,
 html.dark .text-neutral-500,
 html.dark .text-neutral-600,
@@ -1286,7 +1209,7 @@ html.dark .site-footer {
 
 /* rounded-full intentionally excluded so pills/avatars stay fully round;
    box utilities are normalised to the container radius token. */
-:where(.rounded-3xl, .rounded-2xl, .rounded-xl) {
+:where(.rounded-3xl, .rounded-2xl, .rounded-xl, .rounded-lg, .rounded-md) {
   border-radius: var(--radius);
 }
 
@@ -1422,15 +1345,23 @@ html.dark .site-footer {
   --secondary-foreground: #fafafa;
   --app-bg: #09090b;
   --ink: #fafafa;
-  --paper: #111113;
   --paper-soft: #111113;
   --stone: #a1a1aa;
   --line: #1f1f23;
   --moss: #a1a1aa;
-  --indigo: #fafafa;
-  --clay: #a1a1aa;
   --shadow-soft: none;
   --shadow-lift: none;
+  /* Dark values for the canonical semantic status tokens — mirror the [.dark_&]
+     overrides currently inlined in App.tsx's tone helpers. */
+  --danger: #7f2a2a;
+  --danger-bg: #2a1416;
+  --danger-fg: #f8b4b4;
+  --warning: #7a5a1f;
+  --warning-bg: #2a2113;
+  --warning-fg: #f3d79b;
+  --success: #3f5136;
+  --success-bg: #16241a;
+  --success-fg: #bfe3b0;
 }
 
 html.dark,
@@ -1440,12 +1371,7 @@ html.dark body {
   font-family: var(--font-sans);
 }
 
-html.dark body::before,
-.wabi-noise,
-.wabi-shadow,
-[data-glow-card]::before,
-[data-glow-card]::after,
-[data-glow-card] .glow-card-inner {
+html.dark body::before {
   display: none !important;
 }
 
@@ -1649,99 +1575,12 @@ html.dark .strength-4 { color: color-mix(in srgb, var(--primary) 90%, #ffffff); 
 .site-header .font-display {
   font-size: 20px;
   font-weight: 700;
-  letter-spacing: -.03em;
 }
 
 .site-header .text-neutral-500 {
   color: #8a8a94 !important;
   font-size: 11px;
   letter-spacing: .08em;
-}
-
-.limelight-nav {
-  height: 40px !important;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
-  border-radius: 0 !important;
-}
-
-.limelight-nav > div {
-  display: none !important;
-}
-
-.limelight-nav-item {
-  height: 40px !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  color: #a1a1aa !important;
-  font-size: 14px !important;
-  font-weight: 400 !important;
-  padding-inline: 14px !important;
-}
-
-.limelight-nav-item::after {
-  content: "";
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 6px;
-  height: 1px;
-  transform: scaleX(0);
-  transform-origin: left;
-  background: #3b82f6;
-  transition: transform .18s ease;
-}
-
-.limelight-nav-item:hover,
-.limelight-nav-item:focus-visible,
-.limelight-nav-item[aria-current="page"] {
-  background: transparent !important;
-  color: #fafafa !important;
-}
-
-.limelight-nav-item:hover::after,
-.limelight-nav-item:focus-visible::after,
-.limelight-nav-item[aria-current="page"]::after {
-  transform: scaleX(1);
-}
-
-.flow-button {
-  min-height: 40px !important;
-  border: 1px solid #2a2a30 !important;
-  border-radius: 8px !important;
-  background: transparent !important;
-  color: #fafafa !important;
-  padding: 0 16px !important;
-  font-size: 14px !important;
-  font-weight: 500 !important;
-  transition: background .18s ease, border-color .18s ease, color .18s ease !important;
-}
-
-.flow-button:hover,
-.flow-button:focus-visible {
-  border-color: #3b82f6 !important;
-  background: #3b82f6 !important;
-  color: #fafafa !important;
-  transform: none !important;
-}
-
-.flow-button-fill {
-  display: none !important;
-}
-
-.flow-button-arrow {
-  stroke: currentColor !important;
-  transition: none !important;
-}
-
-.flow-button .flow-button-arrow:first-child {
-  display: none !important;
-}
-
-.flow-button span:not(.flow-button-fill) {
-  transform: none !important;
 }
 
 .theme-toggle,
@@ -1942,15 +1781,11 @@ html.dark .search-result-icon {
 
 .tool-card,
 html.dark .tool-card {
-  --backdrop: #111113 !important;
-  --backup-border: #1f1f23 !important;
-  --outer: 0 !important;
   min-height: 176px !important;
   border: .5px solid #1f1f23 !important;
   border-radius: 6px !important;
   background: #111113 !important;
   background-color: #111113 !important;
-  background-image: none !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
   transition: transform .16s ease, border-color .16s ease !important;
@@ -2198,13 +2033,10 @@ html:not(.dark) {
   --secondary-foreground: #18181b;
   --app-bg: #f5f7fa;
   --ink: #18181b;
-  --paper: #ffffff;
   --paper-soft: #f1f5f9;
   --stone: #52525b;
   --line: #cbd5e1;
   --moss: #2563eb;
-  --indigo: #18181b;
-  --clay: #2563eb;
   --shadow-soft: 0 10px 28px rgba(24, 24, 27, .05);
   --shadow-lift: 0 14px 36px rgba(24, 24, 27, .08);
 }
@@ -2220,7 +2052,6 @@ html:not(.dark) .site-header-scrolled {
   background: rgba(245, 247, 250, .92) !important;
 }
 
-html:not(.dark) .limelight-nav-item,
 html:not(.dark) .theme-toggle,
 html:not(.dark) .secondary-button,
 html:not(.dark) .nav-action,
@@ -2233,9 +2064,6 @@ html:not(.dark) .quick-chip {
   color: #52525b !important;
 }
 
-html:not(.dark) .limelight-nav-item:hover,
-html:not(.dark) .limelight-nav-item:focus-visible,
-html:not(.dark) .limelight-nav-item[aria-current="page"],
 html:not(.dark) .theme-toggle:hover,
 html:not(.dark) .theme-toggle:focus-visible,
 html:not(.dark) .secondary-button:hover,
@@ -2248,18 +2076,6 @@ html:not(.dark) .quick-chip:hover,
 html:not(.dark) .quick-chip:focus-visible {
   border-color: #a1a1aa !important;
   color: #18181b !important;
-}
-
-html:not(.dark) .flow-button {
-  border-color: #d4d4d8 !important;
-  color: #18181b !important;
-}
-
-html:not(.dark) .flow-button:hover,
-html:not(.dark) .flow-button:focus-visible {
-  border-color: #2563eb !important;
-  background: #2563eb !important;
-  color: #ffffff !important;
 }
 
 html:not(.dark) .hero-panel h1,
