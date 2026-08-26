@@ -30,12 +30,23 @@ Local processing reduces network exposure. It does not guarantee that an untrust
 - File type, file count, file size, numeric ranges, and page selections are validated before processing.
 - Dashboard cards are generated from a central registry and are only visible when their routes have working implementations.
 
+## Optional Bring-Your-Own LLM Endpoint
+
+PDF Summarizer and Ask Your PDF are fully local by default. PDF Summarizer ranks sentences with a TextRank graph built in the browser; Ask Your PDF retrieves passages with a BM25 index built in the browser. Neither needs a network connection, a model download, or an account.
+
+Both tools also expose an optional adapter for an OpenAI-compatible endpoint the user owns. It is off unless a user configures it, and it changes the processing boundary when used:
+
+- The endpoint base URL, model name, and API key are stored only in that browser's `localStorage`. The key is never logged, never written into a URL or query string, and is masked in the UI. It is sent only as an `Authorization: Bearer` header on a request the user explicitly triggered.
+- Nothing is transmitted until the user saves an endpoint, enables it, and presses an AI button. `requestChatCompletion` in `src/services/llm.service.js` refuses before reaching `fetch` when the settings are absent or disabled, so a default install cannot make the request at all.
+- The AI buttons are labelled with the destination origin, and the results are labelled as produced off the device. PDF Summarizer sends the extracted document text; Ask Your PDF sends only the retrieved passages plus the question.
+- The shipped policy pins `connect-src 'self'` in both `index.html` and `public/_headers`, so a browser blocks every custom endpoint on the default build. **This policy is intentional and is not relaxed for these tools.** An operator who wants the adapter on their own deploy must add `connect-src 'self' https://their-endpoint.example` to both files and rebuild. Until then the tools catch the block and say exactly which files to change rather than reporting a generic network failure.
+
 ## Required Hosting Headers
 
 An HTML `<meta>` policy cannot enforce every response-level security control. Configure the static host to send headers similar to these:
 
 ```text
-Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 Referrer-Policy: no-referrer

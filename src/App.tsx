@@ -59,6 +59,8 @@ import { docxToHtml, epubToHtml, pptxToSlides, readWorkbookSheets, sanitizeHtmlF
 import { pdfToDocx, pdfToEpub, pdfToHtml, pdfToXlsx } from "./services/export.service.js";
 import { OCR_ENGINE_SIZE_LABEL, mergeSearchablePdfPages, ocrImages, ocrPdf, terminateOcrWorker } from "./services/ocr.service.js";
 import { createSpeechRecognizer, getSpeechSynthesis, loadSpeechVoices, speechRecognitionSupport, speechSynthesisSupported, splitTextForSpeech } from "./services/audio.service.js";
+import { buildPassageIndex, chunkPages, highlightSegments, searchPassages, summarizeText } from "./services/nlp.service.js";
+import { buildAnswerPrompt, buildSummaryPrompt, clearLlmSettings, endpointOrigin, isLlmConfigured, maskApiKey, readLlmSettings, requestChatCompletion, saveLlmSettings } from "./services/llm.service.js";
 
 type Tool = (typeof tools)[number];
 type Status = { tone: "idle" | "success" | "error"; message: string };
@@ -1072,6 +1074,8 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "pdf-metadata-cleaner-tool") return <PdfMetadataCleanerTool tool={tool} />;
   if (tool.id === "pdf-to-image-tool") return <PdfToImageTool tool={tool} />;
   if (tool.id === "extract-text-tool") return <ExtractTextTool tool={tool} />;
+  if (tool.id === "summarize-pdf-tool") return <SummarizePdfTool tool={tool} />;
+  if (tool.id === "chat-with-pdf-tool") return <ChatWithPdfTool tool={tool} />;
   if (tool.id === "compress-pdf-tool") return <CompressPdfTool tool={tool} />;
   if (tool.id === "pdf-to-zip-tool") return <PdfToZipTool tool={tool} />;
   if (tool.id === "flatten-pdf-tool") return <FlattenPdfTool tool={tool} />;
@@ -1397,6 +1401,305 @@ function ExtractTextTool({ tool }: { tool: Tool }) {
         return "Text file ready to download.";
       })} />
     </div>
+  </ToolForm>;
+}
+
+type LlmSettings = ReturnType<typeof readLlmSettings>;
+type SummaryResult = ReturnType<typeof summarizeText>;
+type PassageIndex = ReturnType<typeof buildPassageIndex>;
+type PassageHit = ReturnType<typeof searchPassages>[number];
+type QaEntry = { id: number; question: string; hits: PassageHit[]; answer: string };
+
+const NO_PDF_TEXT_MESSAGE = "No selectable text found — this PDF is likely scanned images. Run the OCR / Searchable PDF tool first, then use the searchable PDF it produces.";
+
+/**
+ * Optional bring-your-own-LLM settings, stored in localStorage on this device.
+ * Off by default; while it is off no tool in this app makes a network request.
+ */
+function LlmEndpointPanel({ settings, onChange }: { settings: LlmSettings; onChange: (next: LlmSettings) => void }) {
+  const [open, setOpen] = useState(false);
+  const [baseUrl, setBaseUrl] = useState(settings.baseUrl);
+  const [model, setModel] = useState(settings.model);
+  const [apiKey, setApiKey] = useState("");
+  const [panelStatus, setPanelStatus] = useState(initialStatus);
+  const configured = isLlmConfigured(settings);
+  const origin = endpointOrigin(settings.baseUrl);
+
+  return (
+    <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold leading-6 text-neutral-600">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-black uppercase text-neutral-500">Optional AI endpoint — {configured ? "on" : "off"}</p>
+        <button className="secondary-button" type="button" onClick={() => setOpen(!open)}>{open ? "Hide settings" : "Settings"}</button>
+      </div>
+      <p>
+        {configured
+          ? `Your own endpoint is switched on. When you press an AI button, the document text is sent to ${origin} and is no longer local. Nothing is sent until you press one.`
+          : "This tool is fully local. You can optionally point it at your own OpenAI-compatible endpoint; until you do, nothing leaves this device."}
+      </p>
+      {open && (
+        <div className="grid gap-3">
+          <p className="text-xs font-semibold text-neutral-500">
+            The key is stored only in this browser's localStorage, is never placed in a URL, and is only ever sent as an Authorization header to the endpoint you enter.
+            MyFileKit ships a strict Content-Security-Policy that blocks every outbound connection, so a custom endpoint only works on a deploy where you have added
+            <span className="whitespace-pre"> connect-src 'self' &lt;your origin&gt; </span>
+            to index.html and public/_headers.
+          </p>
+          <Input label="Base URL" value={baseUrl} onChange={setBaseUrl} placeholder="https://api.example.com/v1" helper="Requests go to <base URL>/chat/completions." />
+          <Input label="Model" value={model} onChange={setModel} placeholder="gpt-4o-mini" />
+          <Input label="API key" value={apiKey} onChange={setApiKey} type="password" helper={settings.apiKey ? `Saved key: ${maskApiKey(settings.apiKey)}. Leave blank to keep it.` : "Stored on this device only."} />
+          <StatusBox status={panelStatus} />
+          <div className="flex flex-wrap gap-2">
+            <SecondaryButton label="Save and enable" onClick={() => runSafely(setPanelStatus, async () => {
+              const next = saveLlmSettings({ enabled: true, baseUrl, model, apiKey: apiKey || settings.apiKey });
+              onChange(next);
+              setApiKey("");
+              return `Enabled. AI actions will send text to ${endpointOrigin(next.baseUrl)}.`;
+            })} />
+            <SecondaryButton label="Turn off and forget" onClick={() => runSafely(setPanelStatus, async () => {
+              onChange(clearLlmSettings());
+              setBaseUrl("");
+              setModel("");
+              setApiKey("");
+              return "Endpoint cleared. Everything is local again.";
+            })} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KeywordChips({ keywords }: { keywords: SummaryResult["keywords"] }) {
+  if (!keywords.length) return null;
+  return (
+    <div className="grid gap-2">
+      <p className="text-xs font-black uppercase text-neutral-500">Top keywords</p>
+      <div className="flex flex-wrap gap-2">
+        {keywords.map((keyword) => (
+          <span key={keyword.term} className="tag-badge rounded-full px-3 py-1 text-xs font-black">{keyword.term} · {keyword.count}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Highlights matched terms with React nodes, so document text is never raw HTML. */
+function HighlightedPassage({ text, terms }: { text: string; terms: string[] }) {
+  return (
+    <p className="text-sm font-semibold leading-6 text-[var(--foreground)]">
+      {highlightSegments(text, terms).map((segment, position) => (
+        segment.match
+          ? <mark key={position} className="rounded bg-[#f2e5b0] px-0.5 text-[#33301f] [.dark_&]:bg-[#4a4222] [.dark_&]:text-[#f5e9c0]">{segment.text}</mark>
+          : <span key={position}>{segment.text}</span>
+      ))}
+    </p>
+  );
+}
+
+function SummarizePdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [text, setText] = useState("");
+  const [length, setLength] = useState("5");
+  const [result, setResult] = useState<SummaryResult | null>(null);
+  const [aiSummary, setAiSummary] = useState("");
+  const [settings, setSettings] = useState<LlmSettings>(() => readLlmSettings());
+  const [status, setStatus] = useState(initialStatus);
+
+  const lengthOptions = ["3", "5", "10", "p10", "p25"];
+  const lengthLabels = ["3 sentences", "5 sentences", "10 sentences", "10% of the document", "25% of the document"];
+  const baseName = safeFilename(files[0]?.name || "document");
+
+  const summaryDocument = () => {
+    if (!result) throw new Error("Summarise a PDF first.");
+    const lines = [
+      `Summary of ${files[0]?.name || "document"}`,
+      `${result.stats.returned} of ${result.stats.sentenceCount} sentences · ${result.stats.wordCount} words in the source`,
+      "",
+      ...result.sentences.map((sentence, position) => `${position + 1}. ${sentence.text}`),
+      "",
+      `Keywords: ${result.keywords.map((keyword) => keyword.term).join(", ")}`,
+    ];
+    if (aiSummary) lines.push("", "Abstractive summary from your own endpoint:", aiSummary);
+    return lines.join("\n");
+  };
+
+  const reset = () => {
+    setFiles([]);
+    setText("");
+    setResult(null);
+    setAiSummary("");
+    setStatus(initialStatus);
+  };
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Extracts the PDF's text, then ranks its sentences with a local TextRank graph over TF-IDF similarity and returns the most central ones, skipping near-duplicates. This is an <strong>extractive</strong> summary: every sentence is copied verbatim from the document, so nothing is invented — but it will not read like freshly written prose.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setText(""); setResult(null); setAiSummary(""); }} />
+    <Select label="Summary length" value={length} onChange={setLength} options={lengthOptions} labels={lengthLabels} />
+    <PrimaryButton label="Summarise PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      let source = text;
+      if (!source.trim()) {
+        source = await extractPdfText(file, { onProgress: pageProgress(setStatus, "Reading") });
+        if (!source.trim()) throw new Error(NO_PDF_TEXT_MESSAGE);
+        setText(source);
+      }
+      setStatus({ tone: "idle", message: "Ranking sentences…" });
+      const options = length.startsWith("p") ? { percent: Number(length.slice(1)) } : { sentences: Number(length) };
+      const summary = summarizeText(source, options);
+      setResult(summary);
+      setAiSummary("");
+      return `Kept ${summary.stats.returned} of ${summary.stats.sentenceCount} sentences.`;
+    })} />
+    {result && (
+      <div className="surface-card grid gap-4 rounded-3xl p-5">
+        <div>
+          <p className="text-xs font-black uppercase text-neutral-500">Extractive summary</p>
+          <ol className="mt-2 grid list-decimal gap-2 pl-5 text-sm font-semibold leading-6 text-[var(--foreground)]">
+            {result.sentences.map((sentence) => <li key={sentence.index}>{sentence.text}</li>)}
+          </ol>
+        </div>
+        <KeywordChips keywords={result.keywords} />
+        <p className="text-xs font-semibold text-neutral-500">
+          {result.stats.wordCount} words · {result.stats.sentenceCount} sentences · ranked {result.stats.graphSentences} candidates
+        </p>
+      </div>
+    )}
+    <div className="flex flex-wrap gap-2">
+      <SecondaryButton label="Copy summary" onClick={() => runSafely(setStatus, async () => { await copyText(result?.summary || ""); return "Copied."; })} />
+      <SecondaryButton label="Download .txt" onClick={() => runSafely(setStatus, async () => {
+        downloadText(requireOutput(summaryDocument()), `${baseName}-summary`, "txt");
+        return "Text file ready to download.";
+      })} />
+      <SecondaryButton label="Download .pdf" onClick={() => runSafely(setStatus, async () => {
+        downloadBytes(await textToPdf(requireOutput(summaryDocument())), withExtension(`${baseName}-summary`, "pdf"), "application/pdf");
+        return "Summary PDF ready to download.";
+      })} />
+    </div>
+    <LlmEndpointPanel settings={settings} onChange={setSettings} />
+    {isLlmConfigured(settings) && (
+      <div className="grid gap-3">
+        <PrimaryButton label={`Abstractive summary (sends text to ${endpointOrigin(settings.baseUrl)})`} onClick={() => runSafely(setStatus, async () => {
+          const source = requireOutput(text);
+          const { system, prompt, truncated } = buildSummaryPrompt(source);
+          setStatus({ tone: "idle", message: `Sending the document text to ${endpointOrigin(settings.baseUrl)}…` });
+          const answer = await requestChatCompletion({ settings, system, prompt });
+          setAiSummary(answer);
+          return truncated ? "Abstractive summary received (the document was truncated to fit)." : "Abstractive summary received.";
+        })} />
+        {aiSummary && (
+          <div className="surface-card grid gap-2 rounded-3xl p-5">
+            <p className="text-xs font-black uppercase text-neutral-500">Abstractive summary — generated off this device</p>
+            <p className="whitespace-pre-line text-sm font-semibold leading-6 text-[var(--foreground)]">{aiSummary}</p>
+          </div>
+        )}
+      </div>
+    )}
+  </ToolForm>;
+}
+
+function ChatWithPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [index, setIndex] = useState<PassageIndex | null>(null);
+  const [question, setQuestion] = useState("");
+  const [topN, setTopN] = useState("3");
+  const [history, setHistory] = useState<QaEntry[]>([]);
+  const [settings, setSettings] = useState<LlmSettings>(() => readLlmSettings());
+  const [status, setStatus] = useState(initialStatus);
+
+  const baseName = safeFilename(files[0]?.name || "document");
+  const configured = isLlmConfigured(settings);
+
+  const transcript = () => {
+    if (!history.length) throw new Error("Ask a question first.");
+    return [`Questions about ${files[0]?.name || "document"}`, ""].concat(
+      [...history].reverse().flatMap((entry) => [
+        `Q: ${entry.question}`,
+        ...entry.hits.map((hit) => `  [page ${hit.page}] ${hit.chunk.text}`),
+        ...(entry.answer ? ["", `  Generated answer (from your endpoint): ${entry.answer}`] : []),
+        "",
+      ])
+    ).join("\n");
+  };
+
+  const generateAnswer = (entry: QaEntry) => runSafely(setStatus, async () => {
+    const { system, prompt } = buildAnswerPrompt(entry.question, entry.hits);
+    setStatus({ tone: "idle", message: `Sending ${entry.hits.length} passages to ${endpointOrigin(settings.baseUrl)}…` });
+    const answer = await requestChatCompletion({ settings, system, prompt });
+    setHistory((current) => current.map((item) => (item.id === entry.id ? { ...item, answer } : item)));
+    return "Answer generated from the retrieved passages.";
+  });
+
+  const reset = () => {
+    setFiles([]);
+    setIndex(null);
+    setQuestion("");
+    setHistory([]);
+    setStatus(initialStatus);
+  };
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      By default this is a <strong>local search</strong>, not a chatbot. It indexes the PDF page by page with BM25 and returns the passages that best match your question, with page numbers and matched terms highlighted. It does not write prose and it never invents an answer — you read the source text and judge it yourself.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setIndex(null); setHistory([]); }} />
+    <PrimaryButton label="Index this PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const pages: { page: number; text: string }[] = [];
+      await extractPdfText(file, {
+        onProgress: pageProgress(setStatus, "Reading"),
+        onPage: (page: number, pageText: string) => pages.push({ page, text: pageText }),
+      });
+      if (!pages.some((page) => page.text.trim())) throw new Error(NO_PDF_TEXT_MESSAGE);
+      setStatus({ tone: "idle", message: "Building the search index…" });
+      const built = buildPassageIndex(chunkPages(pages));
+      if (!built.count) throw new Error("This PDF has text but no passages long enough to search.");
+      setIndex(built);
+      setHistory([]);
+      return `Indexed ${built.count} passage${built.count === 1 ? "" : "s"} across ${built.pageCount} page${built.pageCount === 1 ? "" : "s"}. Ask a question.`;
+    })} />
+    <Input label="Your question" value={question} onChange={setQuestion} placeholder="What is the payment deadline?" helper={index ? `${index.count} passages indexed. Follow-up questions re-search the same index.` : "Index a PDF first."} />
+    <Select label="Passages to return" value={topN} onChange={setTopN} options={["3", "5", "8"]} labels={["Top 3", "Top 5", "Top 8"]} />
+    <PrimaryButton label="Find answer passages" onClick={() => runSafely(setStatus, async () => {
+      if (!index) throw new Error("Index a PDF before asking a question.");
+      if (!question.trim()) throw new Error("Type a question first.");
+      const hits = searchPassages(index, question, { limit: Number(topN) });
+      if (!hits.length) throw new Error("No passage in this PDF matches those words. Try different terms.");
+      setHistory((current) => [{ id: current.length + 1, question: question.trim(), hits, answer: "" }, ...current]);
+      return `Found ${hits.length} passage${hits.length === 1 ? "" : "s"} on page${hits.length === 1 ? "" : "s"} ${[...new Set(hits.map((hit) => hit.page))].join(", ")}.`;
+    })} />
+    {history.map((entry) => (
+      <div key={entry.id} className="surface-card grid gap-3 rounded-3xl p-5">
+        <p className="text-xs font-black uppercase text-neutral-500">Question</p>
+        <p className="text-sm font-black text-[var(--foreground)]">{entry.question}</p>
+        {entry.hits.map((hit) => (
+          <div key={hit.chunk.id} className="surface-muted wabi-card-edge grid gap-1 p-4">
+            <p className="text-xs font-black uppercase text-neutral-500">Page {hit.page} · relevance {hit.score.toFixed(2)}</p>
+            <HighlightedPassage text={hit.chunk.text} terms={hit.matchedTerms} />
+          </div>
+        ))}
+        {configured && <SecondaryButton label={`Generate an answer from these passages (sends them to ${endpointOrigin(settings.baseUrl)})`} onClick={() => generateAnswer(entry)} />}
+        {entry.answer && (
+          <div className="surface-muted wabi-card-edge grid gap-1 p-4">
+            <p className="text-xs font-black uppercase text-neutral-500">Generated answer — produced off this device</p>
+            <p className="whitespace-pre-line text-sm font-semibold leading-6 text-[var(--foreground)]">{entry.answer}</p>
+          </div>
+        )}
+      </div>
+    ))}
+    <div className="flex flex-wrap gap-2">
+      <SecondaryButton label="Copy history" onClick={() => runSafely(setStatus, async () => { await copyText(transcript()); return "Copied."; })} />
+      <SecondaryButton label="Download .txt" onClick={() => runSafely(setStatus, async () => {
+        downloadText(requireOutput(transcript()), `${baseName}-questions`, "txt");
+        return "Text file ready to download.";
+      })} />
+      <SecondaryButton label="Download .pdf" onClick={() => runSafely(setStatus, async () => {
+        downloadBytes(await textToPdf(requireOutput(transcript())), withExtension(`${baseName}-questions`, "pdf"), "application/pdf");
+        return "Q&A PDF ready to download.";
+      })} />
+    </div>
+    <LlmEndpointPanel settings={settings} onChange={setSettings} />
   </ToolForm>;
 }
 

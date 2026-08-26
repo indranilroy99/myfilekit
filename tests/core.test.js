@@ -1399,3 +1399,245 @@ test("Phase 5 business tools are registered, routable, and discoverable", () => 
   const gst = tools.find((item) => item.id === "gst-invoice-tool");
   assert.match([gst.name, gst.description, ...gst.keywords].join(" ").toLowerCase(), /cgst sgst/);
 });
+
+const nlp = await import("../src/services/nlp.service.js");
+const llm = await import("../src/services/llm.service.js");
+
+// --- Phase 6a: local NLP (PDF Summarizer) and passage retrieval (Ask Your PDF) ---
+// Everything below runs in plain Node: the algorithms are DOM-free by design.
+// Browser-only paths that are NOT covered here: pdf.js text extraction
+// (extractPdfText / its new onPage callback), clipboard copy, file downloads,
+// localStorage-backed settings persistence, and the React components in App.tsx.
+
+test("sentence splitting keeps abbreviations, decimals, and URLs intact", () => {
+  assert.deepEqual(
+    nlp.splitSentences("Dr. Smith signed the deal. It closed at 3.5 percent."),
+    ["Dr. Smith signed the deal.", "It closed at 3.5 percent."]
+  );
+  assert.deepEqual(
+    nlp.splitSentences("Visit example.com for details. Then call us."),
+    ["Visit example.com for details.", "Then call us."]
+  );
+  // e.g. / i.e. never end a sentence; a lower-case initialism can.
+  assert.deepEqual(nlp.splitSentences("Bring fruit, e.g. apples and pears."), ["Bring fruit, e.g. apples and pears."]);
+  assert.deepEqual(
+    nlp.splitSentences("The meeting starts at 4 p.m. It runs for an hour."),
+    ["The meeting starts at 4 p.m.", "It runs for an hour."]
+  );
+  // An upper-case initialism is part of a name, so no break.
+  assert.deepEqual(nlp.splitSentences("The U.S. Army arrived."), ["The U.S. Army arrived."]);
+  // Paragraph breaks are hard boundaries even without a terminator.
+  assert.deepEqual(nlp.splitSentences("Heading one\n\nBody text follows"), ["Heading one", "Body text follows"]);
+  assert.deepEqual(nlp.splitSentences("Is it ready? Yes! Ship it."), ["Is it ready?", "Yes!", "Ship it."]);
+  assert.deepEqual(nlp.splitSentences("   "), []);
+});
+
+const summaryCorpus = [
+  "Quarterly revenue for the payments division grew because merchant onboarding accelerated across every region.",
+  "The weather in the office car park was pleasant on Tuesday.",
+  "Merchant onboarding accelerated because the revenue team simplified the payments approval workflow.",
+  "Somebody left a bicycle by the stairs.",
+  "Payments revenue growth is expected to continue while merchant onboarding stays this fast.",
+  "A stapler went missing from the third floor.",
+].join(" ");
+
+test("summariser picks salient sentences, honours the length setting, and drops near-duplicates", () => {
+  const three = nlp.summarizeText(summaryCorpus, { sentences: 3 });
+  assert.equal(three.sentences.length, 3);
+  assert.equal(three.stats.sentenceCount, 6);
+  // The topical sentences (revenue / merchant onboarding / payments) win; the
+  // unrelated filler about bicycles and staplers does not.
+  assert.match(three.summary, /revenue/i);
+  assert.match(three.summary, /onboarding/i);
+  assert.equal(/stapler|bicycle|car park/i.test(three.summary), false);
+  // Selected sentences are returned in document order so the summary reads.
+  assert.deepEqual([...three.sentences].map((item) => item.index).sort((a, b) => a - b), three.sentences.map((item) => item.index));
+
+  const one = nlp.summarizeText(summaryCorpus, { sentences: 1 });
+  assert.equal(one.sentences.length, 1);
+  assert.equal(one.summary, one.sentences[0].text);
+
+  // A percentage of the document is honoured too, and clamps to what exists.
+  assert.equal(nlp.summarizeText(summaryCorpus, { percent: 50 }).sentences.length, 3);
+  assert.equal(nlp.summarizeText(summaryCorpus, { sentences: 999 }).sentences.length <= 6, true);
+
+  // Redundancy suppression: three restatements of one claim collapse to one.
+  const repetitive = [
+    "The refund policy allows returns within thirty days of delivery.",
+    "Returns are allowed within thirty days of delivery under the refund policy.",
+    "Within thirty days of delivery, the refund policy allows returns.",
+    "Shipping is handled by an external courier partner in each city.",
+  ].join(" ");
+  const deduped = nlp.summarizeText(repetitive, { sentences: 3, redundancy: 0.5 });
+  assert.equal(deduped.sentences.length < 3, true);
+  assert.equal(deduped.sentences.filter((item) => /refund policy|returns are allowed/i.test(item.text)).length, 1);
+
+  assert.throws(() => nlp.summarizeText("   ", { sentences: 3 }), /no text to summarise/i);
+});
+
+test("keyword extraction ranks topical terms above stopwords and one-off words", () => {
+  const keywords = nlp.extractKeywords(summaryCorpus, { limit: 5 });
+  const terms = keywords.map((keyword) => keyword.term);
+  assert.equal(keywords.length, 5);
+  assert.ok(terms.includes("merchant"));
+  assert.ok(terms.includes("payment") || terms.includes("payments"));
+  assert.equal(terms.includes("the"), false);
+  assert.equal(terms.includes("stapler"), false);
+  // Scores are ordered and every entry carries its counts.
+  for (let index = 1; index < keywords.length; index += 1) {
+    assert.equal(keywords[index - 1].score >= keywords[index].score, true);
+  }
+  assert.equal(keywords.every((keyword) => keyword.count >= 1 && keyword.sentences >= 1), true);
+  assert.equal(nlp.extractKeywords("", { limit: 5 }).length, 0);
+});
+
+const retrievalPages = [
+  { page: 1, text: "This agreement is made between the supplier and the buyer. It sets out the scope of work." },
+  { page: 2, text: "Invoices must be paid within forty five days of receipt. Late payment attracts interest at two percent per month." },
+  { page: 3, text: "Either party may terminate the agreement with ninety days written notice. Notices are sent to the registered office." },
+];
+
+test("passage chunking preserves page numbers and never merges pages", () => {
+  const chunks = nlp.chunkPages(retrievalPages, { targetWords: 12, overlapSentences: 1 });
+  assert.ok(chunks.length >= retrievalPages.length);
+  assert.deepEqual([...new Set(chunks.map((chunk) => chunk.page))], [1, 2, 3]);
+  // Each chunk's text really belongs to the page it claims.
+  for (const chunk of chunks) {
+    const source = retrievalPages.find((entry) => entry.page === chunk.page).text.replace(/\s+/g, " ");
+    for (const sentence of nlp.splitSentences(chunk.text)) assert.ok(source.includes(sentence), `${sentence} not on page ${chunk.page}`);
+  }
+  assert.deepEqual(chunks.map((chunk) => chunk.id), chunks.map((_, index) => index));
+  // Empty pages are skipped, and a bare string array gets 1-based page numbers.
+  assert.equal(nlp.chunkPages([{ page: 1, text: "" }, { page: 2, text: "   " }]).length, 0);
+  assert.equal(nlp.chunkPages(["Only page one text here."])[0].page, 1);
+  assert.deepEqual(nlp.chunkPages(null), []);
+});
+
+test("BM25 ranking returns the passage that answers the question, with its page", () => {
+  const index = nlp.buildPassageIndex(nlp.chunkPages(retrievalPages, { targetWords: 40 }));
+  assert.equal(index.pageCount, 3);
+  assert.ok(index.count >= 3);
+
+  const payment = nlp.searchPassages(index, "When do invoices have to be paid?", { limit: 2 });
+  assert.equal(payment[0].page, 2);
+  assert.match(payment[0].chunk.text, /forty five days/);
+  assert.ok(payment[0].matchedTerms.includes("invoice"));
+  assert.ok(payment[0].score > 0);
+
+  const notice = nlp.searchPassages(index, "How much notice is needed to terminate?", { limit: 1 });
+  assert.equal(notice[0].page, 3);
+  assert.match(notice[0].chunk.text, /ninety days/);
+
+  // Scores are sorted, and the limit is respected.
+  const many = nlp.searchPassages(index, "agreement payment notice supplier", { limit: 3 });
+  assert.equal(many.length <= 3, true);
+  for (let position = 1; position < many.length; position += 1) {
+    assert.equal(many[position - 1].score >= many[position].score, true);
+  }
+
+  assert.deepEqual(nlp.searchPassages(index, "zzzunmatchedtoken", { limit: 3 }), []);
+  assert.throws(() => nlp.searchPassages(index, "   "), /at least one searchable word/i);
+  assert.throws(() => nlp.searchPassages(index, "the of and"), /at least one searchable word/i);
+  assert.throws(() => nlp.searchPassages(nlp.buildPassageIndex([]), "invoices"), /Load a PDF/i);
+});
+
+test("highlight segments mark matched terms as data, never as HTML", () => {
+  const segments = nlp.highlightSegments("Invoices must be paid <b>promptly</b>.", ["invoice"]);
+  assert.deepEqual(segments.filter((segment) => segment.match).map((segment) => segment.text), ["Invoices"]);
+  // The raw text is carried through verbatim, so React escapes it on render.
+  assert.equal(segments.map((segment) => segment.text).join(""), "Invoices must be paid <b>promptly</b>.");
+  assert.equal(nlp.highlightSegments("plain text", []).every((segment) => segment.match === false), true);
+  assert.deepEqual(nlp.highlightSegments("", ["invoice"]), []);
+});
+
+test("llm.service sends nothing at all until an endpoint is configured and enabled", async () => {
+  let calls = 0;
+  const spyFetch = async () => { calls += 1; throw new Error("fetch must not be reached"); };
+
+  const memory = new Map();
+  const storage = {
+    getItem: (key) => (memory.has(key) ? memory.get(key) : null),
+    setItem: (key, value) => memory.set(key, String(value)),
+    removeItem: (key) => memory.delete(key),
+  };
+
+  // Nothing stored: empty settings, not configured.
+  const empty = llm.readLlmSettings({ storage });
+  assert.deepEqual(empty, { enabled: false, baseUrl: "", model: "", apiKey: "" });
+  assert.equal(llm.isLlmConfigured(empty), false);
+
+  await assert.rejects(() => llm.requestChatCompletion({ settings: empty, prompt: "secret document text", fetchImpl: spyFetch }), /switched off/i);
+  await assert.rejects(() => llm.requestChatCompletion({ prompt: "secret document text", fetchImpl: spyFetch }), /switched off/i);
+  // Enabled but incomplete still must not reach the network.
+  await assert.rejects(
+    () => llm.requestChatCompletion({ settings: { enabled: true, baseUrl: "https://api.example.com/v1", model: "", apiKey: "k" }, prompt: "text", fetchImpl: spyFetch }),
+    /incomplete/i
+  );
+  assert.equal(calls, 0, "no fetch may happen while the endpoint is unconfigured");
+
+  // Saving validates, keeps the key out of the URL, and round-trips.
+  const saved = llm.saveLlmSettings({ enabled: true, baseUrl: "https://api.example.com/v1/", model: "local-model", apiKey: "sk-secret-1234" }, { storage });
+  assert.equal(saved.baseUrl, "https://api.example.com/v1");
+  assert.equal(llm.isLlmConfigured(saved), true);
+  assert.deepEqual(llm.readLlmSettings({ storage }), saved);
+  assert.equal(memory.get("myfilekit:llm-endpoint").includes("sk-secret-1234"), true);
+  assert.equal(llm.maskApiKey("sk-secret-1234").endsWith("1234"), true);
+  assert.equal(llm.maskApiKey("sk-secret-1234").includes("secret"), false);
+  assert.equal(llm.endpointOrigin(saved.baseUrl), "https://api.example.com");
+
+  assert.throws(() => llm.saveLlmSettings({ enabled: true, baseUrl: "not a url", model: "m", apiKey: "k" }, { storage }), /full URL/i);
+  assert.throws(() => llm.saveLlmSettings({ enabled: true, baseUrl: "https://user:pw@api.example.com", model: "m", apiKey: "k" }, { storage }), /credentials/i);
+  assert.throws(() => llm.saveLlmSettings({ enabled: true, baseUrl: "https://api.example.com/v1?key=abc", model: "m", apiKey: "k" }, { storage }), /query string/i);
+  assert.throws(() => llm.saveLlmSettings({ enabled: true, baseUrl: "https://api.example.com/v1", model: "m", apiKey: "" }, { storage }), /API key/i);
+
+  // A configured endpoint sends the key in a header only, never in the URL.
+  let seen = null;
+  const okFetch = async (url, init) => {
+    seen = { url, init };
+    return { ok: true, status: 200, statusText: "OK", json: async () => ({ choices: [{ message: { content: " generated answer " } }] }) };
+  };
+  assert.equal(await llm.requestChatCompletion({ settings: saved, system: "sys", prompt: "hello", fetchImpl: okFetch }), "generated answer");
+  assert.equal(seen.url, "https://api.example.com/v1/chat/completions");
+  assert.equal(seen.url.includes("sk-secret"), false);
+  assert.equal(seen.init.headers.Authorization, "Bearer sk-secret-1234");
+  assert.deepEqual(JSON.parse(seen.init.body).messages.map((message) => message.role), ["system", "user"]);
+
+  // A CSP / network refusal is reported as the exact fix, naming both files.
+  const blockedFetch = async () => { throw new TypeError("Failed to fetch"); };
+  await assert.rejects(
+    () => llm.requestChatCompletion({ settings: saved, prompt: "hello", fetchImpl: blockedFetch }),
+    (error) => /connect-src/.test(error.message) && /index\.html/.test(error.message) && /_headers/.test(error.message)
+  );
+  await assert.rejects(
+    () => llm.requestChatCompletion({ settings: saved, prompt: "hello", fetchImpl: async () => ({ ok: false, status: 401, statusText: "Unauthorized" }) }),
+    /401/
+  );
+
+  // Prompts carry only what the tool promised: passages plus the question.
+  const answer = llm.buildAnswerPrompt("When are invoices due?", [{ page: 2, chunk: { text: "Invoices must be paid within forty five days." } }]);
+  assert.match(answer.prompt, /page 2/);
+  assert.match(answer.prompt, /forty five days/);
+  assert.throws(() => llm.buildAnswerPrompt("", []), /Ask a question/i);
+  assert.throws(() => llm.buildAnswerPrompt("question", []), /Retrieve passages/i);
+  assert.equal(llm.buildSummaryPrompt("a".repeat(llm.MAX_PROMPT_CHARACTERS + 50)).truncated, true);
+  assert.throws(() => llm.buildSummaryPrompt("  "), /Extract the document text/i);
+
+  assert.deepEqual(llm.clearLlmSettings({ storage }), { enabled: false, baseUrl: "", model: "", apiKey: "" });
+  assert.equal(memory.has("myfilekit:llm-endpoint"), false);
+});
+
+test("Phase 6a summariser and Q&A tools are registered, routable, and local", () => {
+  for (const id of ["summarize-pdf-tool", "chat-with-pdf-tool"]) {
+    const entry = tools.find((item) => item.id === id);
+    assert.ok(entry, `missing tool ${id}`);
+    assert.equal(entry.category, "Text & Data Tools");
+    assert.equal(entry.status, "available");
+    assert.equal(entry.localProcessing, true);
+    assert.equal(entry.file.maxFiles, 1);
+    assert.deepEqual(entry.acceptedTypes, ["application/pdf"]);
+    assert.ok(entry.badges.includes("Local"));
+    assert.equal(routeForHash(entry.route).tool.id, id);
+  }
+  assert.match(tools.find((item) => item.id === "summarize-pdf-tool").keywords.join(" "), /summarize pdf/);
+  assert.match(tools.find((item) => item.id === "chat-with-pdf-tool").keywords.join(" "), /ask your pdf/);
+});

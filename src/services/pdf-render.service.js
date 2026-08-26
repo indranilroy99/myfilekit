@@ -117,8 +117,12 @@ export async function pdfToImages(file, { format = "jpg", dpi = 150, quality = 0
 /**
  * Extracts selectable text from a PDF, page by page. Scanned/image-only PDFs
  * legitimately return an empty string.
+ *
+ * `onPage(pageNumber, text)` receives each page's text as it is read, for
+ * callers (Ask Your PDF) that need to keep page boundaries rather than the
+ * flattened document string.
  */
-export async function extractPdfText(file, { onProgress } = {}) {
+export async function extractPdfText(file, { onProgress, onPage } = {}) {
   const { loadPdfDocument } = await getPdfjs();
   const pdf = await loadPdfDocument(file);
   const pages = [];
@@ -133,7 +137,9 @@ export async function extractPdfText(file, { onProgress } = {}) {
         if (item.hasEOL) text += "\n";
         else if (item.str && !item.str.endsWith(" ")) text += " ";
       }
-      pages.push(text.replace(/[ \t]+\n/g, "\n").trimEnd());
+      const pageText = text.replace(/[ \t]+\n/g, "\n").trimEnd();
+      pages.push(pageText);
+      onPage?.(pageNum, pageText);
       page.cleanup();
       onProgress?.(pageNum, pdf.numPages);
     }
