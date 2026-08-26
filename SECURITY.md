@@ -9,7 +9,7 @@ Security fixes are applied to the latest release on the `main` branch.
 ## Processing Boundary
 
 - Supported files are processed in the active browser session.
-- The app does not intentionally transmit selected files to a backend.
+- The app does not intentionally transmit selected files to a backend. P2P File Share and Whiteboard send data directly to one peer the user invites by hand; see "Direct Peer Connections" below.
 - PDF processing uses a local vendored copy of `pdf-lib`.
 - Invoice capture uses a local vendored copy of `html2canvas`.
 - Spreadsheet reading and writing use a local vendored copy of SheetJS `0.20.3`. The npm `xlsx` package is not used: it is frozen at `0.18.5`, which carries unfixed prototype-pollution and ReDoS advisories.
@@ -40,6 +40,21 @@ Both tools also expose an optional adapter for an OpenAI-compatible endpoint the
 - Nothing is transmitted until the user saves an endpoint, enables it, and presses an AI button. `requestChatCompletion` in `src/services/llm.service.js` refuses before reaching `fetch` when the settings are absent or disabled, so a default install cannot make the request at all.
 - The AI buttons are labelled with the destination origin, and the results are labelled as produced off the device. PDF Summarizer sends the extracted document text; Ask Your PDF sends only the retrieved passages plus the question.
 - The shipped policy pins `connect-src 'self'` in both `index.html` and `public/_headers`, so a browser blocks every custom endpoint on the default build. **This policy is intentional and is not relaxed for these tools.** An operator who wants the adapter on their own deploy must add `connect-src 'self' https://their-endpoint.example` to both files and rebuild. Until then the tools catch the block and say exactly which files to change rather than reporting a generic network failure.
+
+## Direct Peer Connections (P2P File Share, Whiteboard)
+
+These two tools are the only ones whose data can leave the device, and only to the one peer the user hands a code to. They still involve no MyFileKit server.
+
+- **Signaling is manual, by design.** There is no signaling server and none can be added without a backend. The initiator's browser produces a deflate + base64url code containing its own session description, the user passes that code to their peer through a channel they already trust, and the peer's answer code comes back the same way. `connect-src 'self'` stays as it is; WebRTC is not governed by that directive, and neither tool makes an HTTP, WebSocket, or `EventSource` call — a test in `tests/core.test.js` asserts that no such call and no STUN/TURN/`ws(s)` host appears in either service.
+- **No third-party server is baked in.** The default `RTCPeerConnection` is created with an empty `iceServers` list, so only local-network candidates are gathered. A user may add their own STUN/TURN servers: the field is off by default, restricted to the `stun:`, `stuns:`, `turn:`, and `turns:` schemes, capped at four entries, requires credentials for TURN, and is labelled in the UI as contacting a third party that will learn their IP address. `https://` and `wss://` entries are refused.
+- **ICE gathering completes before a code is produced** (vanilla ICE), with a five-second timeout so a browser that never reports completion cannot hang the tool.
+- **The remote peer is untrusted input.** Peer data reaches the app only as binary frames through `decodeFrame`; a text message is rejected. Received filenames are reduced to their final path segment plus a short extension and passed through `safeFilename`; MIME types must match a strict token pattern or become `application/octet-stream`; peer strings are stripped of control characters and bidi overrides. Nothing from a peer is ever rendered as HTML or used as a URL, and a received file is only ever offered as a download — it is never opened, previewed, or executed.
+- **Transfers are size-bounded and integrity-checked.** Announced sizes above 256 MB per file, or 512 MB per session, are refused with a clear message before anything is allocated. Chunks must arrive in order and may not exceed the announced size. Each side computes a SHA-256 with `crypto.subtle` independently, and a mismatch is reported as a mismatch rather than presented as a good file.
+- **Signaling codes are bounded too.** A code longer than 24,000 characters is refused before decoding, and decompression writes into a fixed 128 KB buffer, so a crafted code cannot expand into a large allocation.
+- **Whiteboard strokes from a peer** have their colour validated against a hex pattern, their width and coordinates clamped into range, and their point and stroke counts capped before anything touches a canvas. Peer stroke ids are namespaced, so a crafted id cannot address a local stroke. A peer disconnecting, cancelling, or clearing never removes local work.
+- **Everything is released on reset, cancel, and unmount:** the `RTCPeerConnection`, the `RTCDataChannel` and its handlers, the pointer and resize listeners, the `ResizeObserver`, offscreen export canvases, and generated object URLs.
+
+WebRTC data channels are encrypted (DTLS) between the two peers. That protects the transfer in flight; it does not vouch for who is on the other end. A code shared over a channel an attacker controls can be used by that attacker instead of the intended peer, and a received file is only as trustworthy as the person who sent it.
 
 ## Required Hosting Headers
 

@@ -2,6 +2,20 @@
 
 All notable MyFileKit changes are documented here. The project uses semantic versioning.
 
+## 3.4.0 - 2026-08-26
+
+### Added
+
+- **P2P File Share** (`Sharing & Collaboration`): sends files straight from one browser to another over a WebRTC data channel. There is no signaling server, because there is no backend and `connect-src` is pinned to `'self'`: the sender generates a deflate+base64url invite code carrying its full local description (vanilla ICE, so gathering completes first with a 5 s timeout fallback), the user hands that code to their peer themselves, and the peer's answer code comes back the same way. Files are chunked at 16 KB with `bufferedAmountLowThreshold` backpressure, show live progress and throughput on both sides, and are verified with a SHA-256 computed independently at each end. Handles cancel, peer disconnect mid-transfer, connection failure, and several files sequentially.
+- **Whiteboard** (`Sharing & Collaboration`): pointer-event canvas with pen, eraser, undo, redo, clear, and PNG/PDF export, working solo with zero setup. Strokes and pen widths are stored as fractions of the board, so the drawing survives a resize, stays crisp at any `devicePixelRatio`, and renders identically on a peer's differently sized canvas. Optional pairing reuses the same manual-signaling channel and streams stroke fragments so a peer's line appears as it is drawn, rendered slightly lighter; a peer disconnecting never removes local work.
+- `src/services/webrtc.service.js` and `src/services/whiteboard.service.js`, both split into a pure, Node-testable half (signaling codes, frame framing, reassembly, hashing, sanitising, stroke model) and a browser-only half that never runs at import time.
+
+### Security
+
+- **No third-party server is baked in.** No STUN, TURN, or signaling host appears anywhere in the source, and a test asserts it. A user may supply their own STUN/TURN server; it is off by default, scheme-restricted to `stun:`/`stuns:`/`turn:`/`turns:`, capped at four entries, and labelled as contacting a third party that will see their IP address. Neither new service makes an HTTP call.
+- **The remote peer is treated as untrusted input.** Received filenames are reduced to their last path segment plus a short extension and run through `safeFilename`; MIME types are narrowed to a strict token pattern or fall back to `application/octet-stream`; peer text is stripped of control characters and bidi overrides; incoming sizes are capped at 256 MB with a clear message. Nothing from a peer is ever rendered as HTML, and a received file is only ever offered as a download — never opened. Whiteboard strokes from a peer have colours, widths, coordinates, and point counts validated or clamped before touching a canvas. Signaling codes are length-capped before decoding and inflated into a fixed 128 KB buffer, so a crafted code cannot expand into a large allocation.
+- Every `RTCPeerConnection`, `RTCDataChannel`, event listener, `ResizeObserver`, object URL, and offscreen export canvas is released on reset, cancel, and unmount.
+
 ## 3.3.0 - 2026-08-26
 
 ### Added

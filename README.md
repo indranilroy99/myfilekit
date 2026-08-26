@@ -23,12 +23,12 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-[![Version](https://img.shields.io/badge/version-3.3.0-2563eb)](./package.json)
-[![Tests](https://img.shields.io/badge/tests-70%20passing-16a34a)](./tests/core.test.js)
-[![Tools](https://img.shields.io/badge/tools-73%20local-2563eb)](./src/registry/tools.registry.js)
+[![Version](https://img.shields.io/badge/version-3.4.0-2563eb)](./package.json)
+[![Tests](https://img.shields.io/badge/tests-87%20passing-16a34a)](./tests/core.test.js)
+[![Tools](https://img.shields.io/badge/tools-77%20local-2563eb)](./src/registry/tools.registry.js)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20known%20vulnerabilities-16a34a)](./SECURITY.md)
 
-MyFileKit is a local-first browser toolkit for common file workflows. It combines 73 working tools in one searchable interface and processes selected files in the browser wherever the underlying format allows it.
+MyFileKit is a local-first browser toolkit for common file workflows. It combines 77 working tools in one searchable interface and processes selected files in the browser wherever the underlying format allows it.
 
 ## Product Principles
 
@@ -40,7 +40,7 @@ MyFileKit is a local-first browser toolkit for common file workflows. It combine
 
 ## Available Tools
 
-73 tools across 7 categories. This table is checked against `src/registry/tools.registry.js`, which is the single source of truth for the dashboard.
+77 tools across 8 categories. This table is checked against `src/registry/tools.registry.js`, which is the single source of truth for the dashboard.
 
 | Category | Tools |
 | --- | --- |
@@ -48,11 +48,14 @@ MyFileKit is a local-first browser toolkit for common file workflows. It combine
 | Image (10) | Compress Image, Batch Compress Images, Resize Image, Batch Resize Images, Convert Image, Crop Image, Rotate / Flip Image, Add Text to Image, Image Metadata Inspector, Equation to Image |
 | Business (4) | Invoice Generator, GST Invoice, POS Billing, GST Filing Prep |
 | Signature (3) | Add Signature to Image, Draw Signature, Type Signature |
-| Text & Data (13) | Extract Text from PDF, Text to PDF, Markdown Preview, Markdown to PDF, CSV to PDF, Audio to PDF, JSON Formatter, CSV to JSON, JSON to CSV, JSON to YAML, URL Encode / Decode, Text Diff Checker, Word Counter |
+| Text & Data (15) | Extract Text from PDF, PDF Summarizer, Ask Your PDF, Text to PDF, Markdown Preview, Markdown to PDF, CSV to PDF, Audio to PDF, JSON Formatter, CSV to JSON, JSON to CSV, JSON to YAML, URL Encode / Decode, Text Diff Checker, Word Counter |
 | Privacy (3) | PDF Metadata Cleaner, PDF Fingerprint, EXIF & Metadata Cleaner |
 | Developer Utilities (5) | Base64 Encode / Decode, File Hash Generator, Hash Compare, Password Generator, QR Code Generator |
+| Sharing & Collaboration (2) | P2P File Share, Whiteboard |
 
 Image Metadata Inspector reads EXIF, XMP, ICC, GPS, and container metadata from supported JPEG, PNG, and WebP files locally, without changing the source file. EXIF & Metadata Cleaner uses the same local inspection capability and can re-encode a cleaned image copy; re-encoding may change file size or encoding details. The PDF metadata cleaner removes common document information fields; it does not sanitize visible content, attachments, or every possible custom PDF object. PDF Fingerprint embeds a traceable identifier in PDF metadata; it is a provenance marker, not a steganographic or tamper-proof mark.
+
+P2P File Share and Whiteboard are the only tools whose data can leave the device, and only to the one peer you hand a code to. There is still no server: WebRTC signaling is manual, so you generate an invite code, pass it to your peer yourself over a channel you already trust, and paste their answer code back. No STUN or TURN server is built in, which means the connection relies on local network addresses and works reliably only when both devices are on the same network; you may supply your own STUN/TURN server (off by default, and it will see your IP address). Received files are hash-checked with SHA-256 on both ends, have their filename stripped of any path, and are only ever offered as a download.
 
 Workflow Builder chains PDF operations into a single pipeline over one file and pipes the bytes between steps. It reports which step failed and keeps the output produced up to that point.
 
@@ -170,7 +173,7 @@ The tool list has grown, so this section lists what MyFileKit still does not do,
 **Not shipped at all**
 
 - **No PDF password encryption or decryption.** pdf-lib cannot write or remove PDF encryption, and doing it properly needs a WASM crypto engine. There is no "lock PDF" or "unlock PDF" tool, and none of the existing tools should be read as protecting a document. Tools that open an already-encrypted PDF do so by ignoring its encryption, which only works for files the browser can already read.
-- **No AI features and no collaboration.** Chat with PDF, AI summarise, and any P2P or shared-session workflow all require a backend, which conflicts with the no-backend design. They are out of scope for an offline app rather than pending.
+- **No hosted AI and no multi-user sessions.** PDF Summarizer and Ask Your PDF run local extractive algorithms (TextRank and BM25); a hosted model is only ever used if you point the optional bring-your-own-LLM adapter at your own endpoint. P2P File Share and Whiteboard pair exactly two browsers by hand-carried code. There are no rooms, no persistence, no presence, no more than one peer, and no relay to fall back on, because all of those need a server.
 - **No background removal, no OCR-based text replacement inside an existing image, and no full free-form editing of existing PDF text.** OCR reads text and can build a searchable layer over the original page; it does not rewrite the page.
 - **No universal metadata removal.** The privacy tools cover documented image metadata containers and common PDF document-information fields only.
 
@@ -180,6 +183,8 @@ The tool list has grown, so this section lists what MyFileKit still does not do,
 - **PDF text drawing is Latin-1 (WinAnsi) only.** The standard pdf-lib fonts cannot encode CJK characters or emoji; the affected tools say so instead of failing cryptically.
 - **PDF to Audio plays but cannot export.** Playback uses the browser's own speech engine and the operating system's voices. The Web Speech API gives no access to the rendered samples, so there is no audio file to download. Audio to PDF uses browser dictation, which may be unavailable — or not fully on-device — depending on the browser; the tool warns you about what your browser actually does and always offers a manual transcript path that stays entirely offline.
 - **Rasterising tools discard the original selectable text.** Compress PDF, Flatten PDF, Invert PDF Colours, Redact PDF, and the searchable PDF that OCR produces all rebuild pages as images. That is what makes redaction permanent. The OCR output adds an invisible recognised-text layer back on top, so it is searchable again, but that text is the OCR engine's reading of the page rather than the source file's own.
+- **Peer connections are manual and best on one network.** P2P File Share and Whiteboard have no signaling server, so you copy an invite code to your peer and paste their answer code back yourself. No STUN or TURN server is built in, so the connection is offered local network addresses only: expect it to work on the same Wi-Fi or LAN and to fail across most home routers or mobile networks unless you supply your own STUN/TURN server (off by default; anything you enter is contacted directly by your browser and will see your IP address). There is no relay, no resume, and no queue: a dropped connection stops the transfer, nothing partial is saved, and each side must generate fresh codes. Files are held in memory on both ends, capped at 256 MB each, and sent one after another. Requires a browser with WebRTC data channels; the tool says so instead of failing silently.
+- **Whiteboard pairing syncs strokes, not history.** Strokes, undo, and clear are broadcast as they happen, so a peer who joins later sees only what is drawn from then on. Your own work is never removed by anything a peer does, and if they disconnect the board stays exactly as it is.
 - **GST scope is deliberately narrow.** The GST tools handle CGST/SGST and IGST splits, round-off, and amount in words, in INR only. Reverse charge, GST cess, TCS/TDS, the composition scheme, and e-invoice IRN/QR generation are not applied. GST Filing Prep produces a GSTR-1-style B2B/B2C and rate-wise summary for you to file with; it does not file anything with the government.
 
 ## Contributing
@@ -188,7 +193,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md), run `npm run preflight`, and keep eve
 
 ## Versioning
 
-The current version is `3.3.0`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
+The current version is `3.4.0`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
 
 ```bash
 npm run version:patch

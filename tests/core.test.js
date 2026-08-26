@@ -11,6 +11,9 @@ import { csvToPdf, markdownToPdf, renderEquationToHtml } from "../src/services/c
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "../src/utils/format.js";
 import { safeFilename, withExtension } from "../src/utils/safe-filename.js";
 import { routeForHash } from "../src/router.js";
+import * as webrtc from "../src/services/webrtc.service.js";
+import * as whiteboard from "../src/services/whiteboard.service.js";
+import { deflateSync, strToU8 } from "fflate";
 
 const pdfLibCode = fs.readFileSync(new URL("../assets/vendor/pdf-lib.min.js", import.meta.url), "utf8");
 const loadPdfLib = new Function(`${pdfLibCode}; return PDFLib;`);
@@ -1640,4 +1643,314 @@ test("Phase 6a summariser and Q&A tools are registered, routable, and local", ()
   }
   assert.match(tools.find((item) => item.id === "summarize-pdf-tool").keywords.join(" "), /summarize pdf/);
   assert.match(tools.find((item) => item.id === "chat-with-pdf-tool").keywords.join(" "), /ask your pdf/);
+});
+
+// --- Phase 6b: manual-signaling WebRTC transport and whiteboard ---------------
+//
+// Everything asserted here is the pure half of the two new services: signaling
+// codes, frame framing, reassembly, hashing, sanitising, and the stroke model.
+// The browser-only paths (RTCPeerConnection, DataChannel backpressure, canvas
+// and devicePixelRatio rendering, pointer events) are exercised by hand in a
+// real browser, because Node has neither WebRTC nor a canvas.
+
+test("Phase 6b signaling codes round-trip and reject malformed or oversized input", () => {
+  // Shaped like a real Chrome/Firefox data-channel offer with host candidates,
+  // because that is what a code has to carry under vanilla ICE.
+  const sdp = [
+    "v=0",
+    "o=- 4611731400430051336 2 IN IP4 127.0.0.1",
+    "s=-",
+    "t=0 0",
+    "a=group:BUNDLE 0",
+    "m=application 51820 UDP/DTLS/SCTP webrtc-datachannel",
+    "c=IN IP4 192.168.1.20",
+    "a=candidate:1 1 udp 2122252543 192.168.1.20 51820 typ host generation 0 network-id 1",
+    "a=candidate:2 1 udp 2122194687 10.0.0.7 51821 typ host generation 0 network-id 2",
+    "a=ice-ufrag:AbCd",
+    "a=ice-pwd:0123456789abcdef0123456789",
+    "a=fingerprint:sha-256 11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00",
+    "a=setup:actpass",
+    "a=mid:0",
+    "a=sctp-port:5000",
+    "a=max-message-size:262144",
+    "",
+  ].join("\r\n");
+
+  const offer = webrtc.encodeSignal({ role: "offer", sdp });
+  assert.ok(offer.startsWith(webrtc.SIGNAL_PREFIX));
+  assert.deepEqual(webrtc.decodeSignal(offer), { role: "offer", sdp });
+  // Compression earns its keep: the code is shorter than the raw SDP, and short
+  // enough to paste into a chat message.
+  assert.ok(offer.length < sdp.length);
+  assert.ok(offer.length < webrtc.MAX_SIGNAL_CODE_CHARS);
+
+  const answer = webrtc.encodeSignal({ role: "answer", sdp });
+  assert.equal(webrtc.decodeSignal(answer).role, "answer");
+  // Whitespace picked up in a copy-paste round trip through chat is tolerated.
+  assert.deepEqual(webrtc.decodeSignal(`  ${offer.slice(0, 20)}\n${offer.slice(20)}  `), { role: "offer", sdp });
+
+  assert.throws(() => webrtc.encodeSignal({ role: "offer", sdp: "" }), /empty connection description/i);
+  assert.throws(() => webrtc.encodeSignal({ role: "host", sdp }), /offer or an answer/i);
+
+  assert.throws(() => webrtc.decodeSignal(""), /Paste a code first/i);
+  assert.throws(() => webrtc.decodeSignal("just some text"), /MyFileKit connection code/i);
+  assert.throws(() => webrtc.decodeSignal(webrtc.SIGNAL_PREFIX), /empty after its prefix/i);
+  assert.throws(() => webrtc.decodeSignal(`${webrtc.SIGNAL_PREFIX}****`), /could not be read/i);
+  assert.throws(() => webrtc.decodeSignal(`${webrtc.SIGNAL_PREFIX}${"A".repeat(webrtc.MAX_SIGNAL_CODE_CHARS + 1)}`), /too long/i);
+  // A truncated code must fail loudly rather than half-connect.
+  assert.throws(() => webrtc.decodeSignal(offer.slice(0, offer.length - 12)), /could not be read|damaged|cut short/i);
+
+  const forge = (payload) => webrtc.SIGNAL_PREFIX + webrtc.base64UrlEncode(deflateSync(strToU8(JSON.stringify(payload))));
+  assert.throws(() => webrtc.decodeSignal(forge({ v: 2, role: "offer", sdp })), /different version/i);
+  assert.throws(() => webrtc.decodeSignal(forge({ v: 1, role: "offer" })), /usable connection description/i);
+  assert.throws(() => webrtc.decodeSignal(forge({ v: 1, role: "offer", sdp: "not an sdp" })), /usable connection description/i);
+  assert.throws(() => webrtc.decodeSignal(forge({ v: 1, role: "operator", sdp })), /invite or an answer/i);
+  assert.throws(() => webrtc.decodeSignal(forge([1, 2, 3])), /connection description/i);
+  // A small code that would inflate past the ceiling is refused, not expanded.
+  assert.throws(() => webrtc.decodeSignal(forge({ v: 1, role: "offer", sdp: `v=0${"A".repeat(400000)}` })), /damaged|cut short|could not be read/i);
+});
+
+test("Phase 6b base64url encoding round-trips every byte length", () => {
+  for (const length of [0, 1, 2, 3, 4, 5, 17, 255, 1024]) {
+    const bytes = new Uint8Array(length);
+    for (let index = 0; index < length; index += 1) bytes[index] = (index * 37 + 11) % 256;
+    assert.deepEqual(webrtc.base64UrlDecode(webrtc.base64UrlEncode(bytes)), bytes);
+  }
+  // URL-safe alphabet only: no +, /, or = padding, so chat clients cannot
+  // reflow or linkify a code into something that no longer decodes.
+  assert.equal(/[+/=]/.test(webrtc.base64UrlEncode(new Uint8Array([251, 239, 190, 255, 0, 16]))), false);
+});
+
+test("Phase 6b chunk framing and reassembly produce identical bytes", () => {
+  const source = new Uint8Array(webrtc.CHUNK_SIZE * 3 + 517);
+  for (let index = 0; index < source.length; index += 1) source[index] = (index * 31 + 7) % 256;
+
+  const chunks = webrtc.chunkBytes(source, webrtc.CHUNK_SIZE);
+  assert.equal(chunks.length, 4);
+  assert.equal(chunks[3].length, 517);
+
+  const assembler = webrtc.createAssembler({ size: source.length });
+  chunks.forEach((chunk, seq) => {
+    const wire = webrtc.encodeFrame(webrtc.FRAME_KIND.CHUNK, seq, chunk);
+    assert.equal(wire.length, chunk.length + webrtc.FRAME_HEADER_BYTES);
+    const frame = webrtc.decodeFrame(wire);
+    assert.equal(frame.kind, webrtc.FRAME_KIND.CHUNK);
+    assert.equal(frame.seq, seq);
+    assembler.push(frame);
+  });
+  assert.equal(assembler.complete, true);
+  assert.deepEqual(assembler.finish(), source);
+
+  // Empty files still complete cleanly.
+  assert.equal(webrtc.createAssembler({ size: 0 }).finish().length, 0);
+
+  // JSON control frames survive the same envelope.
+  const meta = { name: "report.pdf", size: source.length, type: "application/pdf", hash: "a".repeat(64), index: 0, total: 2 };
+  assert.deepEqual(webrtc.decodeJsonFrame(webrtc.decodeFrame(webrtc.encodeJsonFrame(webrtc.FRAME_KIND.META, meta))), meta);
+
+  // Protocol violations from an untrusted peer are refused, never absorbed.
+  assert.throws(() => webrtc.decodeFrame(new Uint8Array([1, 2])), /too short/i);
+  assert.throws(() => webrtc.decodeFrame(new Uint8Array([99, 0, 0, 0, 0])), /does not understand/i);
+  assert.throws(() => webrtc.createAssembler({ size: 8 }).push(webrtc.decodeFrame(webrtc.encodeJsonFrame(webrtc.FRAME_KIND.META, {}))), /Expected file data/i);
+  assert.throws(() => webrtc.createAssembler({ size: 8 }).push(webrtc.decodeFrame(webrtc.encodeFrame(webrtc.FRAME_KIND.CHUNK, 3, new Uint8Array(4)))), /out of order/i);
+  assert.throws(() => webrtc.createAssembler({ size: 4 }).push(webrtc.decodeFrame(webrtc.encodeFrame(webrtc.FRAME_KIND.CHUNK, 0, new Uint8Array(9)))), /more data than it announced/i);
+  assert.throws(() => webrtc.createAssembler({ size: 4 }).finish(), /ended before the whole file/i);
+  assert.throws(() => webrtc.createAssembler({ size: webrtc.MAX_TRANSFER_BYTES + 1 }), /larger than the .* limit/i);
+  assert.throws(() => webrtc.createAssembler({ size: -1 }), /invalid file size/i);
+});
+
+test("Phase 6b SHA-256 verification catches a corrupted chunk", async () => {
+  const source = new Uint8Array(webrtc.CHUNK_SIZE * 2);
+  for (let index = 0; index < source.length; index += 1) source[index] = index % 251;
+  const announced = await webrtc.sha256Hex(source);
+  assert.match(announced, /^[0-9a-f]{64}$/);
+
+  const rebuild = (mutate) => {
+    const assembler = webrtc.createAssembler({ size: source.length });
+    webrtc.chunkBytes(source, webrtc.CHUNK_SIZE).forEach((chunk, seq) => {
+      const copy = Uint8Array.from(chunk);
+      if (mutate) mutate(copy, seq);
+      assembler.push(webrtc.decodeFrame(webrtc.encodeFrame(webrtc.FRAME_KIND.CHUNK, seq, copy)));
+    });
+    return assembler.finish();
+  };
+
+  const clean = await webrtc.verifyBytes(rebuild(null), announced);
+  assert.equal(clean.verified, true);
+  assert.equal(clean.hash, announced);
+
+  // One flipped bit in the second chunk is caught.
+  const corrupt = await webrtc.verifyBytes(rebuild((copy, seq) => { if (seq === 1) copy[42] ^= 0x01; }), announced);
+  assert.equal(corrupt.verified, false);
+  assert.notEqual(corrupt.hash, announced);
+
+  // A peer that announces no usable hash never counts as verified.
+  assert.equal((await webrtc.verifyBytes(source, "nope")).verified, false);
+  assert.equal((await webrtc.verifyBytes(source, "")).verified, false);
+});
+
+test("Phase 6b treats peer-supplied file metadata as untrusted", () => {
+  // Received names lose any path, keep only a conservative extension, and go
+  // through the app's own filename sanitiser.
+  assert.equal(webrtc.sanitizeReceivedFilename("quarterly report.pdf"), "quarterly-report.pdf");
+  assert.equal(webrtc.sanitizeReceivedFilename("../../../etc/passwd"), "passwd");
+  assert.equal(webrtc.sanitizeReceivedFilename("..\\..\\Windows\\System32\\evil.exe"), "evil.exe");
+  assert.equal(webrtc.sanitizeReceivedFilename("/absolute/path/file.txt"), "file.txt");
+  assert.equal(webrtc.sanitizeReceivedFilename(""), "myfilekit-received");
+  assert.equal(webrtc.sanitizeReceivedFilename(null), "myfilekit-received");
+  // Markup and shell metacharacters cannot survive: the last path segment wins,
+  // then the app's own sanitiser reduces it to [a-z0-9._-].
+  assert.equal(webrtc.sanitizeReceivedFilename("<script>alert(1)</script>.png"), "script.png");
+  assert.equal(webrtc.sanitizeReceivedFilename('a"b;rm -rf /.txt'), "myfilekit-received.txt");
+  assert.equal(webrtc.sanitizeReceivedFilename("photo;rm -rf ~.jpg"), "photo-rm--rf.jpg");
+  assert.equal(webrtc.sanitizeReceivedFilename(`${"n".repeat(200)}.pdf`).length <= 84, true);
+  assert.equal(/[\\/]/.test(webrtc.sanitizeReceivedFilename("x/y/z")), false);
+
+  assert.equal(webrtc.sanitizeMimeType("application/pdf"), "application/pdf");
+  assert.equal(webrtc.sanitizeMimeType("TEXT/Plain"), "text/plain");
+  assert.equal(webrtc.sanitizeMimeType("text/html; <script>"), "application/octet-stream");
+  assert.equal(webrtc.sanitizeMimeType(undefined), "application/octet-stream");
+
+  // Bidi overrides and control characters cannot rewrite how the UI text reads.
+  assert.equal(webrtc.sanitizePeerText("plain label"), "plain label");
+  const hostileText = ["bidi", String.fromCharCode(0x202e), "flip", String.fromCharCode(0), "null"].join("");
+  assert.equal(webrtc.sanitizePeerText(hostileText), "bidiflipnull");
+  assert.equal(webrtc.sanitizePeerText("x".repeat(500)).length, 200);
+
+  const meta = webrtc.normalizeIncomingMeta({ name: "../boot/kernel.bin", size: 1024, type: "text/html; <script>", hash: "F".repeat(64), index: 3, total: 4 });
+  assert.deepEqual(meta, { name: "kernel.bin", size: 1024, type: "application/octet-stream", hash: "", index: 3, total: 4 });
+  assert.equal(webrtc.normalizeIncomingMeta({ name: "a.txt", size: 0 }).total, 1);
+  assert.equal(webrtc.normalizeIncomingMeta({ name: "a.txt", size: 5, hash: "b".repeat(64) }).hash, "b".repeat(64));
+  assert.throws(() => webrtc.normalizeIncomingMeta(null), /unexpected shape/i);
+  assert.throws(() => webrtc.normalizeIncomingMeta({ size: "lots" }), /invalid file size/i);
+  assert.throws(() => webrtc.normalizeIncomingMeta({ size: -5 }), /invalid file size/i);
+  assert.throws(() => webrtc.normalizeIncomingMeta({ size: webrtc.MAX_TRANSFER_BYTES + 1 }), /over the .* limit/i);
+});
+
+test("Phase 6b ships no built-in ICE servers and validates the ones a user adds", () => {
+  // The default is genuinely empty: nothing is contacted unless a user types it.
+  assert.deepEqual(webrtc.parseIceServers(""), []);
+  assert.deepEqual(webrtc.parseIceServers(undefined), []);
+  assert.deepEqual(webrtc.parseIceServers("   \n  "), []);
+
+  assert.deepEqual(webrtc.parseIceServers("stun:stun.example.org:3478"), [{ urls: "stun:stun.example.org:3478" }]);
+  assert.deepEqual(webrtc.parseIceServers("turn:relay.example.org:3478|alice|s3cret"), [
+    { urls: "turn:relay.example.org:3478", username: "alice", credential: "s3cret" },
+  ]);
+  assert.equal(webrtc.parseIceServers("stun:a.example:3478\nstuns:b.example:5349").length, 2);
+
+  assert.throws(() => webrtc.parseIceServers("https://tracker.example.com"), /must start with stun/i);
+  assert.throws(() => webrtc.parseIceServers("wss://signal.example.com"), /must start with stun/i);
+  assert.throws(() => webrtc.parseIceServers("turn:relay.example.org"), /needs credentials/i);
+  assert.throws(() => webrtc.parseIceServers('stun:a b"c'), /must start with stun|not a valid/i);
+  assert.throws(() => webrtc.parseIceServers(Array(webrtc.MAX_ICE_SERVERS + 2).fill("stun:a.example:1").join("\n")), /no more than/i);
+
+  assert.equal(webrtc.transferRate(1024, 1000), 1024);
+  assert.equal(webrtc.transferRate(1024, 0), 0);
+  assert.equal(webrtc.progressPercent(50, 200), 25);
+  assert.equal(webrtc.progressPercent(0, 0), 0);
+  assert.equal(webrtc.progressPercent(10, 0), 100);
+});
+
+test("Phase 6b whiteboard strokes serialise and deserialise without drift", () => {
+  const stroke = whiteboard.createStroke({ color: "#2563eb", width: 0.006 });
+  whiteboard.addStrokePoint(stroke, { x: 0.1234, y: 0.5678, pressure: 0.42 });
+  whiteboard.addStrokePoint(stroke, { x: 0.4321, y: 0.8765, pressure: 0 });
+  // Out-of-range input is clamped into board space instead of being trusted.
+  whiteboard.addStrokePoint(stroke, { x: 4, y: -3, pressure: 9 });
+
+  const round = whiteboard.deserializeStroke(whiteboard.serializeStroke(stroke));
+  assert.equal(round.id, stroke.id);
+  assert.equal(round.color, "#2563eb");
+  assert.equal(round.erase, false);
+  assert.equal(Math.abs(round.width - stroke.width) < 1e-5, true);
+  assert.equal(round.points.length, 3);
+  assert.deepEqual(round.points[0], { x: 0.1234, y: 0.5678, pressure: 0.42 });
+  assert.deepEqual(round.points[2], { x: 1, y: 0, pressure: 1 });
+
+  const eraser = whiteboard.createStroke({ erase: true, width: 999 });
+  whiteboard.addStrokePoint(eraser, { x: 0.5, y: 0.5 });
+  const eraserRound = whiteboard.deserializeStroke(whiteboard.serializeStroke(eraser));
+  assert.equal(eraserRound.erase, true);
+  assert.equal(eraserRound.width, whiteboard.MAX_STROKE_WIDTH);
+
+  // A whole board round-trips through the save/load format.
+  const board = whiteboard.deserializeBoard(whiteboard.serializeBoard([stroke, eraser]));
+  assert.equal(board.length, 2);
+  assert.equal(whiteboard.countPoints(board), 4);
+  assert.deepEqual(whiteboard.serializeBoard(board), whiteboard.serializeBoard([stroke, eraser]));
+
+  assert.throws(() => whiteboard.deserializeBoard("not json"), /could not be read/i);
+  assert.throws(() => whiteboard.deserializeBoard(JSON.stringify({ v: 99, strokes: [] })), /different version/i);
+  assert.throws(() => whiteboard.deserializeBoard(JSON.stringify({ v: 1 })), /no strokes/i);
+});
+
+test("Phase 6b whiteboard treats peer strokes as untrusted and merges live fragments", () => {
+  // A peer controls every field. Colours outside #rgb/#rrggbb, absurd widths,
+  // and broken point lists are refused or clamped, never handed to a canvas.
+  const hostile = whiteboard.deserializeStroke({ i: "x", c: "url(javascript:alert(1))", w: 1e9, e: 1, p: [0.5, 0.5, 0] }, { remote: true });
+  assert.equal(hostile.color, "#111111");
+  assert.equal(hostile.width, whiteboard.MAX_STROKE_WIDTH);
+  assert.equal(hostile.remote, true);
+  assert.throws(() => whiteboard.deserializeStroke({ p: [0.1, 0.2] }), /incomplete point list/i);
+  assert.throws(() => whiteboard.deserializeStroke({ p: "0.1,0.2,0" }), /without any points/i);
+  assert.throws(() => whiteboard.deserializeStroke(null), /unexpected shape/i);
+  assert.throws(() => whiteboard.deserializeStroke({ p: new Array(3 * (whiteboard.MAX_POINTS_PER_STROKE + 1)).fill(0) }), /too many points/i);
+
+  // Live fragments: the sender streams the tail of a stroke, the receiver
+  // appends it and learns which segment is new so it can draw only that.
+  const source = whiteboard.createStroke({ color: "#111111", width: 0.004 });
+  whiteboard.addStrokePoint(source, { x: 0, y: 0 });
+  whiteboard.addStrokePoint(source, { x: 0.2, y: 0.2 });
+
+  const first = whiteboard.deserializeStrokeChunk(whiteboard.serializeStrokeChunk(source, 0, false));
+  const opened = whiteboard.mergeStrokeChunk(null, first);
+  assert.equal(opened.stroke.points.length, 2);
+  assert.equal(opened.from, 0);
+  assert.equal(opened.final, false);
+
+  whiteboard.addStrokePoint(source, { x: 0.4, y: 0.5 });
+  const second = whiteboard.deserializeStrokeChunk(whiteboard.serializeStrokeChunk(source, 2, true));
+  const closed = whiteboard.mergeStrokeChunk(opened.stroke, second);
+  assert.equal(closed.stroke.points.length, 3);
+  assert.equal(closed.from, 1);
+  assert.equal(closed.final, true);
+  assert.deepEqual(closed.stroke.points.map((point) => point.x), [0, 0.2, 0.4]);
+
+  // A duplicated fragment is idempotent rather than doubling the line.
+  const replay = whiteboard.mergeStrokeChunk(closed.stroke, whiteboard.deserializeStrokeChunk(whiteboard.serializeStrokeChunk(source, 2, true)));
+  assert.equal(replay.stroke.points.length, 3);
+
+  // A fragment that skips ahead means the boards diverged, so it is refused.
+  assert.throws(() => whiteboard.mergeStrokeChunk(closed.stroke, { stroke: source, offset: 99, final: false }), /out of order/i);
+  assert.throws(() => whiteboard.mergeStrokeChunk(null, { stroke: source, offset: 5, final: false }), /before its start/i);
+  assert.throws(() => whiteboard.deserializeStrokeChunk({ p: [], o: -1 }), /invalid position/i);
+});
+
+test("Phase 6b sharing tools are registered, routable, and backend-free", () => {
+  assert.ok(categories.includes("Sharing & Collaboration"));
+  for (const id of ["p2p-share-tool", "collab-whiteboard-tool"]) {
+    const entry = tools.find((item) => item.id === id);
+    assert.ok(entry, `missing tool ${id}`);
+    assert.equal(entry.category, "Sharing & Collaboration");
+    assert.equal(entry.status, "available");
+    assert.equal(entry.localProcessing, true);
+    assert.equal(routeForHash(entry.route).tool.id, id);
+    assert.ok(entry.badges.includes("Sharing"));
+  }
+  const share = tools.find((item) => item.id === "p2p-share-tool");
+  assert.equal(share.file.maxFiles, 10);
+  assert.equal(share.file.maxSize, 256 * 1024 * 1024);
+  assert.deepEqual(share.acceptedTypes, []);
+
+  // Guard the core promise: no signaling server and no public STUN/TURN host is
+  // baked into either service, and neither makes an HTTP call.
+  for (const file of ["../src/services/webrtc.service.js", "../src/services/whiteboard.service.js"]) {
+    const source = fs.readFileSync(new URL(file, import.meta.url), "utf8");
+    assert.equal(/stuns?:[a-z0-9-]+\.[a-z0-9.-]+/i.test(source), false, `${file} hardcodes a STUN host`);
+    assert.equal(/turns?:[a-z0-9-]+\.[a-z0-9.-]+/i.test(source), false, `${file} hardcodes a TURN host`);
+    assert.equal(/wss?:\/\//i.test(source), false, `${file} hardcodes a signaling socket`);
+    assert.equal(/https?:\/\//i.test(source), false, `${file} hardcodes an HTTP endpoint`);
+    assert.equal(/\bfetch\s*\(|XMLHttpRequest|EventSource/.test(source), false, `${file} makes an HTTP call`);
+  }
 });

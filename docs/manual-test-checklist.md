@@ -16,7 +16,7 @@ Open the URL printed by Vite, normally `http://localhost:4173`.
 - Confirm the text-only MyFileKit wordmark appears without a separate logo icon.
 - Confirm the public UI contains no framework, release milestone, placeholder, AI, or coming-soon copy.
 - Confirm the landing page shows the hero search, quick actions, Popular Tools, optional Recently Used, category links, privacy strip, product highlights, and footer.
-- Confirm the full 73-tool library is available from Browse tools rather than being repeated on the landing page.
+- Confirm the full 77-tool library is available from Browse tools rather than being repeated on the landing page.
 - Press `Cmd+K` on macOS or `Ctrl+K` on Windows/Linux and confirm the hero search receives focus.
 - Search `metadata`, `invoice`, `merge pdf`, `compress image`, `signature`, `json`, and `hash`; confirm relevant results appear directly under the search.
 - Press `Escape` and confirm the search clears.
@@ -165,6 +165,30 @@ Open the URL printed by Vite, normally `http://localhost:4173`.
 - Read a PDF aloud, then pause, resume, and stop; confirm playback stops when you navigate away.
 - Dictate into Audio to PDF with "Require on-device recognition" ticked and unticked, confirm the warning text matches what the browser actually does, and confirm the microphone indicator disappears on Stop and on leaving the tool.
 - Confirm the manual-transcript path exports a PDF with the network disconnected.
+
+## Peer Connection Checks (browser-only — cannot be unit-tested)
+
+Needs two browsers. Use two devices on the same Wi-Fi/LAN, or two windows on one machine.
+
+- In P2P File Share as sender, pick a file, create an invite code, and confirm the code appears only after ICE gathering finishes (it should contain candidates, and should never hang for more than about five seconds).
+- Paste the invite into the second browser as receiver, copy its answer code back, and confirm the status reaches "Connected to peer" and the transfer starts on its own.
+- Confirm progress and throughput update on both sides, and that the receiver reports "SHA-256 verified".
+- Send several files at once and confirm they arrive one after another, each acknowledged before the next starts.
+- Send a large file (tens of MB) and confirm memory stays flat-ish rather than growing without bound — backpressure should pause the sender.
+- Close the receiver's tab mid-transfer and confirm the sender reports the peer disconnected, and that nothing partial is offered for download.
+- Press Cancel mid-transfer on each side in turn and confirm the other side is told, and the connection closes.
+- Paste a truncated, edited, or unrelated code and confirm a clear error rather than a silent failure.
+- Confirm a received file is never opened automatically, its name has no path in it, and Download is the only action offered.
+- With developer tools open on both sides, confirm no HTTP or WebSocket request is made by either tool (Network tab stays empty apart from the app's own assets).
+- Leave the tool mid-connection (navigate to the dashboard) and confirm in `chrome://webrtc-internals` that the peer connection is closed rather than lingering.
+- Enter a deliberately wrong ICE server URL (an `https://` one) and confirm it is refused before any connection attempt.
+
+- In Whiteboard, draw with a mouse, a trackpad, a finger, and a stylus if available; confirm pressure varies the line width on a pressure-capable pen.
+- Resize the window and rotate a phone; confirm the drawing is preserved and lines stay crisp (no blur, no coordinate drift when you draw near the edges).
+- Confirm eraser, undo, redo, and clear behave, and that PNG and PDF exports match what is on screen with a white background.
+- Pair two browsers and confirm strokes appear on the peer's board as they are drawn, rendered slightly lighter than local strokes.
+- Undo and clear on one side and confirm the peer's copy of those strokes goes away while their own work stays.
+- Disconnect the peer and confirm the local board is untouched and still drawable.
 
 ## Browser And Resource Checks
 

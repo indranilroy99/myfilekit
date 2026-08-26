@@ -73,7 +73,9 @@ export const tools = [
   tool("file-hash-tool", "File Hash Generator", "Developer Utilities", "Generate a SHA-256 hash for a local file.", ["hash", "sha256", "checksum"], ["Developer", "Local"], { maxFiles: 1 }),
   tool("hash-compare-tool", "Hash Compare", "Developer Utilities", "Compare a file SHA-256 hash with an expected value.", ["compare hash", "checksum verify", "sha256 verify"], ["Developer", "Local"], { maxFiles: 1 }),
   tool("password-generator-tool", "Password Generator", "Developer Utilities", "Create passwords or passphrases with local strength controls.", ["password", "passphrase", "random", "secure password", "password length"], ["Security", "Local"]),
-  tool("qr-code-generator-tool", "QR Code Generator", "Developer Utilities", "Generate a downloadable QR code for text or links.", ["qr", "qr code", "upi qr", "link qr"], ["Utility", "Local"])
+  tool("qr-code-generator-tool", "QR Code Generator", "Developer Utilities", "Generate a downloadable QR code for text or links.", ["qr", "qr code", "upi qr", "link qr"], ["Utility", "Local"]),
+  tool("p2p-share-tool", "P2P File Share", "Sharing & Collaboration", "Send files straight from this browser to another one over a direct connection, with a SHA-256 check on both ends. No server, no upload: you pass one code to your peer yourself.", ["p2p file share", "send file to peer", "direct file transfer", "share without upload", "webrtc file share", "local network share"], ["Sharing", "Direct", "No server"], { maxFiles: 10, maxSize: 256 * 1024 * 1024 }),
+  tool("collab-whiteboard-tool", "Whiteboard", "Sharing & Collaboration", "Sketch with a pressure-aware pen and eraser, undo and redo, then export to PNG or PDF. Works solo with zero setup, or paired with one peer over a direct connection.", ["whiteboard", "draw", "sketch", "brainstorm", "canvas", "collaborate", "diagram"], ["Sharing", "Local"])
 ];
 
 export const categories = [
@@ -83,7 +85,8 @@ export const categories = [
   "Signature Tools",
   "Text & Data Tools",
   "Privacy Tools",
-  "Developer Utilities"
+  "Developer Utilities",
+  "Sharing & Collaboration"
 ];
 
 function tool(id, name, category, description, keywords, badges, file = {}) {
