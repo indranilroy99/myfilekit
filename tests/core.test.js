@@ -7,6 +7,7 @@ import { addPdfPageNumbers, addTextToPdf, cleanPdfMetadata, deletePdfPages, extr
 import { validateFiles } from "../src/services/file-validator.js";
 import { inspectImageMetadataBuffer } from "../src/services/metadata.service.js";
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "../src/services/text-tools.service.js";
+import { csvToPdf, markdownToPdf, renderEquationToHtml } from "../src/services/convert.service.js";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "../src/utils/format.js";
 import { safeFilename, withExtension } from "../src/utils/safe-filename.js";
 import { routeForHash } from "../src/router.js";
@@ -606,6 +607,61 @@ test("fingerprintPdf embeds a traceable id in metadata without changing pages", 
   assert.match(stamped.getKeywords(), new RegExp(`mfk-fpid:${id}`));
   const preserved = await PDFDocument.load(bytes, { updateMetadata: false });
   assert.match(preserved.getProducer(), new RegExp(id));
+});
+
+// --- Phase 3: convert.service.js ------------------------------------------
+// Pure pdf-lib and KaTeX logic is unit-tested here. The html2canvas, camera
+// (getUserMedia), and canvas enhancement paths are browser-only and covered by
+// the manual test checklist instead.
+
+test("markdownToPdf lays out headings, lists, and paragraphs into a valid PDF", async () => {
+  const md = "# Title\n\n## Section\n\n- one\n- two\n\n" + "word ".repeat(2000).trim();
+  const doc = await window.PDFLib.PDFDocument.load(await markdownToPdf(md));
+  // The long paragraph must overflow onto a second page.
+  assert.ok(doc.getPageCount() >= 2);
+  await assert.rejects(() => markdownToPdf(""), /Add Markdown/);
+  await assert.rejects(() => markdownToPdf("# 你好世界"), /Latin-1 characters only/);
+});
+
+test("csvToPdf builds a paginated table from generated CSV data", async () => {
+  const header = "id,name,note";
+  const many = Array.from({ length: 200 }, (_, i) => `${i + 1},Person ${i + 1},"row, ${i + 1}"`).join("\n");
+  const multi = await window.PDFLib.PDFDocument.load(await csvToPdf(`${header}\n${many}`));
+  assert.ok(multi.getPageCount() > 1, "200 rows should span multiple pages");
+
+  const small = await window.PDFLib.PDFDocument.load(await csvToPdf("a,b\n1,2"));
+  assert.equal(small.getPageCount(), 1);
+
+  await assert.rejects(() => csvToPdf(""), /Add CSV content/);
+});
+
+test("renderEquationToHtml renders LaTeX to KaTeX markup and rejects invalid input", () => {
+  const html = renderEquationToHtml("E = mc^2");
+  assert.match(html, /class="katex"/);
+  assert.match(html, /<span/);
+  assert.throws(() => renderEquationToHtml(""), /Enter a LaTeX equation/);
+  assert.throws(() => renderEquationToHtml("\\frac{1}{"), /Invalid LaTeX/);
+});
+
+test("Phase 3 conversion tools are registered under sensible categories with renderers", () => {
+  const expected = {
+    "markdown-to-pdf-tool": "Text & Data Tools",
+    "csv-to-pdf-tool": "Text & Data Tools",
+    "html-to-pdf-tool": "PDF Tools",
+    "equation-to-image-tool": "Image Tools",
+    "handwriting-to-pdf-tool": "PDF Tools",
+    "scan-to-pdf-tool": "PDF Tools",
+  };
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  for (const [id, category] of Object.entries(expected)) {
+    const found = tools.find((tool) => tool.id === id);
+    assert.ok(found, `${id} should be registered`);
+    assert.equal(found.category, category);
+    assert.ok(categories.includes(category));
+    assert.equal(found.status, "available");
+    assert.equal(found.localProcessing, true);
+    assert.equal(appSource.includes(`"${id}"`), true, `${id} is missing from ToolRenderer`);
+  }
 });
 
 test("Phase 2 PDF tools are registered under sensible categories with renderers", () => {

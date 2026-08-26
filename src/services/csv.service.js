@@ -32,7 +32,7 @@ export function jsonToCsv(jsonText) {
     .join("\n");
 }
 
-function parseCsv(text) {
+export function parseCsv(text) {
   const rows = [];
   let row = [];
   let value = "";

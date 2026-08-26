@@ -1,6 +1,6 @@
 {
   "name": "myfilekit",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "type": "module",
   "private": true,
   "license": "MIT",
@@ -25,6 +25,7 @@
     "@ark-ui/react": "^5.37.2",
     "fflate": "^0.8.3",
     "framer-motion": "^12.40.0",
+    "katex": "^0.18.4",
     "lucide-react": "^1.18.0",
     "pdfjs-dist": "^4.10.38",
     "qrcode": "^1.5.4",

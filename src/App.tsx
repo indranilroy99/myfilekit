@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import { zipSync } from "fflate";
 import {
   ArrowLeft,
@@ -50,6 +52,8 @@ import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetada
 import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip } from "./services/pdf-render.service.js";
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
+import { canvasToPdf, canvasesToPdf, csvToPdf, markdownToPdf } from "./services/convert.service.js";
+import { captureVideoFrame, enhanceCanvas, getHtml2Canvas, startCameraStream, stopCameraStream } from "./services/capture.service.js";
 
 type Tool = (typeof tools)[number];
 type Status = { tone: "idle" | "success" | "error"; message: string };
@@ -1085,6 +1089,12 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "type-signature-tool") return <TypeSignatureTool />;
   if (tool.id === "text-to-pdf-tool") return <TextToPdfTool />;
   if (tool.id === "markdown-preview-tool") return <MarkdownTool />;
+  if (tool.id === "markdown-to-pdf-tool") return <MarkdownToPdfTool />;
+  if (tool.id === "csv-to-pdf-tool") return <CsvToPdfTool />;
+  if (tool.id === "html-to-pdf-tool") return <HtmlToPdfTool />;
+  if (tool.id === "equation-to-image-tool") return <EquationToImageTool />;
+  if (tool.id === "handwriting-to-pdf-tool") return <HandwritingToPdfTool tool={tool} />;
+  if (tool.id === "scan-to-pdf-tool") return <ScanToPdfTool />;
   if (tool.id === "json-formatter-tool") return <JsonTool />;
   if (tool.id === "csv-to-json-tool") return <CsvToJsonTool />;
   if (tool.id === "json-to-csv-tool") return <JsonToCsvTool />;
@@ -2125,6 +2135,242 @@ function renderMarkdownPreview(markdown: string) {
   flushList();
 
   return nodes.length ? nodes : <p className="text-sm font-semibold text-neutral-500">Markdown preview will appear here.</p>;
+}
+
+function MarkdownToPdfTool() {
+  const [markdown, setMarkdown] = useState("# MyFileKit\n\nThis Markdown becomes a clean, crisp PDF.\n\n## Features\n\n- Headings render larger and bold\n- Bullet lists are indented\n- Long paragraphs wrap neatly inside the page margins");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setMarkdown(""); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Builds vector text with pdf-lib, so the PDF stays crisp at any zoom. Supports Latin-1 characters only (no CJK/emoji).
+    </div>
+    <Textarea label="Markdown" value={markdown} onChange={setMarkdown} rows={12} />
+    <div className="surface-card wabi-card-edge grid gap-3 p-4">{renderMarkdownPreview(markdown)}</div>
+    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
+      downloadBytes(await markdownToPdf(markdown), "myfilekit-markdown.pdf", "application/pdf");
+      return "Markdown PDF downloaded.";
+    })} />
+  </ToolForm>;
+}
+
+function CsvToPdfTool() {
+  const [csv, setCsv] = useState("name,role,city\nAlex,Engineer,London\nSam,Designer,Berlin\nJordan,Product Manager,San Francisco");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setCsv(""); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      The first row becomes a bold header. Long cells wrap and the table paginates across pages. Supports Latin-1 characters only.
+    </div>
+    <Textarea label="CSV" value={csv} onChange={setCsv} rows={12} />
+    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
+      downloadBytes(await csvToPdf(csv), "myfilekit-table.pdf", "application/pdf");
+      return "CSV table PDF downloaded.";
+    })} />
+  </ToolForm>;
+}
+
+function HtmlToPdfTool() {
+  const [html, setHtml] = useState("<h1>Hello from MyFileKit</h1>\n<p>Paste any HTML here. It renders locally in a sandboxed frame.</p>\n<ul><li>Scripts never run</li><li>Remote resources are blocked</li></ul>");
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+  const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0}body{padding:24px;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#111;line-height:1.5}img,table{max-width:100%}</style></head><body>${html}</body></html>`;
+  return <ToolForm status={status} onReset={() => { setHtml(""); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      HTML is rendered locally in a sandboxed frame with scripts disabled. Remote images, styles, and network requests are blocked, so no external content is fetched or executed.
+    </div>
+    <Textarea label="HTML" value={html} onChange={setHtml} rows={10} />
+    <div className="grid gap-2">
+      <span className="text-xs font-black uppercase text-neutral-500">Local preview</span>
+      <iframe
+        ref={frameRef}
+        title="Sandboxed HTML preview"
+        sandbox="allow-same-origin"
+        srcDoc={srcDoc}
+        className="surface-card wabi-card-edge h-80 w-full rounded-3xl bg-white"
+      />
+    </div>
+    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
+      if (!html.trim()) throw new Error("Paste some HTML first.");
+      const html2canvas = getHtml2Canvas();
+      const doc = frameRef.current?.contentDocument;
+      if (!doc?.body) throw new Error("The preview is not ready yet. Wait a moment and try again.");
+      await doc.fonts?.ready?.catch(() => {});
+      const canvas = await html2canvas(doc.body, { backgroundColor: "#ffffff", scale: 2, useCORS: false, logging: false });
+      downloadBytes(await canvasToPdf(canvas), "myfilekit-html.pdf", "application/pdf");
+      return "HTML PDF downloaded.";
+    })} />
+  </ToolForm>;
+}
+
+const equationExamples = ["E = mc^2", "\\frac{a}{b}", "\\sqrt{x^2 + y^2}", "\\sum_{i=1}^{n} i", "\\int_0^\\infty e^{-x}\\,dx"];
+
+function EquationToImageTool() {
+  const [latex, setLatex] = useState("E = mc^2");
+  const [format, setFormat] = useState("png");
+  const [transparent, setTransparent] = useState(true);
+  const [scale, setScale] = useState("4");
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  const mathRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const element = mathRef.current;
+    if (!element) return;
+    try {
+      katex.render(latex.trim() || "\\,", element, { throwOnError: true, displayMode: true });
+      setError("");
+    } catch (renderError: any) {
+      setError(renderError?.message || "Invalid LaTeX.");
+    }
+  }, [latex]);
+
+  return <ToolForm status={status} onReset={() => { setLatex(""); setError(""); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Renders LaTeX with KaTeX entirely in your browser — fonts are bundled locally, so nothing is fetched from the network.
+    </div>
+    <Textarea label="LaTeX equation" value={latex} onChange={setLatex} rows={4} />
+    <div className="flex flex-wrap gap-2">
+      {equationExamples.map((example) => (
+        <button key={example} type="button" className="quick-chip" onClick={() => setLatex(example)}>{example}</button>
+      ))}
+    </div>
+    <div className="surface-card wabi-card-edge grid min-h-28 place-items-center overflow-x-auto p-6">
+      <div ref={mathRef} />
+    </div>
+    {error && <StatusBox status={{ tone: "error", message: `Invalid LaTeX: ${error}` }} />}
+    <div className="grid gap-3 sm:grid-cols-3">
+      <Select label="Format" value={format} onChange={setFormat} options={["png", "jpg"]} labels={["PNG", "JPG"]} />
+      <Select label="Scale" value={scale} onChange={setScale} options={["2", "4", "6"]} labels={["2× · standard", "4× · sharp", "6× · large"]} />
+      {format === "png" && <Checkbox label="Transparent background" checked={transparent} onChange={setTransparent} />}
+    </div>
+    <PrimaryButton label="Download image" onClick={() => runSafely(setStatus, async () => {
+      if (!latex.trim()) throw new Error("Enter a LaTeX equation first.");
+      if (error) throw new Error(`Invalid LaTeX: ${error}`);
+      const element = mathRef.current;
+      if (!element) throw new Error("The equation preview is not ready yet.");
+      const html2canvas = getHtml2Canvas();
+      await document.fonts?.ready?.catch(() => {});
+      const type = format === "png" ? "image/png" : "image/jpeg";
+      const useTransparent = format === "png" && transparent;
+      const canvas = await html2canvas(element, {
+        backgroundColor: useTransparent ? null : "#ffffff",
+        scale: Number(scale),
+        logging: false,
+      });
+      downloadBlob(await canvasToBlob(canvas, type), withExtension("myfilekit-equation", format));
+      return `Equation image downloaded as ${format.toUpperCase()}.`;
+    })} />
+  </ToolForm>;
+}
+
+function HandwritingToPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [enhance, setEnhance] = useState(true);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Upload photos of handwritten or scanned pages. They are combined into one PDF in the order shown, one page per image. Enable cleanup for a cleaner, higher-contrast document look.
+    </div>
+    <FileControl accept="image/jpeg,image/png,image/webp" multiple files={files} setFiles={setFiles} />
+    <Checkbox label="Enhance pages (grayscale + contrast)" checked={enhance} onChange={setEnhance} />
+    <PrimaryButton label="Create PDF" onClick={() => runSafely(setStatus, async () => {
+      const valid = validateFiles(files, tool.file);
+      const canvases: HTMLCanvasElement[] = [];
+      for (const file of valid) {
+        const canvas = await imageToCanvas(file, "image/jpeg");
+        canvases.push(enhance ? enhanceCanvas(canvas) : canvas);
+      }
+      downloadBytes(await canvasesToPdf(canvases), "myfilekit-handwriting.pdf", "application/pdf");
+      return `Combined ${valid.length} page${valid.length === 1 ? "" : "s"} into one PDF.`;
+    })} />
+  </ToolForm>;
+}
+
+function ScanToPdfTool() {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [active, setActive] = useState(false);
+  const [pages, setPages] = useState<HTMLCanvasElement[]>([]);
+  const [thumbs, setThumbs] = useState<string[]>([]);
+  const [enhance, setEnhance] = useState(true);
+  const [status, setStatus] = useState(initialStatus);
+
+  const stopCamera = () => {
+    stopCameraStream(streamRef.current);
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setActive(false);
+  };
+
+  // Always release the camera when this tool unmounts (route change / reset),
+  // so the camera light never stays on after leaving.
+  useEffect(() => () => {
+    stopCameraStream(streamRef.current);
+    streamRef.current = null;
+  }, []);
+
+  const startCamera = () => runSafely(setStatus, async () => {
+    const stream = await startCameraStream();
+    streamRef.current = stream;
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play().catch(() => {});
+    }
+    setActive(true);
+    return "Camera started. Capture one or more pages, then create your PDF.";
+  });
+
+  const capture = () => runSafely(setStatus, async () => {
+    if (!active || !videoRef.current) throw new Error("Start the camera first.");
+    const frame = captureVideoFrame(videoRef.current);
+    const canvas = enhance ? enhanceCanvas(frame) : frame;
+    setPages((previous) => [...previous, canvas]);
+    setThumbs((previous) => [...previous, canvas.toDataURL("image/jpeg", 0.6)]);
+    return "Captured a page.";
+  });
+
+  const reset = () => {
+    stopCamera();
+    setPages([]);
+    setThumbs([]);
+    setStatus(initialStatus);
+  };
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Uses your device camera locally. Frames are captured and combined into a PDF in your browser — nothing is uploaded. The camera is released when you stop or leave this tool.
+    </div>
+    <video
+      ref={videoRef}
+      playsInline
+      muted
+      className="w-full rounded-3xl bg-black"
+      style={{ display: active ? "block" : "none", aspectRatio: "4 / 3" }}
+    />
+    <div className="flex flex-wrap gap-2">
+      {active
+        ? <>
+            <PrimaryButton label="Capture page" onClick={capture} />
+            <SecondaryButton label="Stop camera" onClick={stopCamera} />
+          </>
+        : <SecondaryButton label="Start camera" onClick={startCamera} />}
+    </div>
+    <Checkbox label="Enhance pages (grayscale + contrast)" checked={enhance} onChange={setEnhance} />
+    {thumbs.length > 0 && (
+      <div className="surface-card wabi-card-edge grid gap-3 p-4">
+        <p className="text-xs font-black uppercase text-neutral-500">Captured pages · {thumbs.length}</p>
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {thumbs.map((thumb, index) => (
+            <img key={index} src={thumb} alt={`Captured page ${index + 1}`} className="wabi-card-edge w-full rounded-xl border border-[var(--line)]" />
+          ))}
+        </div>
+      </div>
+    )}
+    <PrimaryButton label="Create PDF" onClick={() => runSafely(setStatus, async () => {
+      if (!pages.length) throw new Error("Capture at least one page first.");
+      downloadBytes(await canvasesToPdf(pages), "myfilekit-scan.pdf", "application/pdf");
+      return `Created a PDF from ${pages.length} page${pages.length === 1 ? "" : "s"}.`;
+    })} />
+  </ToolForm>;
 }
 
 function JsonTool() {
