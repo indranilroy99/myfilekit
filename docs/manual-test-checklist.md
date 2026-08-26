@@ -102,6 +102,25 @@ Open the URL printed by Vite, normally `http://localhost:4173`.
 - Generate and download a QR code; reject empty input.
 - Clean unsafe filenames and download the generated list.
 
+## PDF Export Workflows (Word, Excel, HTML, EPUB)
+
+- Convert a text PDF to `.docx` and confirm each page starts on a new Word page.
+- Convert a ruled/tabular PDF to `.xlsx` and confirm columns land in separate cells; retry with a different "Column detection" setting.
+- Export a PDF to HTML in both modes: "Page images" must look like the PDF with selectable text on top, "Text only" must be a much smaller file. Open both with the network disconnected and confirm nothing fails to load.
+- Export a PDF to `.epub` and open it in a real reader (Books, Calibre, Thorium); confirm the table of contents lists every page.
+- Feed a scanned (image-only) PDF to all four and confirm each says the PDF has no selectable text and points at OCR.
+
+## OCR, Speech, And Microphone Checks (browser-only — cannot be unit-tested)
+
+- Run OCR on an image and on a scanned PDF; confirm per-page progress updates and the recognised text is sane.
+- Confirm the searchable PDF looks identical to the original and its text is selectable and searchable in a PDF reader.
+- With developer tools open, confirm OCR fetches `tesseract.min.js`, `worker.min.js`, `core/*.wasm.js`, and `lang/eng.traineddata.gz` from this origin only — no CDN request may appear.
+- Rename the local `assets/vendor/tesseract/lang` directory and confirm OCR fails with a clear message instead of hanging or reaching a CDN.
+- Leave the OCR tool mid-run and confirm the worker is terminated (no lingering CPU use).
+- Read a PDF aloud, then pause, resume, and stop; confirm playback stops when you navigate away.
+- Dictate into Audio to PDF with "Require on-device recognition" ticked and unticked, confirm the warning text matches what the browser actually does, and confirm the microphone indicator disappears on Stop and on leaving the tool.
+- Confirm the manual-transcript path exports a PDF with the network disconnected.
+
 ## Browser And Resource Checks
 
 - Open developer tools and confirm there are no uncaught errors during dashboard, preview, processing, reset, and download flows.

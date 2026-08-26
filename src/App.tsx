@@ -55,6 +55,9 @@ import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePas
 import { canvasToPdf, canvasesToPdf, csvToPdf, markdownToPdf } from "./services/convert.service.js";
 import { captureVideoFrame, enhanceCanvas, getHtml2Canvas, startCameraStream, stopCameraStream } from "./services/capture.service.js";
 import { docxToHtml, epubToHtml, pptxToSlides, readWorkbookSheets, sanitizeHtmlForOffline, sheetsToHtml } from "./services/office.service.js";
+import { pdfToDocx, pdfToEpub, pdfToHtml, pdfToXlsx } from "./services/export.service.js";
+import { OCR_ENGINE_SIZE_LABEL, mergeSearchablePdfPages, ocrImages, ocrPdf, terminateOcrWorker } from "./services/ocr.service.js";
+import { createSpeechRecognizer, getSpeechSynthesis, loadSpeechVoices, speechRecognitionSupport, speechSynthesisSupported, splitTextForSpeech } from "./services/audio.service.js";
 
 type Tool = (typeof tools)[number];
 type Status = { tone: "idle" | "success" | "error"; message: string };
@@ -1097,6 +1100,13 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "excel-to-pdf-tool") return <ExcelToPdfTool tool={tool} />;
   if (tool.id === "powerpoint-to-pdf-tool") return <PowerpointToPdfTool tool={tool} />;
   if (tool.id === "ebook-to-pdf-tool") return <EbookToPdfTool tool={tool} />;
+  if (tool.id === "pdf-to-word-tool") return <PdfToWordTool tool={tool} />;
+  if (tool.id === "pdf-to-excel-tool") return <PdfToExcelTool tool={tool} />;
+  if (tool.id === "pdf-to-html-tool") return <PdfToHtmlTool tool={tool} />;
+  if (tool.id === "pdf-to-epub-tool") return <PdfToEpubTool tool={tool} />;
+  if (tool.id === "ocr-pdf-tool") return <OcrPdfTool tool={tool} />;
+  if (tool.id === "pdf-to-audio-tool") return <PdfToAudioTool tool={tool} />;
+  if (tool.id === "audio-to-pdf-tool") return <AudioToPdfTool />;
   if (tool.id === "equation-to-image-tool") return <EquationToImageTool />;
   if (tool.id === "handwriting-to-pdf-tool") return <HandwritingToPdfTool tool={tool} />;
   if (tool.id === "scan-to-pdf-tool") return <ScanToPdfTool />;
@@ -2348,6 +2358,365 @@ function EbookToPdfTool({ tool }: { tool: Tool }) {
       const canvas = await renderHtmlToCanvas(html);
       downloadBytes(await canvasToPdf(canvas), withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
       return "eBook converted to PDF.";
+    })} />
+  </ToolForm>;
+}
+
+// --- PDF export tools (Phase 4b) ---------------------------------------------
+
+// Shared per-page progress reporter for the export tools below.
+function pageProgress(setStatus: (status: Status) => void, verb: string) {
+  return (page: number, total: number) => setStatus({ tone: "idle", message: `${verb} page ${page} of ${total}…` });
+}
+
+function PdfToWordTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Text-focused conversion: each line of selectable text becomes a Word paragraph, blank space becomes a blank line, and every PDF page ends with a page break. Multi-column layouts, tables, and images are not reproduced. A scanned PDF has no selectable text — run OCR first.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <PrimaryButton label="Download .docx" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = await pdfToDocx(file, { title: file.name, onProgress: pageProgress(setStatus, "Reading") });
+      downloadBytes(bytes, withExtension(safeFilename(file.name), "docx"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      return "Word document ready.";
+    })} />
+  </ToolForm>;
+}
+
+function PdfToExcelTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [tolerance, setTolerance] = useState("12");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Rebuilds tables from where the text actually sits on the page, one sheet per PDF page. This works best on ruled or clearly tabular PDFs (statements, invoices, reports); flowing prose comes back as one column per line. Merged cells and spanning headers are approximated.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Select
+      label="Column detection"
+      value={tolerance}
+      onChange={setTolerance}
+      options={["8", "12", "20", "32"]}
+      labels={["8 · many narrow columns", "12 · default", "20 · fewer columns", "32 · widest columns"]}
+    />
+    <PrimaryButton label="Download .xlsx" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const { bytes, sheets, rows, columns } = await pdfToXlsx(file, {
+        columnTolerance: Number(tolerance),
+        onProgress: pageProgress(setStatus, "Reading"),
+      });
+      downloadBytes(bytes, withExtension(safeFilename(file.name), "xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      return `Rebuilt ${rows} row${rows === 1 ? "" : "s"} across ${columns} column${columns === 1 ? "" : "s"} in ${sheets} sheet${sheets === 1 ? "" : "s"}.\nCheck the result — column detection is a best-effort guess from text positions.`;
+    })} />
+  </ToolForm>;
+}
+
+function PdfToHtmlTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [mode, setMode] = useState("image");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Exports one self-contained .html file with no remote references, so it opens offline anywhere. "Page images" keeps the exact look and lays invisible, selectable text over each page; "text only" produces a much smaller file with positioned text on blank pages. All text is escaped, so nothing in the PDF can run as script.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Select
+      label="Fidelity"
+      value={mode}
+      onChange={setMode}
+      options={["image", "text"]}
+      labels={["Page images + selectable text · exact look, large file", "Text only · small file, no graphics"]}
+    />
+    <PrimaryButton label="Download .html" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const html = await pdfToHtml(file, {
+        pageImages: mode === "image",
+        title: safeFilename(file.name),
+        onProgress: pageProgress(setStatus, "Rendering"),
+      });
+      downloadText(html, `${safeFilename(file.name)}`, "html", "text/html;charset=utf-8");
+      return `HTML ready (${formatBytes(new Blob([html]).size)}).`;
+    })} />
+  </ToolForm>;
+}
+
+function PdfToEpubTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [title, setTitle] = useState("");
+  const [author, setAuthor] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setTitle(""); setAuthor(""); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Packages the PDF's text as a valid EPUB 3 eBook: one reflowable chapter per PDF page, plus a table of contents. Text only — images, columns, and fixed layout are not carried over, so this suits prose rather than magazines. Scanned PDFs need OCR first.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Input label="Book title" value={title} onChange={setTitle} placeholder="Leave blank to use the file name" />
+    <Input label="Author" value={author} onChange={setAuthor} placeholder="Leave blank for MyFileKit" />
+    <PrimaryButton label="Download .epub" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const { bytes, chapters } = await pdfToEpub(file, {
+        title: title.trim() || safeFilename(file.name),
+        author: author.trim() || undefined,
+        onProgress: pageProgress(setStatus, "Reading"),
+      });
+      downloadBytes(bytes, withExtension(safeFilename(file.name), "epub"), "application/epub+zip");
+      return `EPUB ready with ${chapters} chapter${chapters === 1 ? "" : "s"}.`;
+    })} />
+  </ToolForm>;
+}
+
+function OcrPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [dpi, setDpi] = useState("200");
+  const [searchable, setSearchable] = useState(true);
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+
+  // The OCR engine keeps a worker (and a WebAssembly heap) alive between pages;
+  // always release it when the tool unmounts or is reset.
+  useEffect(() => () => { void terminateOcrWorker(); }, []);
+
+  const reset = () => {
+    void terminateOcrWorker();
+    setFiles([]);
+    setText("");
+    setStatus(initialStatus);
+  };
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Reads text out of scanned PDFs and photos with a local OCR engine (Tesseract, English). The engine and its language model ship with this app — {OCR_ENGINE_SIZE_LABEL} loads once from this page on first use, then your browser caches it. Nothing is uploaded. Accuracy depends on the scan: straight, high-contrast, 200–300 DPI pages read best. A searchable PDF keeps the original page image with an invisible text layer over it.
+    </div>
+    <FileControl accept="application/pdf,image/jpeg,image/png,image/webp" multiple files={files} setFiles={setFiles} label="Choose or drop one scanned PDF, or images" />
+    <Select label="Render resolution (DPI)" value={dpi} onChange={setDpi} options={["150", "200", "300"]} labels={["150 · fastest", "200 · default", "300 · most accurate"]} />
+    <Checkbox label="Also build a searchable PDF (image + invisible text layer)" checked={searchable} onChange={setSearchable} />
+    <PrimaryButton label="Run OCR" onClick={() => runSafely(setStatus, async () => {
+      const valid = validateFiles(files, tool.file);
+      const pdfs = valid.filter((file) => file.type === "application/pdf" || /\.pdf$/i.test(file.name));
+      if (pdfs.length && pdfs.length !== valid.length) throw new Error("Choose either one PDF or a set of images, not both at once.");
+      if (pdfs.length > 1) throw new Error("Choose a single PDF at a time.");
+
+      const base = safeFilename(valid[0].name);
+      const onStage = (page: number, total: number, stage: string) =>
+        setStatus({ tone: "idle", message: `Reading page ${page} of ${total} — ${stage}` });
+
+      if (pdfs.length === 1) {
+        const { text: recognised, pages, bytes } = await ocrPdf(pdfs[0], {
+          dpi: Number(dpi),
+          searchablePdf: searchable,
+          onStage,
+          onRender: (page, total) => setStatus({ tone: "idle", message: `Rendering page ${page} of ${total}…` }),
+        });
+        setText(recognised);
+        if (searchable && bytes) downloadBytes(bytes, withExtension(`${base}-ocr`, "pdf"), "application/pdf");
+        if (!recognised) return `No text was recognised in ${pages} page${pages === 1 ? "" : "s"}. Try a higher DPI or a cleaner scan.`;
+        return searchable && bytes
+          ? `Read ${pages} page${pages === 1 ? "" : "s"} and downloaded a searchable PDF.`
+          : `Read ${pages} page${pages === 1 ? "" : "s"}.`;
+      }
+
+      const results = await ocrImages(
+        valid.map((file) => ({ name: file.name, blob: file })),
+        { searchablePdf: searchable, dpi: Number(dpi), onStage }
+      );
+      const recognised = results
+        .map((result: any, index: number) => `--- ${result.name || `Image ${index + 1}`} ---\n${result.text}`)
+        .join("\n\n")
+        .trim();
+      setText(recognised);
+      const parts = results.map((result: any) => result.pdf).filter(Boolean);
+      if (searchable && parts.length === results.length) {
+        downloadBytes(await mergeSearchablePdfPages(parts), withExtension(`${base}-ocr`, "pdf"), "application/pdf");
+      }
+      if (!recognised) return `No text was recognised in ${results.length} image${results.length === 1 ? "" : "s"}.`;
+      return `Read ${results.length} image${results.length === 1 ? "" : "s"}.`;
+    })} />
+    <Textarea label="Recognised text" value={text} onChange={setText} rows={12} />
+    <div className="flex flex-wrap gap-2">
+      <SecondaryButton label="Copy" onClick={() => runSafely(setStatus, async () => { await copyText(text); return "Copied."; })} />
+      <SecondaryButton label="Download .txt" onClick={() => runSafely(setStatus, async () => {
+        downloadText(requireOutput(text), `${safeFilename(files[0]?.name || "ocr")}-ocr`, "txt");
+        return "Text file ready to download.";
+      })} />
+    </div>
+  </ToolForm>;
+}
+
+function PdfToAudioTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [text, setText] = useState("");
+  const [voices, setVoices] = useState<any[]>([]);
+  const [voiceName, setVoiceName] = useState("");
+  const [rate, setRate] = useState("1");
+  const [speaking, setSpeaking] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [status, setStatus] = useState(initialStatus);
+  const stopRequested = useRef(false);
+  const supported = speechSynthesisSupported();
+
+  useEffect(() => {
+    if (!supported) return;
+    let active = true;
+    loadSpeechVoices().then((list: any[]) => { if (active) setVoices(list || []); }).catch(() => {});
+    return () => { active = false; };
+  }, [supported]);
+
+  // Never leave a voice talking after the user navigates away.
+  useEffect(() => () => { if (speechSynthesisSupported()) window.speechSynthesis.cancel(); }, []);
+
+  const stop = () => {
+    stopRequested.current = true;
+    if (supported) window.speechSynthesis.cancel();
+    setPaused(false);
+  };
+
+  const reset = () => {
+    stop();
+    setFiles([]);
+    setText("");
+    setStatus(initialStatus);
+  };
+
+  const voiceNames = voices.map((voice: any) => voice.name);
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Extracts the PDF's text, then reads it aloud with the voices already installed on your device. Playback is local — no audio leaves your browser. It cannot be saved as a file: the browser's speech API never exposes the audio samples, and this app ships no audio encoder, so there is no honest way to hand you an MP3 offline. Use your operating system's own recorder if you need a file.
+    </div>
+    {!supported && <StatusBox status={{ tone: "error", message: "This browser has no built-in speech engine, so text cannot be read aloud here." }} />}
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <SecondaryButton label="Extract text" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const extracted = await extractPdfText(file, { onProgress: pageProgress(setStatus, "Reading") });
+      setText(extracted);
+      return extracted.trim()
+        ? "Text extracted. Press Read aloud to start."
+        : "No selectable text found — this PDF is likely scanned images. Run OCR first.";
+    })} />
+    <Textarea label="Text to read" value={text} onChange={setText} rows={10} />
+    {voiceNames.length > 0 && <Select label="Voice" value={voiceName || voiceNames[0]} onChange={setVoiceName} options={voiceNames} />}
+    <Select label="Speed" value={rate} onChange={setRate} options={["0.75", "1", "1.25", "1.5", "2"]} labels={["0.75× slower", "1× normal", "1.25×", "1.5×", "2× faster"]} />
+    <div className="flex flex-wrap gap-2">
+      <PrimaryButton label="Read aloud" onClick={() => runSafely(setStatus, async () => {
+        const chunks = splitTextForSpeech(requireOutput(text));
+        if (!chunks.length) throw new Error("Extract or paste some text first.");
+        const synthesis = getSpeechSynthesis();
+        synthesis.cancel();
+        stopRequested.current = false;
+        const voice = voices.find((item: any) => item.name === (voiceName || voiceNames[0])) || null;
+        setSpeaking(true);
+        setPaused(false);
+        try {
+          for (let index = 0; index < chunks.length; index += 1) {
+            if (stopRequested.current) break;
+            setStatus({ tone: "idle", message: `Reading part ${index + 1} of ${chunks.length}…` });
+            await new Promise<void>((resolve, reject) => {
+              const utterance = new window.SpeechSynthesisUtterance(chunks[index]);
+              if (voice) utterance.voice = voice;
+              utterance.rate = Number(rate) || 1;
+              utterance.onend = () => resolve();
+              utterance.onerror = (event: any) => {
+                // Cancelling on purpose surfaces as an error event; that is not a failure.
+                if (stopRequested.current || event?.error === "interrupted" || event?.error === "canceled") resolve();
+                else reject(new Error(`Playback failed: ${event?.error || "unknown error"}.`));
+              };
+              synthesis.speak(utterance);
+            });
+          }
+        } finally {
+          setSpeaking(false);
+          setPaused(false);
+        }
+        return stopRequested.current ? "Playback stopped." : `Finished reading ${chunks.length} part${chunks.length === 1 ? "" : "s"}.`;
+      })} />
+      {speaking && <SecondaryButton
+        label={paused ? "Resume" : "Pause"}
+        onClick={() => {
+          const synthesis = getSpeechSynthesis();
+          if (paused) { synthesis.resume(); setPaused(false); } else { synthesis.pause(); setPaused(true); }
+        }}
+      />}
+      {speaking && <SecondaryButton label="Stop" onClick={stop} />}
+    </div>
+  </ToolForm>;
+}
+
+function AudioToPdfTool() {
+  const [transcript, setTranscript] = useState("");
+  const [interim, setInterim] = useState("");
+  const [title, setTitle] = useState("Transcript");
+  const [listening, setListening] = useState(false);
+  const [onDeviceOnly, setOnDeviceOnly] = useState(true);
+  const [status, setStatus] = useState(initialStatus);
+  const recognizer = useRef<any>(null);
+  const support = speechRecognitionSupport();
+
+  // Capability is detected synchronously; the note is plain honesty about what
+  // pressing "Start dictation" will actually do in this browser.
+  const engineNote = !support.supported
+    ? "This browser has no built-in speech recognition, so dictation is unavailable here. Paste or type the transcript below — that path is fully offline."
+    : onDeviceOnly
+      ? support.canRunOnDevice
+        ? "Dictation will ask this browser to recognise speech on your device. If it cannot, it stops with an error rather than sending your audio anywhere."
+        : "This browser cannot keep recognition on your device, so dictation is blocked while the box below is ticked. Untick it to allow cloud recognition, or paste the transcript instead."
+      : "Heads up: with on-device recognition off, this browser may send your audio to its vendor's servers. Every other MyFileKit tool stays local — paste or type the transcript instead if you need a fully offline path.";
+
+  const stopListening = () => {
+    recognizer.current?.stop();
+    recognizer.current = null;
+    setListening(false);
+    setInterim("");
+  };
+
+  // Always release the microphone when the tool unmounts.
+  useEffect(() => () => { recognizer.current?.stop(); recognizer.current = null; }, []);
+
+  const reset = () => {
+    stopListening();
+    setTranscript("");
+    setStatus(initialStatus);
+  };
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Two ways in: dictate with your microphone using the browser's own speech recognition, or paste a transcript you already have. The PDF is always built locally. The microphone is released as soon as you stop or leave this tool.
+    </div>
+    <StatusBox status={{ tone: support.supported ? "idle" : "error", message: engineNote }} />
+    <Checkbox label="Require on-device recognition (never send audio to a server)" checked={onDeviceOnly} onChange={setOnDeviceOnly} />
+    <div className="flex flex-wrap gap-2">
+      {listening
+        ? <SecondaryButton label="Stop dictation" onClick={stopListening} />
+        : <SecondaryButton label="Start dictation" onClick={() => runSafely(setStatus, async () => {
+            if (recognizer.current) throw new Error("Already listening.");
+            const instance = await createSpeechRecognizer({
+              requireOnDevice: onDeviceOnly,
+              onTranscript: ({ final, interim: partial }: { final: string; interim: string }) => {
+                if (final.trim()) setTranscript((previous) => (previous ? `${previous} ${final.trim()}` : final.trim()));
+                setInterim(partial);
+              },
+              onError: (message: string) => setStatus({ tone: "error", message }),
+              onEnd: () => { setListening(false); setInterim(""); },
+            });
+            recognizer.current = instance;
+            instance.start();
+            setListening(true);
+            return instance.local
+              ? "Listening on-device. Speak, then stop when you are done."
+              : "Listening. Speak, then stop when you are done.";
+          })} />}
+    </div>
+    {listening && interim && <p className="text-sm font-semibold italic text-neutral-500">Hearing: {interim}</p>}
+    <Input label="PDF title" value={title} onChange={setTitle} placeholder="Transcript" />
+    <Textarea label="Transcript" value={transcript} onChange={setTranscript} rows={12} />
+    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
+      const body = requireOutput(transcript);
+      const heading = title.trim() || "Transcript";
+      const document = `${heading}\n${new Date().toLocaleString()}\n\n${body.trim()}\n`;
+      downloadBytes(await textToPdf(document), withExtension(heading, "pdf"), "application/pdf");
+      return "Transcript PDF ready.";
     })} />
   </ToolForm>;
 }

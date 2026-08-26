@@ -828,3 +828,187 @@ test("epubToHtml concatenates spine chapters, inlines images, and strips scripts
 
   await assert.rejects(() => epubToHtml({ name: "notepub.txt", arrayBuffer: async () => new ArrayBuffer(0) }), /Only \.epub/);
 });
+
+// --- Phase 4b exports (PDF -> Word / Excel / HTML / EPUB) ---------------------
+// The pdf.js-backed readers are browser-only (Vite `?worker` import), so these
+// tests drive the pure document builders with synthetic positioned text items.
+// OCR (tesseract.js worker + WebAssembly), speech synthesis, and microphone
+// speech recognition are browser-only too and are covered by the manual test
+// checklist rather than here.
+
+// Two ruled rows of a table: three columns at x = 50 / 200 / 400.
+function syntheticTableItems() {
+  const row = (y, cells) => cells.map(([x, text]) => ({ text, x, y, width: text.length * 5, height: 10 }));
+  return [
+    ...row(100, [[50, "Name"], [200, "Role"], [400, "City"]]),
+    ...row(120, [[50, "Ada"], [200, "Engineer"], [400, "London"]]),
+    ...row(140, [[50, "Grace"], [200, "Admiral"], [400, "New York"]]),
+  ];
+}
+
+test("groupItemsIntoLines groups by vertical proximity and orders runs left to right", async () => {
+  const { groupItemsIntoLines } = await import("../src/services/export.service.js");
+  const items = [
+    { text: "world", x: 60, y: 100, width: 30, height: 10 },
+    { text: "Hello", x: 10, y: 101, width: 30, height: 10 },
+    { text: "Second", x: 10, y: 140, width: 30, height: 10 },
+  ];
+  const lines = groupItemsIntoLines(items);
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].text, "Hello world");
+  assert.equal(lines[1].text, "Second");
+});
+
+test("linesToText inserts a blank line where the PDF had vertical space", async () => {
+  const { groupItemsIntoLines, linesToText } = await import("../src/services/export.service.js");
+  const items = [
+    { text: "Heading", x: 10, y: 100, width: 40, height: 10 },
+    { text: "Body line", x: 10, y: 112, width: 40, height: 10 },
+    { text: "New block", x: 10, y: 200, width: 40, height: 10 },
+  ];
+  assert.equal(linesToText(groupItemsIntoLines(items)), "Heading\nBody line\n\nNew block");
+});
+
+test("itemsToTableRows clusters positioned items into table rows and columns", async () => {
+  const { itemsToTableRows } = await import("../src/services/export.service.js");
+  const rows = itemsToTableRows(syntheticTableItems());
+  assert.deepEqual(rows, [
+    ["Name", "Role", "City"],
+    ["Ada", "Engineer", "London"],
+    ["Grace", "Admiral", "New York"],
+  ]);
+
+  // A loose tolerance collapses neighbouring columns rather than inventing them.
+  const loose = itemsToTableRows(syntheticTableItems(), { columnTolerance: 500 });
+  assert.equal(loose[0].length, 1);
+});
+
+test("buildDocx writes a real .docx with a page break between pages", async () => {
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const { buildDocx } = await import("../src/services/export.service.js");
+  const bytes = await buildDocx(["First page line\n\nAfter a blank line", "Second page"], { title: "Unit test" });
+
+  // A .docx is an OOXML zip: check the parts Word requires are present.
+  const entries = unzipSync(bytes);
+  assert.ok(entries["[Content_Types].xml"], "missing [Content_Types].xml");
+  assert.ok(entries["word/document.xml"], "missing word/document.xml");
+  const document = strFromU8(entries["word/document.xml"]);
+  assert.match(document, /First page line/);
+  assert.match(document, /After a blank line/);
+  assert.match(document, /Second page/);
+  assert.match(document, /w:br[^>]*w:type="page"/);
+
+  await assert.rejects(() => buildDocx(["", "   "]), /No selectable text/);
+});
+
+test("buildEpub stores mimetype first and uncompressed, with a parseable OPF", async () => {
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const { buildEpub } = await import("../src/services/export.service.js");
+  const { bytes, chapters } = await buildEpub(["Page one text", "Page two text"], { title: "My Book", author: "Ada" });
+  assert.equal(chapters, 2);
+
+  // OCF requires `mimetype` to be the archive's first entry, stored (method 0).
+  assert.deepEqual([...bytes.slice(0, 4)], [0x50, 0x4b, 0x03, 0x04]);
+  assert.equal(bytes[8] | (bytes[9] << 8), 0, "mimetype must be stored, not deflated");
+  const nameLength = bytes[26] | (bytes[27] << 8);
+  assert.equal(strFromU8(bytes.slice(30, 30 + nameLength)), "mimetype");
+  assert.equal(strFromU8(bytes.slice(30 + nameLength, 30 + nameLength + 20)), "application/epub+zip");
+
+  const entries = unzipSync(bytes);
+  assert.ok(entries["META-INF/container.xml"]);
+  const container = strFromU8(entries["META-INF/container.xml"]);
+  const rootfile = container.match(/<rootfile\b[^>]*full-path="([^"]+)"/);
+  assert.ok(rootfile);
+  assert.equal(rootfile[1], "EPUB/package.opf");
+
+  const opf = strFromU8(entries[rootfile[1]]);
+  assert.match(opf, /<package[^>]*version="3\.0"/);
+  assert.match(opf, /<dc:title>My Book<\/dc:title>/);
+  assert.match(opf, /<dc:creator>Ada<\/dc:creator>/);
+  assert.match(opf, /properties="nav"/);
+
+  // Every spine itemref must resolve to a manifest item that exists in the zip.
+  const manifest = new Map([...opf.matchAll(/<item\b[^>]*id="([^"]+)"[^>]*href="([^"]+)"/g)].map((m) => [m[1], m[2]]));
+  const spine = [...opf.matchAll(/<itemref\b[^>]*idref="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(spine.length >= 3);
+  for (const id of spine) {
+    const href = manifest.get(id);
+    assert.ok(href, `spine references unknown manifest id ${id}`);
+    assert.ok(entries[`EPUB/${href}`], `manifest href missing from archive: ${href}`);
+  }
+  assert.match(strFromU8(entries["EPUB/page-1.xhtml"]), /Page one text/);
+
+  assert.throws(() => buildEpub([]), /No selectable text/);
+});
+
+test("buildEpub escapes PDF text and metadata so no markup can be injected", async () => {
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const { buildEpub } = await import("../src/services/export.service.js");
+  const { bytes } = await buildEpub(['<script>alert("x")</script> & "quoted"'], { title: '</dc:title><evil/>' });
+  const entries = unzipSync(bytes);
+  const chapter = strFromU8(entries["EPUB/page-1.xhtml"]);
+  assert.doesNotMatch(chapter, /<script/);
+  assert.match(chapter, /&lt;script&gt;/);
+  assert.match(chapter, /&amp; &quot;quoted&quot;/);
+  const opf = strFromU8(entries["EPUB/package.opf"]);
+  assert.doesNotMatch(opf, /<evil\/>/);
+  assert.match(opf, /&lt;\/dc:title&gt;/);
+});
+
+test("buildHtmlDocument emits a self-contained page with every string escaped", async () => {
+  const { buildHtmlDocument } = await import("../src/services/export.service.js");
+  const html = buildHtmlDocument(
+    [
+      {
+        number: 1,
+        width: 595.28,
+        height: 841.89,
+        items: [{ text: '<img src=x onerror="alert(1)">', x: 10, y: 100, width: 50, height: 12 }],
+      },
+    ],
+    { title: '</title><script>alert(1)</script>' }
+  );
+  assert.match(html, /^<!doctype html>/);
+  assert.doesNotMatch(html, /<script/i);
+  assert.doesNotMatch(html, /<img src=x/);
+  assert.match(html, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
+  // Offline-safe: no remote references of any kind.
+  assert.doesNotMatch(html, /https?:\/\//);
+  assert.match(html, /width:595\.28px/);
+  assert.match(html, /font-size:12px/);
+});
+
+test("splitTextForSpeech chunks on sentence boundaries and respects the limit", async () => {
+  const { splitTextForSpeech } = await import("../src/services/audio.service.js");
+  assert.deepEqual(splitTextForSpeech(""), []);
+  // Sentences are packed up to the limit, then split.
+  assert.deepEqual(splitTextForSpeech("One. Two. Three.", 10), ["One. Two.", "Three."]);
+  const long = splitTextForSpeech("word ".repeat(200), 50);
+  assert.ok(long.length > 1);
+  assert.equal(long.every((chunk) => chunk.length <= 50), true);
+  // Chunking must never drop content, including words longer than the limit.
+  assert.equal(long.join(" "), "word ".repeat(200).trim());
+  assert.equal(splitTextForSpeech("a".repeat(25), 10).join(""), "a".repeat(25));
+});
+
+test("Phase 4b tools are registered, routable, and discoverable", () => {
+  const expected = {
+    "pdf-to-word-tool": "PDF Tools",
+    "pdf-to-excel-tool": "PDF Tools",
+    "pdf-to-html-tool": "PDF Tools",
+    "pdf-to-epub-tool": "PDF Tools",
+    "ocr-pdf-tool": "PDF Tools",
+    "pdf-to-audio-tool": "PDF Tools",
+    "audio-to-pdf-tool": "Text & Data Tools",
+  };
+  for (const [id, category] of Object.entries(expected)) {
+    const entry = tools.find((item) => item.id === id);
+    assert.ok(entry, `missing tool ${id}`);
+    assert.equal(entry.category, category);
+    assert.equal(entry.status, "available");
+    assert.equal(entry.localProcessing, true);
+    assert.equal(routeForHash(entry.route).tool.id, id);
+  }
+  const ocr = tools.find((item) => item.id === "ocr-pdf-tool");
+  assert.deepEqual(ocr.acceptedTypes, ["application/pdf", "image/jpeg", "image/png", "image/webp"]);
+});

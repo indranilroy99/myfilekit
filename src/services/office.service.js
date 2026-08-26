@@ -52,8 +52,10 @@ export async function docxToHtml(file) {
 // `script-src 'self'` CSP allows it, and it only loads when a spreadsheet tool
 // runs). In Node (tests) we evaluate the same vendored file, mirroring how
 // tests/core.test.js already loads pdf-lib.
+// Exported so the PDF-to-Excel export (export.service.js) writes workbooks with
+// the same vendored build instead of pulling the npm package back in.
 let xlsxPromise = null;
-function loadXlsx() {
+export function loadXlsx() {
   if (xlsxPromise) return xlsxPromise;
   xlsxPromise = (async () => {
     if (typeof window !== "undefined") {

@@ -19,6 +19,11 @@ const requiredFiles = [
   "assets/myfilekit-logo.svg",
   "assets/vendor/pdf-lib.min.js",
   "assets/vendor/html2canvas.min.js",
+  "assets/vendor/xlsx.full.min.js",
+  "assets/vendor/tesseract/tesseract.min.js",
+  "assets/vendor/tesseract/worker.min.js",
+  "assets/vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js",
+  "assets/vendor/tesseract/lang/eng.traineddata.gz",
   "invoice-generator/index.html",
   "README.md",
   "CHANGELOG.md",
@@ -65,7 +70,13 @@ for (const file of [
   "dist/index.html",
   "dist/invoice-generator/index.html",
   "dist/assets/vendor/pdf-lib.min.js",
-  "dist/assets/vendor/html2canvas.min.js"
+  "dist/assets/vendor/html2canvas.min.js",
+  "dist/assets/vendor/xlsx.full.min.js",
+  // The OCR engine must ship with the build, or OCR would silently reach for a CDN.
+  "dist/assets/vendor/tesseract/tesseract.min.js",
+  "dist/assets/vendor/tesseract/worker.min.js",
+  "dist/assets/vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js",
+  "dist/assets/vendor/tesseract/lang/eng.traineddata.gz"
 ]) {
   const exists = fs.existsSync(path.join(root, file));
   process.stdout.write(`${exists ? "Built" : "Missing build output"}: ${file}\n`);
