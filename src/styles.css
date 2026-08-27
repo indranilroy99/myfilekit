@@ -380,6 +380,41 @@ button {
   text-decoration: none;
 }
 
+/* Pointer-following spotlight glow — single accent hue only (no rainbow), the
+   position (--sx/--sy) is set by the card's own onPointerMove. Sits above the
+   card surface but below the content link (z-index 1). Revealed on hover/focus. */
+.spotlight-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.spotlight-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: radial-gradient(
+    240px 240px at var(--sx, 50%) var(--sy, 0%),
+    color-mix(in srgb, var(--primary) 20%, transparent),
+    transparent 60%
+  );
+  opacity: 0;
+  transition: opacity .18s ease;
+}
+
+.spotlight-card:hover::before,
+.spotlight-card:focus-within::before {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-card::before {
+    transition: none;
+  }
+}
+
 .tool-card:hover {
   background:
     radial-gradient(circle at 18% 10%, rgba(255, 255, 255, .94), transparent 34%),

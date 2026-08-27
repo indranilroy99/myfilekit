@@ -36,6 +36,7 @@ import {
 import { Icons } from "@/components/ui/icons";
 import { NumberedPagination } from "@/components/ui/pagination";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
+import { SpotlightCard } from "@/components/ui/spotlight-card";
 import { categories, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { filterTools, searchableText } from "./lib/search.js";
@@ -667,7 +668,7 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
   const multiFile = multiFileLabel(tool);
   const primaryBadge = categoryDetails[tool.category]?.accent || tool.category.replace(" Tools", "");
   return (
-    <div className={`tool-card group p-0 transition hover:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
+    <SpotlightCard className={`tool-card group p-0 transition hover:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
       <a href={tool.route} className={`tool-card-link gap-4 rounded-3xl p-5 transition focus-visible:-translate-y-1 ${compact ? "min-h-40" : "min-h-52"}`}>
         <div className="flex items-start justify-between gap-3">
           <span className="icon-tile grid h-12 w-12 place-items-center rounded-2xl transition group-hover:rotate-3">
@@ -686,7 +687,7 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
           {!compact && fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
         </div>
       </a>
-    </div>
+    </SpotlightCard>
   );
 }
 

@@ -97,13 +97,29 @@ test("React shell does not use dangerous user-controlled HTML injection", () => 
   assert.doesNotMatch(appSource, /dangerouslySetInnerHTML|\\.innerHTML\\s*=/);
 });
 
-test("tool cards use the plain tool-card shell (no cursor-follow GlowCard) and avoid inline HTML injection", () => {
+test("SpotlightCard glow is single-accent, on-element, and injection-free", () => {
   const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const cardSource = fs.readFileSync(new URL("../src/components/ui/spotlight-card.tsx", import.meta.url), "utf8");
 
-  // GlowCard / spotlight-card was removed as dead decorative machinery.
-  assert.doesNotMatch(appSource, /GlowCard/);
-  assert.doesNotMatch(appSource, /spotlight-card/);
-  assert.match(appSource, /<div className=\{`tool-card group/);
+  // The card glow is the deliberately-rebuilt on-system version: it must NOT
+  // reintroduce the old cursor-driven rainbow (a per-hue glowColorMap sweeping
+  // base+xp*spread) and must NOT inject markup.
+  assert.doesNotMatch(cardSource, /glowColorMap|dangerouslySetInnerHTML|<style/);
+  // No multi-hue rainbow config (the old component enumerated hues + a spread).
+  assert.doesNotMatch(cardSource, /glowColor\s*[:?]|spread/);
+  assert.doesNotMatch(cardSource, /['"](purple|orange)['"]/);
+  // Glow position comes from element-local coords; hue is the single accent (CSS).
+  assert.match(cardSource, /--sx|--sy/);
+  // No document-level pointer listener (the old per-card perf smell) — the
+  // handler is scoped to the element via React's onPointerMove.
+  assert.doesNotMatch(cardSource, /document\.addEventListener\(\s*["']pointermove/);
+  assert.match(cardSource, /onPointerMove/);
+  // The accent-only glow lives in scoped CSS.
+  const cssSource = fs.readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /\.spotlight-card::before/);
+  assert.match(cssSource, /var\(--primary\)/);
+
+  assert.match(appSource, /<SpotlightCard className=\{`tool-card group/);
   assert.doesNotMatch(appSource, /dangerouslySetInnerHTML|\\.innerHTML\\s*=/);
 });
 
