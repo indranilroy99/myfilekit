@@ -60,6 +60,7 @@ import { CONFIDENCE as PII_CONFIDENCE, PII_TYPE_LABELS, buildPrivacyReportText, 
 import { analyzePdfBytes, buildAnalyzerReportText } from "./services/pdf-analyzer.service.js";
 import { sanitizePdf, buildSanitizeReportText, residualActiveContent } from "./services/pdf-sanitize.service.js";
 import { extractPdfAssets, buildExtractionZip } from "./services/pdf-extract.service.js";
+import { LANGUAGE_OPTIONS, auditPdfAccessibility, buildAccessibilityReportText, extractAccessibilityContent, remediatePdfAccessibility } from "./services/pdf-accessibility.service.js";
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 import { canvasToPdf, canvasesToPdf, csvToPdf, markdownToPdf } from "./services/convert.service.js";
 import { STATE_CODES, WORKFLOW_PRESETS, computeGstInvoice, computePosBill, defaultStepOptions, formatAmount, gstInvoicePdf, gstr1SummaryCsv, gstr1SummaryPdf, gstr1SummaryXlsx, posReceiptPdf, presetSteps, readInvoiceRows, runWorkflow, summariseGstr1, summarisePosSession, workflowOpList } from "./services/business.service.js";
@@ -1144,6 +1145,8 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "compare-pdf-tool") return <ComparePdfTool tool={tool} />;
   if (tool.id === "deskew-pdf-tool") return <DeskewPdfTool tool={tool} />;
   if (tool.id === "pdfa-prep-tool") return <PdfaPrepTool tool={tool} />;
+  if (tool.id === "accessibility-check-tool") return <AccessibilityCheckTool tool={tool} />;
+  if (tool.id === "tag-pdf-tool") return <TagPdfTool tool={tool} />;
   if (tool.id === "merge-pdf-tool") return <PdfFileTool tool={tool} action="Merge PDFs" multiple run={(files) => mergePdfs(files).then((bytes) => downloadBytes(bytes, "myfilekit-merged.pdf", "application/pdf"))} />;
   if (tool.id === "split-pdf-tool") return <PageRangeTool tool={tool} action="Extract pages" suffix="extracted" run={extractPdfPages} />;
   if (tool.id === "delete-pdf-pages-tool") return <PageRangeTool tool={tool} action="Delete pages" suffix="pages-deleted" run={deletePdfPages} />;
@@ -4564,6 +4567,254 @@ function PdfaPrepTool({ tool }: { tool: Tool }) {
       </div>
     )}
   </ToolForm>;
+}
+
+// --- Accessibility: Check + Auto-Tag -----------------------------------------
+// The check audits machine-verifiable PDF/UA + WCAG basics from the object model
+// (via the accessibility service) plus a pdf.js text-layer count. Auto-Tag sets
+// language/title/marked/viewer-preferences and builds a basic real tagged
+// structure tree with alt text. Neither claims certified PDF/UA conformance.
+
+type A11yStatus = "pass" | "warn" | "fail" | "info";
+type A11yCheck = { id: string; label: string; status: A11yStatus; detail: string; fix?: string; note?: string };
+type A11yReport = {
+  checks: A11yCheck[];
+  summary: { pass: number; warn: number; fail: number; info: number };
+  verdict: { level: "pass" | "warn" | "fail"; headline: string; summary: string };
+  stats: Record<string, any>;
+};
+type A11yFigure = { page: number; id: string; alt: string; decorative: boolean };
+type A11yAnalysis = { textBlocks: any[]; figures: A11yFigure[]; textLayer: { characters: number; pageCount: number }; pageCount: number };
+
+function a11yStatusTone(status: A11yStatus) {
+  if (status === "fail") return "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger-fg)]";
+  if (status === "warn") return "border-[var(--warning)] bg-[var(--warning-bg)] text-[var(--warning-fg)]";
+  if (status === "pass") return "border-[var(--success)] bg-[var(--success-bg)] text-[var(--success-fg)]";
+  return "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]";
+}
+
+function A11yStatusTag({ status }: { status: A11yStatus }) {
+  const label = status === "pass" ? "PASS" : status === "warn" ? "WARN" : status === "fail" ? "FAIL" : "INFO";
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black uppercase ${a11yStatusTone(status)}`}>{label}</span>;
+}
+
+function A11yCheckList({ checks }: { checks: A11yCheck[] }) {
+  return (
+    <div className="grid gap-2">
+      {checks.map((check) => (
+        <div key={check.id} className="surface-muted wabi-card-edge grid gap-2 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <A11yStatusTag status={check.status} />
+            <span className="font-black text-[var(--foreground)]">{check.label}</span>
+          </div>
+          <p className="text-sm font-semibold leading-6 text-neutral-600">{check.detail}</p>
+          {check.fix ? <p className="text-sm font-semibold leading-6 text-[var(--foreground)]">Fix: {check.fix}</p> : null}
+          {check.note ? <p className="text-xs font-semibold text-neutral-500">Note: {check.note}</p> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AccessibilityCheckTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [report, setReport] = useState<A11yReport | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => { setFiles([]); setReport(null); setStatus(initialStatus); };
+
+  useEffect(() => {
+    let cancelled = false;
+    setReport(null);
+    if (!files.length) return undefined;
+    runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      // The extractable-text check needs the pdf.js text layer (browser-only).
+      const { textLayer } = await extractAccessibilityContent(file, (page: number, total: number) =>
+        setStatus({ tone: "idle", message: `Reading ${file.name} — page ${page} of ${total}…`, progress: { value: page, total, label: "Reading text layer…" } }));
+      const result = (await auditPdfAccessibility(bytes, { textLayer })) as A11yReport;
+      if (cancelled) return "Ready.";
+      setReport(result);
+      return `${result.verdict.headline}. ${result.summary.fail} fail, ${result.summary.warn} warn, ${result.summary.pass} pass. Automated check only — a manual audit is still required.`;
+    });
+    return () => { cancelled = true; };
+  }, [files, tool.file]);
+
+  const reportText = useMemo(() => (report && files.length ? buildAccessibilityReportText(report, { fileName: files[0].name }) : ""), [report, files]);
+
+  return (
+    <ToolForm status={status} onReset={reset}>
+      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+        Audits a PDF against PDF/UA and WCAG basics that a machine can verify — tagging, title, language, image alt text, extractable text, encryption permissions, reading order, and headings. Everything runs locally in this browser. This does <strong>not</strong> replace a manual audit: colour contrast, whether alt text is meaningful, and whether the reading order is logically correct all need human judgement.
+      </div>
+      <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+
+      {report && (
+        <>
+          <div className={`wabi-card-edge grid gap-2 rounded-2xl border p-4 ${verdictTone(report.verdict.level)}`}>
+            <p className="text-xs font-black uppercase tracking-wide">Accessibility verdict</p>
+            <p className="text-lg font-black">{report.verdict.headline}</p>
+            <p className="text-sm font-semibold leading-6">{report.verdict.summary}</p>
+          </div>
+
+          <div className="surface-card wabi-card-edge grid gap-3 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="font-black">Checks</p>
+              <p className="text-xs font-black uppercase text-neutral-500">{report.summary.pass}P · {report.summary.warn}W · {report.summary.fail}F</p>
+            </div>
+            <A11yCheckList checks={report.checks} />
+            <div className="flex flex-wrap gap-2">
+              <SecondaryButton label="Download .txt report" onClick={() => {
+                if (!reportText) throw new Error("Check a file first.");
+                downloadText(reportText, `${safeFilename(files[0].name)}-accessibility`, "txt");
+              }} />
+              <SecondaryButton label="Download .pdf report" onClick={async () => {
+                if (!reportText) throw new Error("Check a file first.");
+                try {
+                  const bytes = await textToPdf(reportText);
+                  downloadBytes(bytes, withExtension(`${safeFilename(files[0].name)}-accessibility`, "pdf"), "application/pdf");
+                } catch {
+                  throw new Error("The PDF report supports Latin-1 characters only. Download the .txt report instead.");
+                }
+              }} />
+            </div>
+            {!report.stats.tagged ? (
+              <p className="text-sm font-semibold text-neutral-500">This document is not tagged. Use Make Accessible (Auto-Tag) to fix the machine-fixable basics, then re-check.</p>
+            ) : null}
+          </div>
+        </>
+      )}
+    </ToolForm>
+  );
+}
+
+function TagPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [analysis, setAnalysis] = useState<A11yAnalysis | null>(null);
+  const [title, setTitle] = useState("");
+  const [lang, setLang] = useState("en-US");
+  const [figures, setFigures] = useState<A11yFigure[]>([]);
+  const [before, setBefore] = useState<A11yReport | null>(null);
+  const [after, setAfter] = useState<A11yReport | null>(null);
+  const [remediation, setRemediation] = useState<{ applied: string[]; review: string[] } | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => {
+    setFiles([]); setAnalysis(null); setTitle(""); setLang("en-US"); setFigures([]);
+    setBefore(null); setAfter(null); setRemediation(null); setStatus(initialStatus);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setAnalysis(null); setBefore(null); setAfter(null); setRemediation(null);
+    if (!files.length) return undefined;
+    runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const content = (await extractAccessibilityContent(file, (page: number, total: number) =>
+        setStatus({ tone: "idle", message: `Analysing ${file.name} — page ${page} of ${total}…`, progress: { value: page, total, label: "Analysing layout…" } }))) as A11yAnalysis;
+      const audit = (await auditPdfAccessibility(bytes, { textLayer: content.textLayer })) as A11yReport;
+      if (cancelled) return "Ready.";
+      setAnalysis(content);
+      setFigures(content.figures.map((figure) => ({ ...figure, alt: "", decorative: false })));
+      setTitle(audit.stats.title || file.name.replace(/\.[^.]+$/, ""));
+      if (audit.stats.lang) setLang(audit.stats.lang);
+      setBefore(audit);
+      const noText = content.textLayer.characters < 8;
+      return noText
+        ? `Analysed. Warning: almost no extractable text — if this is a scan, run OCR / Searchable PDF first. Found ${content.figures.length} image(s).`
+        : `Analysed: ${content.textBlocks.length} text block(s), ${content.figures.length} image(s). Review the details below, then make the PDF accessible.`;
+    });
+    return () => { cancelled = true; };
+  }, [files, tool.file]);
+
+  const updateFigure = (index: number, patch: Partial<A11yFigure>) => {
+    setFigures((current) => current.map((figure, i) => (i === index ? { ...figure, ...patch } : figure)));
+  };
+
+  const remediate = () => runSafely(setStatus, async () => {
+    const [file] = validateFiles(files, tool.file);
+    if (!analysis) throw new Error("Wait for analysis to finish before tagging.");
+    if (!title.trim()) throw new Error("Enter a document title — assistive technology reads it aloud first.");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const { bytes: out, report } = await remediatePdfAccessibility(bytes, {
+      lang,
+      title: title.trim(),
+      textBlocks: analysis.textBlocks,
+      figures: figures.map((figure) => ({ page: figure.page, alt: figure.alt, decorative: figure.decorative })),
+    });
+    downloadBytes(out, withExtension(`${safeFilename(file.name)}-accessible`, "pdf"), "application/pdf");
+    const remReport = report as { applied: string[]; review: string[] };
+    setRemediation({ applied: remReport.applied, review: remReport.review });
+    // Eval: re-check the OUTPUT so the before/after failure counts are visible.
+    const recheck = (await auditPdfAccessibility(out, { textLayer: analysis.textLayer })) as A11yReport;
+    setAfter(recheck);
+    return `Made accessible. Set language, title, tagged structure, and alt text. Re-check: ${before ? before.summary.fail : "?"} → ${recheck.summary.fail} failing check(s). This is a strong automated start, not certified PDF/UA — review the reading order and alt text by hand.`;
+  });
+
+  return (
+    <div className="tool-form-grid">
+      <div className="tool-form-actions">
+        <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+          Remediates a PDF toward PDF/UA as far as is reliably automatable: sets the document language, title, and window-bar title, marks it tagged, and builds a basic <strong>real</strong> structure tree (headings and paragraphs in reading order, in an invisible tagged text layer) plus alt text for images. Automated tagging gets structure, language, title, and alt-text scaffolding right, but a perfect reading order and correct semantic tags for complex layouts (multi-column, tables, forms) still need a manual pass in a full authoring tool. This does <strong>not</strong> claim certified PDF/UA conformance.
+        </div>
+        <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+
+        {analysis && (
+          <>
+            <Input label="Document title" value={title} onChange={setTitle} placeholder="e.g. Quarterly Report 2026" helper="Read aloud first by screen readers and shown in the window bar. Non-Latin titles are written as UTF-16BE and preserved." />
+            <Select label="Document language" value={lang} onChange={setLang} options={LANGUAGE_OPTIONS.map((option) => option.code)} labels={LANGUAGE_OPTIONS.map((option) => `${option.label} (${option.code})`)} />
+
+            <div className="surface-card wabi-card-edge grid gap-3 p-4">
+              <p className="font-black">Images ({figures.length})</p>
+              {figures.length ? (
+                <>
+                  <p className="text-sm font-semibold text-neutral-500">Type alt text that describes each image's meaning. Leave it blank and tick “decorative” for images that carry no information (they are marked as artifacts and skipped by screen readers).</p>
+                  {figures.map((figure, index) => (
+                    <div key={figure.id} className="surface-muted wabi-card-edge grid gap-2 p-3">
+                      <p className="text-xs font-black uppercase text-neutral-500">{figure.id}</p>
+                      <Input label="Alt text" value={figure.alt} onChange={(value) => updateFigure(index, { alt: value, decorative: value.trim() ? false : figure.decorative })} placeholder="Describe the image" />
+                      <Checkbox label="Decorative (no alt text needed)" checked={figure.decorative} onChange={(checked) => updateFigure(index, { decorative: checked, alt: checked ? "" : figure.alt })} />
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <p className="text-sm font-semibold text-neutral-500">No image XObjects were detected, so no alt text is needed.</p>
+              )}
+            </div>
+
+            <PrimaryButton label="Make accessible & download" onClick={remediate} />
+          </>
+        )}
+      </div>
+      <ToolMetaPanel status={status} onReset={reset}>
+        {before && (
+          <div className="surface-card wabi-card-edge grid gap-2 p-4">
+            <p className="text-xs font-black uppercase text-neutral-500">{after ? "Before → after" : "Before (current)"}</p>
+            <div className="flex flex-wrap items-center gap-3 text-sm font-black">
+              <span>Failing checks:</span>
+              <span className="tabular-nums">{before.summary.fail}</span>
+              {after ? <><span aria-hidden>→</span><span className="tabular-nums text-[var(--success-fg)]">{after.summary.fail}</span></> : null}
+            </div>
+            {after ? <p className="text-sm font-semibold text-neutral-600">Language, title, tagging, and reading order now pass. Remaining items are the ones a machine cannot settle.</p> : <p className="text-sm font-semibold text-neutral-500">Run the remediation to see the after count.</p>}
+          </div>
+        )}
+        {remediation && (
+          <div className="surface-card wabi-card-edge grid gap-3 p-4">
+            <div className="grid gap-1 text-sm font-semibold text-neutral-600">
+              <p className="text-xs font-black uppercase text-neutral-500">What I set</p>
+              {remediation.applied.map((item, index) => <p key={index} className="text-[var(--foreground)]">• {item}</p>)}
+            </div>
+            <div className="grid gap-1 text-sm font-semibold text-neutral-600">
+              <p className="text-xs font-black uppercase text-neutral-500">What still needs human review</p>
+              {remediation.review.map((item, index) => <p key={index} className="text-[var(--foreground)]">• {item}</p>)}
+            </div>
+          </div>
+        )}
+      </ToolMetaPanel>
+    </div>
+  );
 }
 
 // The crypt layer reports permissions as a plain object keyed by name; these

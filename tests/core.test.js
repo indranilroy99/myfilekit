@@ -4741,7 +4741,7 @@ test("OCR stays offline: the service names no CDN / tessdata / http(s) URL", () 
 
 test("every PDF tool has a valid sub-group from the allowed set (no PDF tool left ungrouped)", () => {
   const allowed = categoryGroups["PDF Tools"];
-  assert.deepEqual(allowed, ["Organize", "Convert", "Edit & Annotate", "Forms", "Secure", "Archival & Print"]);
+  assert.deepEqual(allowed, ["Organize", "Convert", "Edit & Annotate", "Forms", "Secure", "Accessibility", "Archival & Print"]);
   const pdfTools = tools.filter((tool) => tool.category === "PDF Tools");
   assert.ok(pdfTools.length >= 46, `expected the full PDF page, saw ${pdfTools.length}`);
   for (const tool of pdfTools) {
@@ -4766,6 +4766,7 @@ test("isNew is boolean everywhere and flags the newest tools", () => {
     "edit-pdf-text-tool", "annotate-pdf-tool", "compare-pdf-tool", "sign-pdf-tool", "verify-signature-tool",
     "batch-process-tool", "smart-split-pdf-tool", "impose-pdf-tool", "bookmarks-editor-tool",
     "create-form-tool", "deskew-pdf-tool", "pdfa-prep-tool", "sanitize-pdf-tool", "extract-images-tool",
+    "accessibility-check-tool", "tag-pdf-tool",
   ];
   for (const id of expectedNew) {
     assert.equal(tools.find((tool) => tool.id === id).isNew, true, `${id} should be isNew`);
@@ -5108,4 +5109,228 @@ test("Sanitize PDF and Extract Images tools are registered, routed, and wired", 
   assert.equal(extract.localProcessing, true);
   assert.equal(routeForHash(extract.route).tool.id, "extract-images-tool");
   assert.ok(appSource.includes('"extract-images-tool"'), "extract wired into ToolRenderer");
+});
+
+// --- PDF Accessibility suite -------------------------------------------------
+// The structure/metadata parts run in Node via window.PDFLib; the pdf.js text
+// layout used by the browser is stubbed here by passing synthetic text blocks /
+// text-layer counts straight to the service (as the app does after extraction).
+
+const a11y = await import("../src/services/pdf-accessibility.service.js");
+
+async function makeTextPdf(pageCount, label) {
+  const { PDFDocument, StandardFonts } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let i = 0; i < pageCount; i += 1) {
+    const page = doc.addPage([612, 792]);
+    page.drawText(`${label} page ${i + 1} body text`, { x: 72, y: 700, size: 12, font });
+  }
+  return doc.save();
+}
+
+async function makeImageOnlyPdf() {
+  const { PDFDocument } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const png = Buffer.from(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000 1f15c4890000000d49444154789c6360000002000100ffff0300000600000557bfabd40000000049454e44ae426082".replace(/\s/g, ""),
+    "hex",
+  );
+  const img = await doc.embedPng(png);
+  page.drawImage(img, { x: 0, y: 0, width: 200, height: 200 });
+  return doc.save();
+}
+
+const a11yById = (report) => Object.fromEntries(report.checks.map((check) => [check.id, check]));
+
+test("accessibility check flags an untagged PDF as not tagged, no title, no language", async () => {
+  const bytes = await makeTextPdf(1, "Report");
+  const report = await a11y.auditPdfAccessibility(bytes, { textLayer: { characters: 24, pageCount: 1 } });
+  const checks = a11yById(report);
+  assert.equal(checks.tagged.status, "fail");
+  assert.match(checks.tagged.detail, /not tagged/i);
+  assert.equal(checks.language.status, "fail");
+  assert.equal(checks["document-title"].status, "fail");
+  assert.equal(checks["title-in-titlebar"].status, "fail");
+  assert.equal(checks["reading-order"].status, "fail");
+  assert.equal(report.verdict.level, "fail");
+  assert.match(report.verdict.headline, /not tagged/i);
+});
+
+test("accessibility check flags an image-only PDF as scanned / needs OCR", async () => {
+  const bytes = await makeImageOnlyPdf();
+  const report = await a11y.auditPdfAccessibility(bytes, { textLayer: { characters: 0, pageCount: 1 } });
+  const checks = a11yById(report);
+  assert.equal(report.stats.imageCount, 1);
+  assert.equal(checks["extractable-text"].status, "fail");
+  assert.match(checks["extractable-text"].detail, /scan/i);
+  assert.match(checks["extractable-text"].fix, /OCR/i);
+  // An image with no tag structure cannot carry alt text.
+  assert.equal(checks["image-alt"].status, "fail");
+});
+
+test("accessibility check reports extractable-text as info when no text layer is supplied", async () => {
+  const bytes = await makeTextPdf(1, "Report");
+  const report = await a11y.auditPdfAccessibility(bytes);
+  const checks = a11yById(report);
+  assert.equal(checks["extractable-text"].status, "info");
+  assert.equal(report.stats.textLayerEvaluated, false);
+});
+
+test("auto-tag sets language, title, viewer prefs, marked, and a real structure tree", async () => {
+  const { PDFDocument, PDFName, PDFArray, PDFNumber } = window.PDFLib;
+  const bytes = await makeTextPdf(2, "Quarterly");
+  const { bytes: out } = await a11y.remediatePdfAccessibility(bytes, {
+    lang: "en-US",
+    title: "Quarterly Report",
+    textBlocks: [
+      { page: 1, text: "Quarterly Report", x: 72, y: 740, fontSize: 24, heading: 1 },
+      { page: 1, text: "Body paragraph one.", x: 72, y: 700, fontSize: 12, heading: 0 },
+      { page: 2, text: "Second page text.", x: 72, y: 700, fontSize: 12, heading: 0 },
+    ],
+    figures: [],
+  });
+
+  const doc = await PDFDocument.load(out, { throwOnInvalidObject: false });
+  const ctx = doc.context;
+  const cat = doc.catalog;
+
+  // /Lang
+  assert.equal(cat.get(PDFName.of("Lang")).decodeText(), "en-US");
+  // Info /Title
+  const info = ctx.lookup(ctx.trailerInfo.Info);
+  assert.equal(info.get(PDFName.of("Title")).decodeText(), "Quarterly Report");
+  // XMP dc:title
+  const meta = ctx.lookup(cat.get(PDFName.of("Metadata")));
+  const xml = new TextDecoder().decode(meta.getContents());
+  assert.match(xml, /<dc:title>[\s\S]*Quarterly Report[\s\S]*<\/dc:title>/);
+  // ViewerPreferences /DisplayDocTitle true
+  const vp = ctx.lookup(cat.get(PDFName.of("ViewerPreferences")));
+  assert.equal(vp.get(PDFName.of("DisplayDocTitle")).asBoolean(), true);
+  // MarkInfo /Marked true
+  const markInfo = ctx.lookup(cat.get(PDFName.of("MarkInfo")));
+  assert.equal(markInfo.get(PDFName.of("Marked")).asBoolean(), true);
+  // StructTreeRoot with /Document root and /P + /H1 kids
+  const structRoot = ctx.lookup(cat.get(PDFName.of("StructTreeRoot")));
+  const docEl = ctx.lookup(structRoot.get(PDFName.of("K")));
+  assert.equal(docEl.get(PDFName.of("S")).toString(), "/Document");
+  const kids = ctx.lookup(docEl.get(PDFName.of("K")));
+  assert.ok(kids instanceof PDFArray);
+  const roles = [];
+  for (let i = 0; i < kids.size(); i += 1) roles.push(ctx.lookup(kids.get(i)).get(PDFName.of("S")).toString());
+  assert.ok(roles.includes("/P"), "has a /P paragraph element");
+  assert.ok(roles.includes("/H1"), "has a /H1 heading element");
+  // ParentTree present with a next key.
+  assert.ok(ctx.lookup(structRoot.get(PDFName.of("ParentTree"))));
+  assert.ok(structRoot.get(PDFName.of("ParentTreeNextKey")) instanceof PDFNumber);
+});
+
+test("round-trip remediation makes the checker pass tagged, language, and title", async () => {
+  const bytes = await makeTextPdf(2, "Quarterly");
+  const before = await a11y.auditPdfAccessibility(bytes, { textLayer: { characters: 40, pageCount: 2 } });
+  assert.equal(a11yById(before).tagged.status, "fail");
+
+  const { bytes: out } = await a11y.remediatePdfAccessibility(bytes, {
+    lang: "en-US",
+    title: "Quarterly Report",
+    textBlocks: [
+      { page: 1, text: "Heading", x: 72, y: 740, fontSize: 24, heading: 1 },
+      { page: 1, text: "Body paragraph.", x: 72, y: 700, fontSize: 12, heading: 0 },
+      { page: 2, text: "Second page.", x: 72, y: 700, fontSize: 12, heading: 0 },
+    ],
+    figures: [],
+  });
+  const after = await a11y.auditPdfAccessibility(out, { textLayer: { characters: 40, pageCount: 2 } });
+  const checks = a11yById(after);
+  assert.equal(checks.tagged.status, "pass");
+  assert.equal(checks.language.status, "pass");
+  assert.equal(checks["document-title"].status, "pass");
+  assert.equal(checks["title-in-titlebar"].status, "pass");
+  assert.equal(checks["reading-order"].status, "pass");
+  assert.ok(after.summary.fail < before.summary.fail, "materially fewer failures after remediation");
+});
+
+test("auto-tag writes a non-Latin title as a UTF-16BE PDF string that decodes back", async () => {
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const unicodeTitle = "तिमाही रिपोर्ट 报告 2026";
+  const bytes = await makeTextPdf(1, "Doc");
+  const { bytes: out } = await a11y.remediatePdfAccessibility(bytes, {
+    lang: "hi-IN",
+    title: unicodeTitle,
+    textBlocks: [{ page: 1, text: "Body", x: 72, y: 700, fontSize: 12, heading: 0 }],
+    figures: [],
+  });
+  const doc = await PDFDocument.load(out, { throwOnInvalidObject: false });
+  const titleObj = doc.context.lookup(doc.context.trailerInfo.Info).get(PDFName.of("Title"));
+  const hex = titleObj.toString();
+  // UTF-16BE PDF hex string carries a leading FEFF byte-order mark.
+  assert.match(hex, /^<FEFF/i);
+  // Decode the raw hex bytes back to text and confirm they match the input.
+  const inner = hex.slice(1, -1);
+  const codeUnits = [];
+  for (let i = 4; i < inner.length; i += 4) codeUnits.push(parseInt(inner.slice(i, i + 4), 16));
+  const decoded = String.fromCharCode(...codeUnits);
+  assert.equal(decoded, unicodeTitle);
+  assert.equal(titleObj.decodeText(), unicodeTitle);
+});
+
+test("auto-tag writes /Alt for described figures and /Artifact for decorative ones", async () => {
+  const { PDFDocument, PDFName, PDFArray, decodePDFRawStream } = window.PDFLib;
+  const bytes = await makeTextPdf(1, "Doc");
+  const { bytes: out, report } = await a11y.remediatePdfAccessibility(bytes, {
+    lang: "en-US",
+    title: "Doc",
+    textBlocks: [],
+    figures: [
+      { page: 1, alt: "A bar chart of quarterly revenue", decorative: false },
+      { page: 1, alt: "", decorative: true },
+    ],
+  });
+  assert.equal(report.structSummary.figures, 1);
+  assert.equal(report.structSummary.artifacts, 1);
+
+  const doc = await PDFDocument.load(out, { throwOnInvalidObject: false });
+  const ctx = doc.context;
+  const structRoot = ctx.lookup(doc.catalog.get(PDFName.of("StructTreeRoot")));
+  const docEl = ctx.lookup(structRoot.get(PDFName.of("K")));
+  const kids = ctx.lookup(docEl.get(PDFName.of("K")));
+  let figureAlt = null;
+  for (let i = 0; i < kids.size(); i += 1) {
+    const el = ctx.lookup(kids.get(i));
+    if (el.get(PDFName.of("S")).toString() === "/Figure") figureAlt = el.get(PDFName.of("Alt")).decodeText();
+  }
+  assert.equal(figureAlt, "A bar chart of quarterly revenue");
+
+  // The decorative image is marked /Artifact in the page content (not tagged).
+  const pageNode = doc.getPages()[0].node;
+  let contents = ctx.lookup(pageNode.get(PDFName.of("Contents")));
+  const streams = contents instanceof PDFArray ? contents.asArray().map((ref) => ctx.lookup(ref)) : [contents];
+  let decoded = "";
+  for (const stream of streams) decoded += new TextDecoder().decode(decodePDFRawStream(stream).decode());
+  assert.match(decoded, /\/Artifact\b/);
+});
+
+test("Accessibility Check and Auto-Tag tools are registered, grouped, routed, and wired", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+
+  const check = tools.find((tool) => tool.id === "accessibility-check-tool");
+  assert.ok(check, "accessibility-check-tool registered");
+  assert.equal(check.category, "PDF Tools");
+  assert.equal(check.group, "Accessibility");
+  assert.equal(check.status, "available");
+  assert.equal(check.localProcessing, true);
+  assert.equal(routeForHash(check.route).tool.id, "accessibility-check-tool");
+  assert.ok(appSource.includes('"accessibility-check-tool"'), "check wired into ToolRenderer");
+
+  const tag = tools.find((tool) => tool.id === "tag-pdf-tool");
+  assert.ok(tag, "tag-pdf-tool registered");
+  assert.equal(tag.category, "PDF Tools");
+  assert.equal(tag.group, "Accessibility");
+  assert.equal(tag.status, "available");
+  assert.equal(routeForHash(tag.route).tool.id, "tag-pdf-tool");
+  assert.ok(appSource.includes('"tag-pdf-tool"'), "tag wired into ToolRenderer");
+
+  // The new Accessibility group is declared in the PDF Tools group order.
+  assert.ok(categoryGroups["PDF Tools"].includes("Accessibility"), "Accessibility group registered in categoryGroups");
 });
