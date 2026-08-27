@@ -16,7 +16,7 @@ Open the URL printed by Vite, normally `http://localhost:4173`.
 - Confirm the text-only MyFileKit wordmark appears without a separate logo icon.
 - Confirm the public UI contains no framework, release milestone, placeholder, AI, or coming-soon copy.
 - Confirm the landing page shows the hero search, quick actions, Popular Tools, optional Recently Used, category links, privacy strip, product highlights, and footer.
-- Confirm the full 77-tool library is available from Browse tools rather than being repeated on the landing page.
+- Confirm the full 96-tool library is available from Browse tools rather than being repeated on the landing page.
 - Press `Cmd+K` on macOS or `Ctrl+K` on Windows/Linux and confirm the hero search receives focus.
 - Search `metadata`, `invoice`, `merge pdf`, `compress image`, `signature`, `json`, and `hash`; confirm relevant results appear directly under the search.
 - Press `Escape` and confirm the search clears.
@@ -159,7 +159,9 @@ Open the URL printed by Vite, normally `http://localhost:4173`.
 
 - Run OCR on an image and on a scanned PDF; confirm per-page progress updates and the recognised text is sane.
 - Confirm the searchable PDF looks identical to the original and its text is selectable and searchable in a PDF reader.
-- With developer tools open, confirm OCR fetches `tesseract.min.js`, `worker.min.js`, `core/*.wasm.js`, and `lang/eng.traineddata.gz` from this origin only — no CDN request may appear.
+- Confirm the language picker only lists languages that have a vendored model (English, Hindi, Spanish, French, German, Portuguese, Simplified Chinese, Arabic, Russian) and shows the one-time download size before recognition starts.
+- Pick a non-English language (e.g. Hindi) and a combination (e.g. `eng+hin`); confirm recognition uses the selected model(s) and that, with developer tools open, only the chosen language's `lang/<code>.traineddata.gz` is fetched from this origin — never the whole set and never a CDN.
+- With developer tools open, confirm OCR fetches `tesseract.min.js`, `worker.min.js`, `core/*.wasm.js`, and the selected `lang/*.traineddata.gz` from this origin only — no CDN request may appear.
 - Rename the local `assets/vendor/tesseract/lang` directory and confirm OCR fails with a clear message instead of hanging or reaching a CDN.
 - Leave the OCR tool mid-run and confirm the worker is terminated (no lingering CPU use).
 - Read a PDF aloud, then pause, resume, and stop; confirm playback stops when you navigate away.
@@ -189,6 +191,56 @@ Needs two browsers. Use two devices on the same Wi-Fi/LAN, or two windows on one
 - Pair two browsers and confirm strokes appear on the peer's board as they are drawn, rendered slightly lighter than local strokes.
 - Undo and clear on one side and confirm the peer's copy of those strokes goes away while their own work stays.
 - Disconnect the peer and confirm the local board is untouched and still drawable.
+
+## Advanced PDF Structure (Smart Split, Bates, N-up, Outline, Form Creation)
+
+- Smart Split PDF: split the same file by every-N pages, into K equal parts, at specific pages, and by top-level bookmark; confirm each mode produces a ZIP whose parts have the expected page counts and cover every page once.
+- Bates Numbering: stamp a multi-page PDF with a prefix, zero-padding, suffix, chosen position, and a non-default start page/number; confirm the printed sequence increments correctly and the reported first/last Bates numbers match the document.
+- N-up / Booklet: produce a 2-up and a 4-up sheet and confirm the source pages land in reading order; produce a booklet from an 8-page file and confirm the fold order and multiple-of-four padding.
+- Bookmarks / Outline: build a one-level outline, download, and confirm a PDF reader shows the entries and each jumps to the right page; replace an existing outline and confirm the old one is gone.
+- Create PDF Form: place text, checkbox, dropdown, and radio fields onto a page; open the output in a real reader and in the app's Fill PDF Form tool and confirm every field is fillable and round-trips.
+- Confirm a non-Latin character in a Bates prefix or field produces the friendly Latin-1 message rather than a crash.
+
+## In-Place Editing And Markup (Edit PDF Text, Annotate PDF)
+
+- Edit PDF Text: click an existing text run, change the string, and export; confirm the replacement sits at the same baseline and size and surrounding text does not move.
+- Confirm a longer replacement is allowed to overflow and a shorter one leaves a gap (overlay, not reflow), and that the tool states this.
+- Delete a text run and confirm the original glyphs are covered; then open the file and confirm the covered text is still selectable underneath, and that the tool routes to Redact PDF for true removal.
+- Feed a scanned (image-only) PDF and confirm Edit PDF Text points at OCR; feed non-Latin text and confirm the Latin-1 message.
+- Annotate PDF: add a highlight, freehand ink, a rectangle/ellipse/line/arrow, a text note, and a sticky note; use select/move/delete and undo/redo, then export and confirm all markup is burned in and the highlighted text is still readable.
+- Confirm annotations export flattened (not reader-editable `/Annot` objects) and that removal routes to Redact PDF.
+
+## Compare, Deskew, And Archival (Compare PDFs, Deskew, PDF/A Prep)
+
+- Compare PDFs: compare a file with itself (confirm "identical"), a file with an edited copy (confirm the per-page added/removed/changed diff and the changed-page list), and two files with different page counts (confirm it is handled).
+- Confirm the optional visual pixel diff tints the changed regions and is presented as a comparison view, not an edit.
+- Deskew / Straighten: feed a visibly skewed scan and confirm the estimated angle is sensible and the output pages are straight; feed a straight page and confirm the angle is near zero; override the angle manually and confirm it is honoured.
+- PDF/A Archival Prep: run on a normal PDF and confirm it completes, adds an sRGB OutputIntent and the pdfaid XMP identifier, and reports any OpenAction/JavaScript/Launch actions it stripped; confirm it refuses an encrypted input and is labelled best-effort, not certified PDF/A.
+
+## Batch Processing
+
+- Batch Processing: add several PDFs, pick one operation (e.g. watermark or rotate), run it, and confirm a single ZIP downloads with one uniquely named output per file and determinate "Processing X of Y" progress.
+- Include one corrupt or non-matching file and confirm it is skipped or reported as failed while the rest still succeed, and the end report lists succeeded versus failed with reasons.
+- Confirm exceeding the 100-file cap is refused with a clear message.
+
+## Security & Privacy (Encryption, PII, Analysis)
+
+- Encrypt PDF: encrypt a file with AES-256 (default) using a user and an owner password and permission restrictions; open it in a PDF reader and confirm the password is required and the permissions apply. Repeat with the AES-128 and legacy RC4-128 options.
+- Remove Password: open the encrypted file with its password and confirm the decrypted output preserves text, fonts, and images (not rasterised) and opens without a password. Confirm the tool states it does not crack unknown passwords.
+- Unlock PDF: strip owner-password restrictions from a file that opens without a user password and confirm the restrictions are gone.
+- Confirm encrypting an already-encrypted file is refused rather than chained, and that re-serialisation invalidating a digital signature is disclosed.
+- Auto-Redact PII: scan a document containing Aadhaar, a card number, GSTIN, PAN, email, and phone; confirm hits are grouped by type with page, masked value, and confidence, masked by default with an explicit reveal. Redact and confirm the removed text cannot be selected or searched.
+- Confirm ordinary prose (order numbers, dates, version strings) does not produce high-confidence false positives, and that a scanned PDF routes to OCR.
+- Privacy Scanner: run the read-only report and confirm it lists PII, metadata leaks, hidden/invisible text, embedded URLs/IPs, attachments, and encryption/signature entries with an honest summary; download the `.txt`/`.pdf` report.
+- PDF Analyser: feed a PDF containing `/JavaScript`, `/OpenAction`, and an embedded file; confirm each is detected with location, severity, plain-English reason, and inert (non-executed) evidence, and that a benign PDF yields no Critical/High findings. Feed a truncated/garbage file and confirm it still produces a report without crashing.
+
+## Digital Signatures (Digital Signature, Verify Signature)
+
+- Digital Signature: load a PKCS#12 (`.p12`/`.pfx`) with its password, optionally add a visible appearance, and sign; open the output in a real reader (or `pdfsig`) and confirm it is recognised as digitally signed.
+- Confirm a wrong `.p12` password produces a clear error and no output, and that an EC-key `.p12` is refused (RSA only).
+- Verify Signature: verify the signed file and confirm it reports integrity (unchanged), signer CN/issuer/serial/validity, and signing time; then flip a byte in the document and confirm it reports modified-after-signing.
+- Verify a PDF with no signatures and confirm it reports "no signatures" rather than an error.
+- Confirm the UI states verification is offline cryptographic-integrity only: no trust-chain validation, no revocation check, and no RFC 3161 timestamp; a self-signed certificate verifies as valid with unknown identity.
 
 ## Browser And Resource Checks
 

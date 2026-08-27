@@ -3,7 +3,7 @@
 Status: Complete
 Scope: Expand and harden the current product before the next public release.
 
-> Historical record. This plan covers the 38-tool readiness pass that shipped as 3.0.x/3.1.x, and the counts and out-of-scope items below are preserved as they were at that time. The product has since grown to 73 tools, and Office/eBook conversion, PDF export, and local OCR — listed here as out of scope pending a reliable format engine — have shipped. Password-protected PDF workflows are still out of scope. See [README.md](../README.md) for the current tool list and boundaries.
+> Historical record. This plan covers the 38-tool readiness pass that shipped as 3.0.x/3.1.x, and the counts and out-of-scope items below are preserved as they were at that time. The product has since grown to 96 tools, and Office/eBook conversion, PDF export, local (now multi-language) OCR, and password-protected PDF workflows — several listed here as out of scope pending a reliable format engine — have all shipped, along with in-place text editing, annotation, cryptographic digital signatures, compare, batch processing, PDF/A prep, and more. See [README.md](../README.md) for the current tool list and boundaries.
 
 ## Product Premise
 
