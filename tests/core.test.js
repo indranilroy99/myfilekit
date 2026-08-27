@@ -3977,3 +3977,131 @@ test("Phase 2 review tools are registered, routed, and rendered", () => {
   // Compare accepts two files.
   assert.equal(tools.find((t) => t.id === "compare-pdf-tool").file.maxFiles, 2);
 });
+
+// --- Phase 3: Batch Processing ------------------------------------------------
+
+async function makeBatchPdf(pages = 1) {
+  const { PDFDocument } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  for (let i = 0; i < pages; i += 1) doc.addPage([200, 200]);
+  return doc.save();
+}
+
+test("batch: runs a pure pdf-lib op over many files, names each output, and zips them", async () => {
+  const { runBatch, zipOutputs } = await import("../src/services/batch.service.js");
+  const { unzipSync } = await import("fflate");
+  const { PDFDocument } = window.PDFLib;
+
+  const files = [];
+  for (const base of ["alpha", "beta", "gamma"]) {
+    files.push(new File([await makeBatchPdf(2)], `${base}.pdf`, { type: "application/pdf" }));
+  }
+
+  const seen = [];
+  const run = await runBatch(files, "rotate", { degrees: "90" }, { onProgress: (info) => seen.push(info.current) });
+
+  assert.equal(run.total, 3);
+  assert.equal(run.failures.length, 0);
+  assert.equal(run.outputs.length, 3);
+  assert.deepEqual(seen, [1, 2, 3], "determinate progress fires once per file, in order");
+  assert.deepEqual(run.outputs.map((o) => o.name).sort(), ["alpha-rotated.pdf", "beta-rotated.pdf", "gamma-rotated.pdf"]);
+
+  for (const out of run.outputs) {
+    const doc = await PDFDocument.load(out.bytes);
+    assert.equal(doc.getPageCount(), 2, "each output is a valid 2-page PDF");
+    assert.equal(doc.getPage(0).getRotation().angle, 90, "the rotate op actually ran");
+  }
+
+  const entries = unzipSync(zipOutputs(run.outputs));
+  assert.deepEqual(Object.keys(entries).sort(), ["alpha-rotated.pdf", "beta-rotated.pdf", "gamma-rotated.pdf"]);
+  const reloaded = await PDFDocument.load(entries["beta-rotated.pdf"]);
+  assert.equal(reloaded.getPageCount(), 2);
+});
+
+test("batch: a corrupt file fails without aborting the batch, and the zip holds only the good outputs", async () => {
+  const { runBatch, zipOutputs } = await import("../src/services/batch.service.js");
+  const { unzipSync } = await import("fflate");
+  const { PDFDocument } = window.PDFLib;
+
+  const files = [
+    new File([await makeBatchPdf(1)], "good-1.pdf", { type: "application/pdf" }),
+    new File([new Uint8Array([1, 2, 3, 4, 5])], "broken.pdf", { type: "application/pdf" }),
+    new File([await makeBatchPdf(1)], "good-2.pdf", { type: "application/pdf" }),
+  ];
+
+  const run = await runBatch(files, "page-numbers", { prefix: "Page ", fontSize: "10" });
+
+  assert.equal(run.total, 3);
+  assert.equal(run.outputs.length, 2, "the run completes with the two good files");
+  assert.equal(run.failures.length, 1, "the corrupt file is recorded, not thrown");
+  assert.equal(run.failures[0].name, "broken.pdf");
+  assert.ok(run.failures[0].reason && run.failures[0].reason.length > 0, "the failure carries a reason");
+  assert.deepEqual(run.outputs.map((o) => o.name).sort(), ["good-1-numbered.pdf", "good-2-numbered.pdf"]);
+
+  const entries = unzipSync(zipOutputs(run.outputs));
+  assert.deepEqual(Object.keys(entries).sort(), ["good-1-numbered.pdf", "good-2-numbered.pdf"]);
+  assert.equal(entries["broken.pdf"], undefined, "the failed file is absent from the zip");
+});
+
+test("batch: a PDF op flags and skips a non-PDF while the PDFs still succeed", async () => {
+  const { runBatch } = await import("../src/services/batch.service.js");
+
+  const files = [
+    new File([await makeBatchPdf(1)], "doc-a.pdf", { type: "application/pdf" }),
+    new File([new Uint8Array([137, 80, 78, 71])], "picture.png", { type: "image/png" }),
+    new File([await makeBatchPdf(1)], "doc-b.pdf", { type: "application/pdf" }),
+  ];
+
+  const run = await runBatch(files, "metadata-clean", {});
+
+  assert.equal(run.outputs.length, 2);
+  assert.deepEqual(run.outputs.map((o) => o.name).sort(), ["doc-a-clean.pdf", "doc-b-clean.pdf"]);
+  assert.equal(run.failures.length, 1);
+  assert.equal(run.failures[0].name, "picture.png");
+  assert.match(run.failures[0].reason, /not a pdf/i);
+});
+
+test("batch: rejects an over-limit file count with a clear message", async () => {
+  const { runBatch, MAX_BATCH_FILES } = await import("../src/services/batch.service.js");
+  const tooMany = Array.from({ length: MAX_BATCH_FILES + 1 }, (_, i) => new File(["x"], `f-${i}.pdf`, { type: "application/pdf" }));
+  await assert.rejects(() => runBatch(tooMany, "rotate", { degrees: "90" }), new RegExp(`no more than ${MAX_BATCH_FILES} files`, "i"));
+  // An unknown op id is rejected too (prototype-safe lookup).
+  await assert.rejects(() => runBatch([new File(["x"], "f.pdf")], "__proto__", {}), /not a supported batch operation/i);
+  await assert.rejects(() => runBatch([], "rotate", {}), /at least one file/i);
+});
+
+test("batch-process tool is registered, routed, rendered, and exposes sensible ops", () => {
+  const found = tools.find((tool) => tool.id === "batch-process-tool");
+  assert.ok(found, "batch-process-tool registered");
+  assert.equal(found.category, "PDF Tools");
+  assert.equal(found.status, "available");
+  assert.equal(found.localProcessing, true);
+  assert.equal(found.file.maxFiles, 100);
+  assert.equal(routeForHash(found.route).tool.id, "batch-process-tool");
+
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.equal(appSource.includes(`"batch-process-tool"`), true, "wired into ToolRenderer");
+  assert.equal(appSource.includes("BatchProcessTool"), true, "component defined");
+
+  const searchable = [found.name, found.description, ...found.keywords].join(" ").toLowerCase();
+  for (const term of ["batch", "bulk", "multi"]) assert.match(searchable, new RegExp(term));
+});
+
+test("batch op registry is well-formed with both pdf-lib and browser-only ops", async () => {
+  const { batchOpList, defaultBatchOptions, batchAcceptFor } = await import("../src/services/batch.service.js");
+  const ops = batchOpList();
+  const ids = ops.map((op) => op.id);
+  for (const id of ["rotate", "page-numbers", "watermark", "metadata-clean", "encrypt", "compress", "flatten", "image-compress", "image-convert", "image-resize"]) {
+    assert.ok(ids.includes(id), `${id} exposed`);
+  }
+  // Every op has an accepts of pdf|image and default options resolve.
+  for (const op of ops) {
+    assert.ok(op.accepts === "pdf" || op.accepts === "image");
+    assert.equal(typeof defaultBatchOptions(op.id), "object");
+  }
+  assert.equal(batchAcceptFor("rotate"), "application/pdf");
+  assert.equal(batchAcceptFor("image-convert"), "image/jpeg,image/png,image/webp");
+  // At least one pure pdf-lib op and one browser-only op exist.
+  assert.ok(ops.some((op) => !op.browserOnly));
+  assert.ok(ops.some((op) => op.browserOnly));
+});

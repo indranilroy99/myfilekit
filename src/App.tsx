@@ -58,6 +58,7 @@ import { analyzePdfBytes, buildAnalyzerReportText } from "./services/pdf-analyze
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 import { canvasToPdf, canvasesToPdf, csvToPdf, markdownToPdf } from "./services/convert.service.js";
 import { STATE_CODES, computeGstInvoice, computePosBill, defaultStepOptions, formatAmount, gstInvoicePdf, gstr1SummaryCsv, gstr1SummaryPdf, gstr1SummaryXlsx, posReceiptPdf, readInvoiceRows, runWorkflow, summariseGstr1, summarisePosSession, workflowOpList } from "./services/business.service.js";
+import { MAX_BATCH_FILES, batchAcceptFor, batchOpList, defaultBatchOptions, runBatch, zipOutputs } from "./services/batch.service.js";
 import { captureVideoFrame, enhanceCanvas, getHtml2Canvas, startCameraStream, stopCameraStream } from "./services/capture.service.js";
 import { docxToHtml, epubToHtml, pptxToSlides, readWorkbookSheets, sanitizeHtmlForOffline, sheetsToHtml } from "./services/office.service.js";
 import { pdfToDocx, pdfToEpub, pdfToHtml, pdfToXlsx } from "./services/export.service.js";
@@ -1097,6 +1098,7 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "pos-billing-tool") return <PosBillingTool />;
   if (tool.id === "gst-filing-prep-tool") return <GstFilingPrepTool tool={tool} />;
   if (tool.id === "workflow-builder-tool") return <WorkflowBuilderTool tool={tool} />;
+  if (tool.id === "batch-process-tool") return <BatchProcessTool tool={tool} />;
   if (tool.id === "smart-split-pdf-tool") return <SmartSplitPdfTool tool={tool} />;
   if (tool.id === "bates-numbering-tool") return <BatesNumberingTool tool={tool} />;
   if (tool.id === "impose-pdf-tool") return <ImposePdfTool tool={tool} />;
@@ -6186,6 +6188,112 @@ function WorkflowBuilderTool({ tool }: { tool: Tool }) {
       downloadBytes(output.bytes, output.filename, "application/pdf");
       return `${output.filename} downloaded.`;
     })} />}
+  </ToolForm>;
+}
+
+const batchOps = batchOpList() as { id: string; label: string; hint: string; accepts: string; browserOnly: boolean; fields: { key: string; label: string; type: string; options?: string[]; placeholder?: string }[] }[];
+const batchOpIds = batchOps.map((op) => op.id);
+const batchOpLabels = batchOps.map((op) => `${op.label}${op.browserOnly ? " (rasterises)" : ""}`);
+const batchMime: Record<string, string> = { pdf: "application/pdf", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" };
+
+function BatchProcessTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [opId, setOpId] = useState(batchOpIds[0]);
+  const [options, setOptions] = useState<Record<string, string | boolean>>(() => defaultBatchOptions(batchOpIds[0]) as Record<string, string | boolean>);
+  const [progress, setProgress] = useState<{ current: number; total: number; name: string } | null>(null);
+  const [result, setResult] = useState<{ outputs: { name: string; bytes: Uint8Array }[]; failures: { name: string; reason: string }[] } | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  const definition = batchOps.find((op) => op.id === opId)!;
+
+  const pickOp = (nextOp: string) => {
+    setOpId(nextOp);
+    setOptions(defaultBatchOptions(nextOp) as Record<string, string | boolean>);
+    setProgress(null);
+    setResult(null);
+    setStatus(initialStatus);
+  };
+
+  const setOption = (key: string, value: string | boolean) => setOptions((previous) => ({ ...previous, [key]: value }));
+
+  const reset = () => { setFiles([]); pickOp(batchOpIds[0]); };
+
+  const downloadResult = () => runSafely(setStatus, async () => {
+    if (!result?.outputs.length) throw new Error("Run the batch first — there is nothing to download.");
+    if (result.outputs.length === 1) {
+      const [only] = result.outputs;
+      const ext = only.name.toLowerCase().split(".").pop() || "";
+      downloadBytes(only.bytes, only.name, batchMime[ext] || "application/octet-stream");
+      return `${only.name} downloaded.`;
+    }
+    const zipped = zipOutputs(result.outputs);
+    const zipName = withExtension(`myfilekit-batch-${definition.id}`, "zip");
+    downloadBytes(zipped, zipName, "application/zip");
+    return `${zipName} downloaded (${result.outputs.length} files).`;
+  });
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Apply one operation across many files at once — up to {MAX_BATCH_FILES}. Each file is processed on its own: if one fails, the rest keep going, and you get a report of which succeeded and which did not. Successful results download together as a ZIP (or as a single file when there is only one). Operations marked "rasterises" turn PDF text into page images.
+    </div>
+
+    <Select label="Operation" value={opId} onChange={pickOp} options={batchOpIds} labels={batchOpLabels} />
+    <p className="text-xs font-semibold text-neutral-500">{definition.hint} Accepts {definition.accepts === "image" ? "JPG, PNG, or WebP images" : "PDF files"}.</p>
+
+    {definition.fields.length ? (
+      <div className="grid gap-2 sm:grid-cols-3">
+        {definition.fields.map((field) => {
+          if (field.type === "select") return <Select key={field.key} label={field.label} value={String(options[field.key] ?? "")} onChange={(value) => setOption(field.key, value)} options={field.options || []} />;
+          if (field.type === "checkbox") return <Checkbox key={field.key} label={field.label} checked={options[field.key] === true || options[field.key] === "true"} onChange={(value) => setOption(field.key, value)} />;
+          return <MiniField key={field.key} label={field.label} type={field.type === "number" ? "number" : field.type === "password" ? "password" : "text"} value={String(options[field.key] ?? "")} placeholder={field.placeholder} onChange={(value) => setOption(field.key, value)} />;
+        })}
+      </div>
+    ) : null}
+
+    <FileControl accept={batchAcceptFor(opId)} multiple files={files} setFiles={(next) => { setFiles(next); setResult(null); setProgress(null); }} label={`Choose or drop files (up to ${MAX_BATCH_FILES})`} />
+    {files.length > 0 && <p className="text-xs font-semibold text-neutral-500">{files.length} file{files.length === 1 ? "" : "s"} selected.</p>}
+
+    <PrimaryButton label="Run batch" disabled={!files.length} onClick={() => runSafely(setStatus, async () => {
+      setResult(null);
+      setProgress(null);
+      const run = await runBatch(files, opId, options, {
+        maxFiles: MAX_BATCH_FILES,
+        maxSize: (tool.file as { maxSize?: number }).maxSize || 0,
+        onProgress: (info) => setProgress(info),
+      });
+      setProgress(null);
+      setResult({ outputs: run.outputs, failures: run.failures });
+      if (!run.outputs.length) throw new Error(`No files could be processed. ${run.failures.length} failed — see the report below.`);
+      const failNote = run.failures.length ? ` ${run.failures.length} failed.` : "";
+      return `Processed ${run.outputs.length} of ${run.total} file${run.total === 1 ? "" : "s"}.${failNote}`;
+    })} />
+
+    {progress && <ProgressBar value={progress.current} total={progress.total} label={`Processing ${progress.current} of ${progress.total} — ${progress.name}`} />}
+
+    {result && (result.outputs.length > 0 || result.failures.length > 0) && (
+      <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold">
+        {result.outputs.length > 0 && (
+          <div className="grid gap-1">
+            <p className="text-xs font-black uppercase text-neutral-500">Succeeded ({result.outputs.length})</p>
+            <ul className="grid gap-1">
+              {result.outputs.map((item) => <li key={item.name} className="break-words text-[var(--foreground)]">{item.name}</li>)}
+            </ul>
+          </div>
+        )}
+        {result.failures.length > 0 && (
+          <div className="grid gap-1">
+            <p className="text-xs font-black uppercase text-red-700 [.dark_&]:text-[#f8b4b4]">Failed / skipped ({result.failures.length})</p>
+            <ul className="grid gap-1">
+              {result.failures.map((item) => <li key={`${item.name}-${item.reason}`} className="break-words text-neutral-600">{item.name} — {item.reason}</li>)}
+            </ul>
+          </div>
+        )}
+      </div>
+    )}
+
+    {result && result.outputs.length > 0 && (
+      <PrimaryButton label={result.outputs.length === 1 ? "Download result" : "Download ZIP"} onClick={downloadResult} />
+    )}
   </ToolForm>;
 }
 
