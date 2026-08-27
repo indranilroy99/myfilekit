@@ -24,6 +24,14 @@ const requiredFiles = [
   "assets/vendor/tesseract/worker.min.js",
   "assets/vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js",
   "assets/vendor/tesseract/lang/eng.traineddata.gz",
+  "assets/vendor/tesseract/lang/hin.traineddata.gz",
+  "assets/vendor/tesseract/lang/spa.traineddata.gz",
+  "assets/vendor/tesseract/lang/fra.traineddata.gz",
+  "assets/vendor/tesseract/lang/deu.traineddata.gz",
+  "assets/vendor/tesseract/lang/por.traineddata.gz",
+  "assets/vendor/tesseract/lang/chi_sim.traineddata.gz",
+  "assets/vendor/tesseract/lang/ara.traineddata.gz",
+  "assets/vendor/tesseract/lang/rus.traineddata.gz",
   "invoice-generator/index.html",
   "README.md",
   "CHANGELOG.md",
@@ -76,7 +84,15 @@ for (const file of [
   "dist/assets/vendor/tesseract/tesseract.min.js",
   "dist/assets/vendor/tesseract/worker.min.js",
   "dist/assets/vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js",
-  "dist/assets/vendor/tesseract/lang/eng.traineddata.gz"
+  "dist/assets/vendor/tesseract/lang/eng.traineddata.gz",
+  "dist/assets/vendor/tesseract/lang/hin.traineddata.gz",
+  "dist/assets/vendor/tesseract/lang/spa.traineddata.gz",
+  "dist/assets/vendor/tesseract/lang/fra.traineddata.gz",
+  "dist/assets/vendor/tesseract/lang/deu.traineddata.gz",
+  "dist/assets/vendor/tesseract/lang/por.traineddata.gz",
+  "dist/assets/vendor/tesseract/lang/chi_sim.traineddata.gz",
+  "dist/assets/vendor/tesseract/lang/ara.traineddata.gz",
+  "dist/assets/vendor/tesseract/lang/rus.traineddata.gz"
 ]) {
   const exists = fs.existsSync(path.join(root, file));
   process.stdout.write(`${exists ? "Built" : "Missing build output"}: ${file}\n`);

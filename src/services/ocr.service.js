@@ -1,20 +1,26 @@
 // Local OCR (Phase 4b) built on tesseract.js. Nothing here touches the network.
 //
 // tesseract.js normally downloads its worker script, its WebAssembly core, and
-// the language model from jsDelivr at runtime. That would break both the offline
+// the language model from a CDN at runtime. That would break both the offline
 // promise and the page's `default-src 'self'` CSP, so all four pieces are
 // VENDORED into assets/vendor/tesseract and every path is passed explicitly:
 //
 //   assets/vendor/tesseract/tesseract.min.js               (UMD build, ~63 KB)
 //   assets/vendor/tesseract/worker.min.js                  (worker, ~111 KB)
 //   assets/vendor/tesseract/core/*-lstm.wasm.js            (3 SIMD variants, ~11.7 MB)
-//   assets/vendor/tesseract/lang/eng.traineddata.gz        (English model, ~2.9 MB)
+//   assets/vendor/tesseract/lang/<code>.traineddata.gz     (one model per language)
 //
 // Re-vendor after bumping the devDependencies with:
 //   cp node_modules/tesseract.js/dist/tesseract.min.js assets/vendor/tesseract/
 //   cp node_modules/tesseract.js/dist/worker.min.js assets/vendor/tesseract/
 //   cp node_modules/tesseract.js-core/tesseract-core*-lstm.wasm.js assets/vendor/tesseract/core/
-// (the traineddata comes from the @tesseract.js-data/eng package, 4.0.0_best_int)
+//
+// The language models come from the @tesseract.js-data/<code> npm packages
+// (version 1.0.0), variant `4.0.0_best_int` — the same source/variant as the
+// English core, so every model is compatible with the vendored WebAssembly. To
+// add a language, extract `package/4.0.0_best_int/<code>.traineddata.gz` from
+// `@tesseract.js-data/<code>` into lang/, add it to OCR_LANGUAGES below, and
+// register its sha256 in scripts/security-audit.js and scripts/build-check.js.
 //
 // The main build is loaded through a same-origin <script> tag rather than an npm
 // import, mirroring office.service.js's vendored SheetJS loader. That keeps the
@@ -31,9 +37,55 @@ const CORE_PATH = `${VENDOR_BASE}/core`;
 const LANG_PATH = `${VENDOR_BASE}/lang`;
 
 // One-time local load, so the UI can be honest about the first run. The browser
-// pulls one core variant (~3.9 MB) plus the worker and the English model; the
-// repo carries all three SIMD variants so any browser gets a matching build.
-export const OCR_ENGINE_SIZE_LABEL = "about 4 MB of engine plus a 3 MB English model";
+// pulls one core variant (~3.9 MB) plus the worker; the repo carries all three
+// SIMD variants so any browser gets a matching build. The selected language's
+// model is fetched separately, lazily, and only when OCR actually runs.
+export const OCR_ENGINE_SIZE_LABEL = "about 4 MB of engine";
+
+// The curated set of recognition languages vendored under
+// assets/vendor/tesseract/lang. `file` is the on-disk gzipped model and
+// `sizeBytes` its exact size, so the UI can warn about the one-time download and
+// the tests can catch drift. This list is the single source of truth: every code
+// here must have a vendored model (and vice-versa), asserted by the test-suite.
+export const OCR_LANGUAGES = [
+  { code: "eng", label: "English", file: "eng.traineddata.gz", sizeBytes: 2952873 },
+  { code: "hin", label: "Hindi", file: "hin.traineddata.gz", sizeBytes: 1389692 },
+  { code: "spa", label: "Spanish", file: "spa.traineddata.gz", sizeBytes: 2100190 },
+  { code: "fra", label: "French", file: "fra.traineddata.gz", sizeBytes: 707406 },
+  { code: "deu", label: "German", file: "deu.traineddata.gz", sizeBytes: 1333102 },
+  { code: "por", label: "Portuguese", file: "por.traineddata.gz", sizeBytes: 1392239 },
+  { code: "chi_sim", label: "Chinese (Simplified)", file: "chi_sim.traineddata.gz", sizeBytes: 1718768 },
+  { code: "ara", label: "Arabic", file: "ara.traineddata.gz", sizeBytes: 1661906 },
+  { code: "rus", label: "Russian", file: "rus.traineddata.gz", sizeBytes: 2679598 },
+];
+
+export const DEFAULT_OCR_LANG = "eng";
+const AVAILABLE_LANG_CODES = new Set(OCR_LANGUAGES.map((entry) => entry.code));
+
+/**
+ * Normalises a language selection ("hin", "eng+hin", or ["eng","hin"]) into a
+ * validated Tesseract lang string. Only languages with a locally vendored model
+ * survive; duplicates are dropped and, if nothing valid remains, it falls back
+ * to English. Pure and Node-reachable so the config plumbing can be unit-tested
+ * without a browser.
+ *
+ * @param {string | string[]} lang
+ * @returns {string} a "+"-joined code string, e.g. "eng" or "hin+eng"
+ */
+export function resolveOcrLang(lang) {
+  const requested = (Array.isArray(lang) ? lang : String(lang ?? "").split("+"))
+    .map((code) => code.trim())
+    .filter(Boolean);
+  const seen = new Set();
+  const valid = [];
+  for (const code of requested) {
+    if (AVAILABLE_LANG_CODES.has(code) && !seen.has(code)) {
+      seen.add(code);
+      valid.push(code);
+    }
+  }
+  return valid.length ? valid.join("+") : DEFAULT_OCR_LANG;
+}
 
 let tesseractPromise = null;
 
@@ -58,13 +110,20 @@ function loadTesseract() {
 }
 
 // A single worker is reused across pages (loading the model per page would be
-// pointlessly slow). `progressListener` is swapped per job so the caller's
-// progress callback always receives the current page's events.
+// pointlessly slow). It is keyed on the resolved language string: asking for a
+// different language terminates the old worker and starts one with that model,
+// so only the selected language's traineddata is ever fetched. `progressListener`
+// is swapped per job so the caller's progress callback always receives the
+// current page's events.
 let workerPromise = null;
+let workerLang = null;
 let progressListener = null;
 
-async function getWorker() {
-  if (workerPromise) return workerPromise;
+async function getWorker(lang = DEFAULT_OCR_LANG) {
+  const resolved = resolveOcrLang(lang);
+  if (workerPromise && workerLang === resolved) return workerPromise;
+  // A different language needs a fresh worker with that model loaded.
+  if (workerPromise) await terminateOcrWorker();
   const Tesseract = await loadTesseract();
 
   // tesseract.js swallows start-up failures other than the core load (its
@@ -74,8 +133,12 @@ async function getWorker() {
   let reportFailure;
   const failed = new Promise((_, reject) => { reportFailure = reject; });
 
+  workerLang = resolved;
   workerPromise = Promise.race([
-    Tesseract.createWorker("eng", 1, {
+    // The resolved code(s) drive both loadLanguage and initialize inside
+    // createWorker; langPath is the local vendored dir so the model is read
+    // from disk, never a CDN. "eng+hin"-style strings load several models.
+    Tesseract.createWorker(resolved, 1, {
       workerPath: WORKER_PATH,
       corePath: CORE_PATH,
       langPath: LANG_PATH,
@@ -90,6 +153,7 @@ async function getWorker() {
     failed,
   ]).catch((error) => {
     workerPromise = null;
+    workerLang = null;
     throw new Error(`The local OCR engine could not start: ${error?.message || error}`);
   });
   return workerPromise;
@@ -99,6 +163,7 @@ async function getWorker() {
 export async function terminateOcrWorker() {
   const pending = workerPromise;
   workerPromise = null;
+  workerLang = null;
   progressListener = null;
   if (!pending) return;
   try {
@@ -120,12 +185,12 @@ function statusText(message) {
  * that draws the image with an invisible text layer on top.
  *
  * @param {Array<{ name?: string, blob: Blob } | Blob>} images
- * @param {{ searchablePdf?: boolean, dpi?: number, onProgress?: (done: number, total: number) => void, onStage?: (page: number, total: number, stage: string) => void }} [options]
+ * @param {{ lang?: string | string[], searchablePdf?: boolean, dpi?: number, onProgress?: (done: number, total: number) => void, onStage?: (page: number, total: number, stage: string) => void }} [options]
  */
-export async function ocrImages(images, { searchablePdf = false, dpi, onProgress, onStage } = {}) {
+export async function ocrImages(images, { lang = DEFAULT_OCR_LANG, searchablePdf = false, dpi, onProgress, onStage } = {}) {
   const list = Array.from(images || []);
   if (!list.length) throw new Error("Add at least one page or image to read.");
-  const worker = await getWorker();
+  const worker = await getWorker(lang);
   if (dpi) {
     // Tesseract otherwise guesses the resolution, which mis-sizes PDF pages.
     await worker.setParameters({ user_defined_dpi: String(Math.round(dpi)) }).catch(() => {});
@@ -159,11 +224,11 @@ export async function ocrImages(images, { searchablePdf = false, dpi, onProgress
  * an invisible, selectable text layer over it.
  *
  * @param {File} file
- * @param {{ dpi?: number, searchablePdf?: boolean, onProgress?: (done: number, total: number) => void, onStage?: (page: number, total: number, stage: string) => void, onRender?: (page: number, total: number) => void }} [options]
+ * @param {{ lang?: string | string[], dpi?: number, searchablePdf?: boolean, onProgress?: (done: number, total: number) => void, onStage?: (page: number, total: number, stage: string) => void, onRender?: (page: number, total: number) => void }} [options]
  */
-export async function ocrPdf(file, { dpi = 200, searchablePdf = true, onProgress, onStage, onRender } = {}) {
+export async function ocrPdf(file, { lang = DEFAULT_OCR_LANG, dpi = 200, searchablePdf = true, onProgress, onStage, onRender } = {}) {
   const images = await pdfToImages(file, { format: "png", dpi, onProgress: onRender });
-  const results = await ocrImages(images, { searchablePdf, dpi, onProgress, onStage });
+  const results = await ocrImages(images, { lang, searchablePdf, dpi, onProgress, onStage });
   const text = results.map((result, index) => `--- Page ${index + 1} ---\n${result.text}`).join("\n\n").trim();
   const pdfParts = results.map((result) => result.pdf).filter(Boolean);
   const bytes = searchablePdf && pdfParts.length === results.length ? await mergeSearchablePdfPages(pdfParts) : null;

@@ -23,7 +23,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-[![Version](https://img.shields.io/badge/version-3.12.0-2563eb)](./package.json)
+[![Version](https://img.shields.io/badge/version-3.13.0-2563eb)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-87%20passing-16a34a)](./tests/core.test.js)
 [![Tools](https://img.shields.io/badge/tools-77%20local-2563eb)](./src/registry/tools.registry.js)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20known%20vulnerabilities-16a34a)](./SECURITY.md)
@@ -93,7 +93,7 @@ npm run build
 npm run preview
 ```
 
-Deploy the generated `dist/` directory to any static host. The build includes the React dashboard, the invoice editor, and every vendored local engine — PDF, capture, spreadsheet, and the OCR engine with its English model. The OCR assets are the bulk of the output size; see [Local Engines](#local-engines). Navigation uses URL hashes, so static hosts do not need route rewrites for tool pages.
+Deploy the generated `dist/` directory to any static host. The build includes the React dashboard, the invoice editor, and every vendored local engine — PDF, capture, spreadsheet, and the OCR engine with its nine language models. The OCR assets are the bulk of the output size; see [Local Engines](#local-engines). Navigation uses URL hashes, so static hosts do not need route rewrites for tool pages.
 
 For production hosting, configure the response headers documented in [SECURITY.md](./SECURITY.md).
 
@@ -153,12 +153,12 @@ Every engine the app needs at runtime is vendored into `assets/vendor/` and serv
 | `pdf-lib.min.js` | Every PDF read/write tool and the invoice export | Offline PDF construction; no remote script origin in the CSP. |
 | `html2canvas.min.js` | HTML to PDF, invoice preview-matched export | Renders DOM to canvas locally so exports match the on-screen preview. |
 | `xlsx.full.min.js` (SheetJS 0.20.3) | Excel to PDF, PDF to Excel, GST Filing Prep | The npm `xlsx` package is frozen at 0.18.5 with unfixed prototype-pollution and ReDoS advisories. SheetJS 0.20.3 is vendored directly from the upstream distribution instead, which keeps `npm audit` clean and gets the fixed parser. |
-| `tesseract/` (tesseract.js 7.0.0 + core WASM + `eng.traineddata.gz`) | OCR / Searchable PDF | tesseract.js normally downloads its worker, WebAssembly core, and language model at run time. The engine and English model (~14 MB on disk, including three SIMD core variants) are vendored so OCR never touches a CDN. |
+| `tesseract/` (tesseract.js 7.0.0 + core WASM + nine `*.traineddata.gz` models) | OCR / Searchable PDF | tesseract.js normally downloads its worker, WebAssembly core, and language models at run time. The engine and nine language models — English, Hindi, Spanish, French, German, Portuguese, Simplified Chinese, Arabic, Russian (~27 MB on disk, including three SIMD core variants and ~12.4 MiB of added language models) — are vendored so OCR never touches a CDN. Models come from `@tesseract.js-data/<code>@1.0.0` (variant `4.0.0_best_int`), the same source/variant as the English core. |
 | `pdfjs-dist` worker (bundled via `src/lib/pdfjs.ts`) | Rasterising and text extraction | Built into the app bundle rather than fetched from a CDN, and loaded lazily. |
 
 `scripts/security-audit.js` pins a sha256 digest for each vendored asset and fails the release gate if any file is missing or its digest changes, so a silent swap of a local engine cannot pass `npm run preflight`. The pdf-lib and html2canvas script tags additionally carry Subresource Integrity hashes.
 
-The OCR tool is the one place the size shows: the first run in a browser session loads about 7 MB from this origin (one WebAssembly core variant plus the English model) before recognition starts. The tool states this before it begins, the load is one-time per session, and the worker is terminated when you leave the tool.
+The OCR tool is the one place the size shows: the first run in a browser session loads about 7 MB from this origin (one WebAssembly core variant plus the English model) before recognition starts. Picking a different recognition language fetches only that language's model (0.7–2.8 MB) the first time it is used — never the whole set. The tool states the download size for the chosen language before it begins, the load is one-time per session, and the worker is terminated when you leave the tool.
 
 ## Privacy And Security
 
@@ -193,7 +193,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md), run `npm run preflight`, and keep eve
 
 ## Versioning
 
-The current version is `3.12.0`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
+The current version is `3.13.0`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
 
 ```bash
 npm run version:patch

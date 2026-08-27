@@ -21,6 +21,16 @@ const requiredLocalAssets = {
   "assets/vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js": "c58b46a4c796c0b8afccf77591d5b875b6896b45d402bbce8caa6f5362447b38",
   "assets/vendor/tesseract/core/tesseract-core-relaxedsimd-lstm.wasm.js": "861a536cf9ef8e63cb644d57bab39c388f37f7d6b6f60024b741c5f6b39a59b3",
   "assets/vendor/tesseract/lang/eng.traineddata.gz": "45b4cb346724ac1774f1c36f42f182b887bcdb28ebe63e6fff90ac41f3fcff91",
+  // Additional recognition languages, vendored from @tesseract.js-data/<code>@1.0.0
+  // (variant 4.0.0_best_int — same source/variant as eng). See ocr.service.js.
+  "assets/vendor/tesseract/lang/hin.traineddata.gz": "f3b6a0d320df38d886178cdd727b90dbf9df3db053adb32bd9cf73f0463cda07",
+  "assets/vendor/tesseract/lang/spa.traineddata.gz": "40be52f97b5d4eb7460073dc1f94cd546b27150333c0bf854ed7e7132db6bceb",
+  "assets/vendor/tesseract/lang/fra.traineddata.gz": "d611139672b3752c7097e671e4a1d9209dfd37f2aeb081ef6487fba3351e9255",
+  "assets/vendor/tesseract/lang/deu.traineddata.gz": "306c4280d0cbed46fbff727486bd43b92730181bae80f56941a091f363bdf28b",
+  "assets/vendor/tesseract/lang/por.traineddata.gz": "dacebc1386ddaaf8389f81094236cca0d690897cde693d48cbdaa881c86e2b4c",
+  "assets/vendor/tesseract/lang/chi_sim.traineddata.gz": "b8a23f10c7de500891eb458a8adc9cc58ab7f242f08b7d149f5e9aea4ad5db7c",
+  "assets/vendor/tesseract/lang/ara.traineddata.gz": "f4746c44b02342dd5b3d4f0198000f47d7c49f1a229e63e0f436c0592dcd9639",
+  "assets/vendor/tesseract/lang/rus.traineddata.gz": "f51f5edc992249ff9b70a227b22f242dfa47b2b1bbc7ae0ea74908640c101f6a",
 };
 let failed = false;
 

@@ -65,7 +65,7 @@ import { MAX_BATCH_FILES, batchAcceptFor, batchOpList, defaultBatchOptions, runB
 import { captureVideoFrame, enhanceCanvas, getHtml2Canvas, startCameraStream, stopCameraStream } from "./services/capture.service.js";
 import { docxToHtml, epubToHtml, pptxToSlides, readWorkbookSheets, sanitizeHtmlForOffline, sheetsToHtml } from "./services/office.service.js";
 import { pdfToDocx, pdfToEpub, pdfToHtml, pdfToXlsx } from "./services/export.service.js";
-import { OCR_ENGINE_SIZE_LABEL, mergeSearchablePdfPages, ocrImages, ocrPdf, terminateOcrWorker } from "./services/ocr.service.js";
+import { DEFAULT_OCR_LANG, OCR_ENGINE_SIZE_LABEL, OCR_LANGUAGES, mergeSearchablePdfPages, ocrImages, ocrPdf, terminateOcrWorker } from "./services/ocr.service.js";
 import { createSpeechRecognizer, getSpeechSynthesis, loadSpeechVoices, speechRecognitionSupport, speechSynthesisSupported, splitTextForSpeech } from "./services/audio.service.js";
 import { buildPassageIndex, chunkPages, highlightSegments, searchPassages, summarizeText } from "./services/nlp.service.js";
 import { buildAnswerPrompt, buildSummaryPrompt, clearLlmSettings, endpointOrigin, isLlmConfigured, maskApiKey, readLlmSettings, requestChatCompletion, saveLlmSettings } from "./services/llm.service.js";
@@ -5436,6 +5436,8 @@ function PdfToEpubTool({ tool }: { tool: Tool }) {
 function OcrPdfTool({ tool }: { tool: Tool }) {
   const [files, setFiles] = useState<File[]>([]);
   const [dpi, setDpi] = useState("200");
+  const [lang, setLang] = useState(DEFAULT_OCR_LANG);
+  const [alsoEnglish, setAlsoEnglish] = useState(false);
   const [searchable, setSearchable] = useState(true);
   const [text, setText] = useState("");
   const [status, setStatus] = useState(initialStatus);
@@ -5448,14 +5450,31 @@ function OcrPdfTool({ tool }: { tool: Tool }) {
     void terminateOcrWorker();
     setFiles([]);
     setText("");
+    setLang(DEFAULT_OCR_LANG);
+    setAlsoEnglish(false);
     setStatus(initialStatus);
   };
 
+  // Tesseract accepts "hin+eng"; pair a non-English language with English only
+  // when asked. The selector already limits `lang` to a vendored model, so the
+  // effective string never names a language whose model is missing.
+  const selected = OCR_LANGUAGES.find((entry) => entry.code === lang) || OCR_LANGUAGES[0];
+  const combineEnglish = alsoEnglish && lang !== DEFAULT_OCR_LANG;
+  const effectiveLang = combineEnglish ? `${lang}+${DEFAULT_OCR_LANG}` : lang;
+  const englishModel = OCR_LANGUAGES.find((entry) => entry.code === DEFAULT_OCR_LANG)!;
+  const modelBytes = selected.sizeBytes + (combineEnglish ? englishModel.sizeBytes : 0);
+  const downloadMb = (modelBytes / (1024 * 1024)).toFixed(1);
+
   return <ToolForm status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Reads text out of scanned PDFs and photos with a local OCR engine (Tesseract, English). The engine and its language model ship with this app — {OCR_ENGINE_SIZE_LABEL} loads once from this page on first use, then your browser caches it. Nothing is uploaded. Accuracy depends on the scan: straight, high-contrast, 200–300 DPI pages read best. A searchable PDF keeps the original page image with an invisible text layer over it.
+      Reads text out of scanned PDFs and photos with a local OCR engine (Tesseract). The engine and every language model ship with this app — nothing is uploaded. {OCR_ENGINE_SIZE_LABEL} loads once from this page on first use; each language model is fetched only when you first read in that language, then your browser caches it. Accuracy depends on the scan: straight, high-contrast, 200–300 DPI pages read best. A searchable PDF keeps the original page image with an invisible text layer over it.
     </div>
     <FileControl accept="application/pdf,image/jpeg,image/png,image/webp" multiple files={files} setFiles={setFiles} label="Choose or drop one scanned PDF, or images" />
+    <Select label="Recognition language" value={lang} onChange={setLang} options={OCR_LANGUAGES.map((entry) => entry.code)} labels={OCR_LANGUAGES.map((entry) => entry.label)} />
+    {lang !== DEFAULT_OCR_LANG && <Checkbox label="Also recognise English on the same page (adds the English model)" checked={alsoEnglish} onChange={setAlsoEnglish} />}
+    <p className="text-xs font-semibold leading-5 text-neutral-500">
+      First use of {combineEnglish ? `${selected.label} + English` : selected.label} downloads {combineEnglish ? "their models" : "its model"} once (~{downloadMb} MB), then your browser caches {combineEnglish ? "them" : "it"}. No other language is fetched.
+    </p>
     <Select label="Render resolution (DPI)" value={dpi} onChange={setDpi} options={["150", "200", "300"]} labels={["150 · fastest", "200 · default", "300 · most accurate"]} />
     <Checkbox label="Also build a searchable PDF (image + invisible text layer)" checked={searchable} onChange={setSearchable} />
     <PrimaryButton label="Run OCR" onClick={() => runSafely(setStatus, async () => {
@@ -5470,6 +5489,7 @@ function OcrPdfTool({ tool }: { tool: Tool }) {
 
       if (pdfs.length === 1) {
         const { text: recognised, pages, bytes } = await ocrPdf(pdfs[0], {
+          lang: effectiveLang,
           dpi: Number(dpi),
           searchablePdf: searchable,
           onStage,
@@ -5485,7 +5505,7 @@ function OcrPdfTool({ tool }: { tool: Tool }) {
 
       const results = await ocrImages(
         valid.map((file) => ({ name: file.name, blob: file })),
-        { searchablePdf: searchable, dpi: Number(dpi), onStage }
+        { lang: effectiveLang, searchablePdf: searchable, dpi: Number(dpi), onStage }
       );
       const recognised = results
         .map((result: any, index: number) => `--- ${result.name || `Image ${index + 1}`} ---\n${result.text}`)

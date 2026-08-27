@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import { tools, categories } from "../src/registry/tools.registry.js";
 import { filterTools } from "../src/lib/search.js";
 import { csvToJson, jsonToCsv } from "../src/services/csv.service.js";
@@ -4640,4 +4641,98 @@ test("sign-pdf-tool and verify-signature-tool are registered, routed, and wired 
   assert.equal(appSource.includes(`"verify-signature-tool"`), true, "verify tool wired into ToolRenderer");
   assert.equal(appSource.includes("SignPdfTool"), true);
   assert.equal(appSource.includes("VerifySignatureTool"), true);
+});
+
+// --- Phase 7: OCR multi-language support -------------------------------------
+// Actual recognition needs a browser (tesseract.js worker + WebAssembly), so it
+// is not exercised here. These tests lock in the vendored-model integrity, the
+// config/param plumbing that IS Node-reachable, the UI/model list agreement, and
+// the source-level offline guarantee.
+
+// The expected sha256 for a vendored asset, read from the release gate itself,
+// so these tests catch any model that was corrupted or swapped after vendoring.
+function registeredAssetDigest(assetPath) {
+  const auditSource = fs.readFileSync(new URL("../scripts/security-audit.js", import.meta.url), "utf8");
+  const match = auditSource.match(
+    new RegExp(`"${assetPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}":\\s*"([0-9a-f]{64})"`)
+  );
+  return match ? match[1] : null;
+}
+
+test("every vendored OCR language model is a real, integrity-checked gzip file", async () => {
+  const { OCR_LANGUAGES } = await import("../src/services/ocr.service.js");
+  assert.ok(OCR_LANGUAGES.length >= 2, "more than English should be vendored");
+  for (const { code, file, sizeBytes } of OCR_LANGUAGES) {
+    const relativePath = `assets/vendor/tesseract/lang/${file}`;
+    const modelPath = new URL(`../${relativePath}`, import.meta.url);
+    assert.ok(fs.existsSync(modelPath), `${code}: ${file} exists on disk`);
+    const bytes = fs.readFileSync(modelPath);
+    assert.ok(bytes.length > 0, `${code}: model is non-empty`);
+    assert.equal(bytes.length, sizeBytes, `${code}: OCR_LANGUAGES sizeBytes matches the file on disk`);
+    // gzip magic bytes 1f 8b — the model is shipped gzipped, as the worker expects.
+    assert.equal(bytes[0], 0x1f, `${code}: gzip magic byte 0`);
+    assert.equal(bytes[1], 0x8b, `${code}: gzip magic byte 1`);
+    // sha256 must match the value registered in the security-audit release gate,
+    // so a corrupted or replaced model is caught before it can ship.
+    const expected = registeredAssetDigest(relativePath);
+    assert.ok(expected, `${code}: sha256 is registered in security-audit.js`);
+    const actual = createHash("sha256").update(bytes).digest("hex");
+    assert.equal(actual, expected, `${code}: model sha256 matches the registered integrity value`);
+  }
+});
+
+test("the OCR language list and the vendored models are exactly in sync", async () => {
+  const { OCR_LANGUAGES } = await import("../src/services/ocr.service.js");
+  const langDir = new URL("../assets/vendor/tesseract/lang/", import.meta.url);
+  const onDisk = new Set(fs.readdirSync(langDir).filter((name) => name.endsWith(".traineddata.gz")));
+  const listed = new Set(OCR_LANGUAGES.map((entry) => entry.file));
+  // No UI option without a local model...
+  for (const file of listed) assert.ok(onDisk.has(file), `${file} is offered but not vendored`);
+  // ...and no orphan model without a UI option.
+  for (const file of onDisk) assert.ok(listed.has(file), `${file} is vendored but has no language option`);
+  assert.equal(listed.size, onDisk.size, "OCR_LANGUAGES and the vendored lang dir match one-to-one");
+});
+
+test("resolveOcrLang validates codes, dedupes, supports combos, and falls back to English", async () => {
+  const { resolveOcrLang, DEFAULT_OCR_LANG } = await import("../src/services/ocr.service.js");
+  assert.equal(DEFAULT_OCR_LANG, "eng");
+  // Default / passthrough of a known code.
+  assert.equal(resolveOcrLang("eng"), "eng");
+  assert.equal(resolveOcrLang("hin"), "hin");
+  // Multi-language strings Tesseract understands are preserved in order.
+  assert.equal(resolveOcrLang("hin+eng"), "hin+eng");
+  assert.equal(resolveOcrLang(["eng", "hin"]), "eng+hin");
+  // Duplicates collapse.
+  assert.equal(resolveOcrLang("eng+eng"), "eng");
+  // Unknown codes (no local model) are dropped; a clear English fallback remains.
+  assert.equal(resolveOcrLang("klingon"), "eng");
+  assert.equal(resolveOcrLang("hin+klingon"), "hin");
+  assert.equal(resolveOcrLang(""), "eng");
+  assert.equal(resolveOcrLang(undefined), "eng");
+});
+
+test("ocr.service points Tesseract at the LOCAL vendored dir and threads the lang code through", () => {
+  const serviceSource = fs.readFileSync(new URL("../src/services/ocr.service.js", import.meta.url), "utf8");
+  // langPath is the same-origin vendored directory, never a remote host.
+  assert.match(serviceSource, /const LANG_PATH = `\$\{VENDOR_BASE\}\/lang`/);
+  assert.match(serviceSource, /VENDOR_BASE = "\/assets\/vendor\/tesseract"/);
+  // The resolved language code(s) are handed to createWorker with the local langPath.
+  assert.match(serviceSource, /createWorker\(resolved, 1, \{/);
+  assert.match(serviceSource, /langPath: LANG_PATH/);
+  // gzip stays on so the vendored *.gz models load, and the blob-URL worker
+  // (which the CSP would block) stays off.
+  assert.match(serviceSource, /gzip: true/);
+  assert.match(serviceSource, /workerBlobURL: false/);
+  // The lang option is threaded from the public API down into the worker.
+  assert.match(serviceSource, /async function getWorker\(lang = DEFAULT_OCR_LANG\)/);
+  assert.match(serviceSource, /getWorker\(lang\)/);
+});
+
+test("OCR stays offline: the service names no CDN / tessdata / http(s) URL", () => {
+  const serviceSource = fs.readFileSync(new URL("../src/services/ocr.service.js", import.meta.url), "utf8");
+  // Mirror of the pdf.js offline guard: no remote loader of any kind in the OCR
+  // path. Comments legitimately mention "the CDN serves"/gzip, so the assertion
+  // targets actual URL forms and known tessdata hosts, not the word "CDN".
+  assert.doesNotMatch(serviceSource, /https?:\/\//);
+  assert.doesNotMatch(serviceSource, /tessdata|cdnjs|unpkg|jsdelivr/i);
 });
