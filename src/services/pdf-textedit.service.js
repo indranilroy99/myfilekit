@@ -185,14 +185,84 @@ export async function applyTextEdits(pdfBytes, edits) {
     const col = clampColor(edit.color, { r: 0.1, g: 0.1, b: 0.13 });
     const baseline = Number.isFinite(Number(r.baseline)) ? Number(r.baseline) : y;
     const size = Number.isFinite(Number(r.fontSize)) && r.fontSize > 0 ? Number(r.fontSize) : h;
-    const options = { x, y: baseline, size, font, color: rgb(col.r, col.g, col.b) };
+    const drawColor = rgb(col.r, col.g, col.b);
     const angle = Number(r.angle) || 0;
-    if (angle) options.rotate = degrees(angle);
-    // Reuse the shared Latin-1 safe-draw helper: it raises the friendly
-    // "Latin-1 characters only" error for CJK/emoji replacements.
-    drawPdfText(page, text, options);
+
+    // Re-wrap the replacement WITHIN the original block width so a longer edit
+    // stacks into multiple lines at the original line height instead of
+    // overflowing off the right edge; a shorter one still fits on one line. This
+    // is block-level wrapping, NOT paragraph reflow — surrounding text does not
+    // move, so wrapped lines below the first can overlap content beneath. A
+    // rotated run is drawn as a single line (wrapping a rotated block is out of
+    // scope). Measuring uses the matched standard font, so the wrap matches the
+    // glyphs actually drawn.
+    const lines = angle ? [text] : wrapToWidth(text, w, font, size);
+    const lineHeight = size * REFLOW_LINE_HEIGHT;
+    for (let li = 0; li < lines.length; li += 1) {
+      const options = { x, y: baseline - li * lineHeight, size, font, color: drawColor };
+      if (angle) options.rotate = degrees(angle);
+      // Reuse the shared Latin-1 safe-draw helper: it raises the friendly
+      // "Latin-1 characters only" error for CJK/emoji replacements.
+      drawPdfText(page, lines[li], options);
+    }
   }
   return pdf.save();
+}
+
+// Single-line advance, in multiples of the font size, for stacked wrapped lines.
+const REFLOW_LINE_HEIGHT = 1.15;
+// Slack (points) so a replacement whose measured width only rounds past the
+// block width — e.g. same-length text — is not needlessly split onto two lines.
+const WRAP_SLACK = 1;
+
+/**
+ * Wraps `text` to fit `maxWidth` points using the embedded font's own metrics,
+ * breaking on spaces and hard-splitting any single token wider than the block.
+ * Newlines in the input are preserved as line breaks. Returns at least one line.
+ * Exported for direct unit testing.
+ */
+export function wrapToWidth(text, maxWidth, font, size) {
+  const value = String(text ?? "");
+  if (!(Number(maxWidth) > 0)) return [value];
+  const limit = Number(maxWidth) + WRAP_SLACK;
+  // Measuring throws the same Latin-1 error as drawing; swallow it here (return
+  // 0 so the text stays on one line) and let drawPdfText raise the friendly
+  // message when it actually draws the run.
+  const measure = (s) => { try { return font.widthOfTextAtSize(s, size); } catch { return 0; } };
+  const out = [];
+  for (const paragraph of value.split(/\r?\n/)) {
+    const words = paragraph.split(/\s+/).filter((w) => w.length);
+    if (!words.length) { out.push(""); continue; }
+    let line = "";
+    for (let word of words) {
+      // Hard-break a token that cannot fit the block on its own.
+      while (measure(word) > limit) {
+        const cut = fittingPrefixLength(word, limit, measure);
+        if (cut >= word.length) break;
+        if (line) { out.push(line); line = ""; }
+        out.push(word.slice(0, cut));
+        word = word.slice(cut);
+      }
+      const candidate = line ? `${line} ${word}` : word;
+      if (line && measure(candidate) > limit) { out.push(line); line = word; }
+      else line = candidate;
+    }
+    out.push(line);
+  }
+  return out.length ? out : [value];
+}
+
+// Longest prefix (at least one character) of `token` that still fits `maxWidth`.
+// Binary search so a very long token is not re-measured character by character.
+function fittingPrefixLength(token, maxWidth, measure) {
+  let low = 1;
+  let high = token.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (measure(token.slice(0, middle)) <= maxWidth) low = middle;
+    else high = middle - 1;
+  }
+  return low;
 }
 
 function clampColor(color, fallback) {

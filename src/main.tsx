@@ -2,7 +2,12 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { installMyFileKit } from "./api/myfilekit.js";
 import "./styles.css";
+
+// Expose the local, client-side programmatic API on window.MyFileKit. It wraps
+// the same services the UI uses and never opens a network connection.
+installMyFileKit();
 
 // Privacy-first: surface unexpected errors to the local console only.
 window.addEventListener("error", (event) => {

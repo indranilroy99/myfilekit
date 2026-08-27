@@ -5696,3 +5696,171 @@ test("pwa: index.html links the manifest and registers the service worker, and s
   const externalUrls = (sw.match(/https?:\/\/[^\s"')]+/g) || []).filter((u) => !u.startsWith("http://www.w3.org"));
   assert.deepEqual(externalUrls, [], "the service worker references no external/CDN URL");
 });
+
+// --- Client-side programmatic API (MyFileKit) --------------------------------
+// The differentiator vs iLovePDF / Stirling: the API runs 100% locally (no
+// server, no upload, no key). These assert the surface exists, wraps the real
+// services (correct page counts through the API), and opens no network.
+
+test("MyFileKit API exposes local namespaces that wrap the real services", async () => {
+  const { MyFileKit, installMyFileKit } = await import("../src/api/myfilekit.js");
+  const { PDFDocument } = window.PDFLib;
+
+  // Namespaces + a representative method set exist.
+  for (const ns of ["pdf", "ocr", "image", "batch", "workflow"]) {
+    assert.equal(typeof MyFileKit[ns], "object", `${ns} namespace present`);
+  }
+  for (const method of ["merge", "split", "compress", "encrypt", "sign", "sanitize", "archivalPrep", "extractText", "toImages", "verify", "redact"]) {
+    assert.equal(typeof MyFileKit.pdf[method], "function", `pdf.${method} present`);
+  }
+  assert.equal(typeof MyFileKit.pdf.accessibility.check, "function");
+  assert.equal(typeof MyFileKit.pdf.accessibility.tag, "function");
+  assert.equal(typeof MyFileKit.batch.run, "function");
+  assert.equal(typeof MyFileKit.workflow.run, "function");
+  assert.equal(typeof MyFileKit.ocr.pdf, "function");
+  assert.equal(MyFileKit.local, true);
+
+  // merge: 2 + 3 pages -> 5.
+  const a = new File([await makeBatchPdf(2)], "a.pdf", { type: "application/pdf" });
+  const b = new File([await makeBatchPdf(3)], "b.pdf", { type: "application/pdf" });
+  const merged = await MyFileKit.pdf.merge([a, b]);
+  assert.ok(merged instanceof Uint8Array, "merge returns bytes");
+  assert.equal((await PDFDocument.load(merged)).getPageCount(), 5);
+
+  // The wrapper maps to the real service: same result as calling mergePdfs directly.
+  const direct = await mergePdfs([a, b]);
+  assert.equal((await PDFDocument.load(direct)).getPageCount(), 5);
+
+  // split by a page-range string and by an explicit 0-based index array.
+  const five = new File([merged], "merged.pdf", { type: "application/pdf" });
+  assert.equal((await PDFDocument.load(await MyFileKit.pdf.split(five, "1-3,5"))).getPageCount(), 4);
+  assert.equal((await PDFDocument.load(await MyFileKit.pdf.split(five, [0, 4]))).getPageCount(), 2);
+
+  // workflow chains real pure pdf-lib ops (page-numbers then rotate).
+  const wfOut = await MyFileKit.workflow.run(
+    [{ op: "page-numbers", options: { prefix: "P" } }, { op: "rotate", options: { degrees: "90" } }],
+    new File([await makeBatchPdf(2)], "wf.pdf", { type: "application/pdf" }),
+  );
+  const wfDoc = await PDFDocument.load(wfOut);
+  assert.equal(wfDoc.getPageCount(), 2);
+  assert.equal(wfDoc.getPage(0).getRotation().angle, 90, "workflow rotate op ran");
+  assert.ok(MyFileKit.workflow.ops().includes("rotate"));
+
+  // install exposes the same object on window.
+  const installed = installMyFileKit();
+  assert.equal(installed, MyFileKit);
+  assert.equal(window.MyFileKit, MyFileKit);
+});
+
+test("MyFileKit API source makes no network calls (privacy differentiator)", () => {
+  const src = fs.readFileSync(new URL("../src/api/myfilekit.js", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /fetch\s*\(/, "no fetch()");
+  assert.doesNotMatch(src, /new\s+XMLHttpRequest/, "no XMLHttpRequest");
+  assert.doesNotMatch(src, /new\s+WebSocket/, "no WebSocket");
+  assert.doesNotMatch(src, /sendBeacon/, "no sendBeacon");
+  assert.doesNotMatch(src, /import\s*\(/, "no dynamic/remote import");
+});
+
+test("api-playground tool is registered, routed, wired, and documents the local API", () => {
+  const found = tools.find((tool) => tool.id === "api-playground-tool");
+  assert.ok(found, "api-playground-tool registered");
+  assert.equal(found.category, "Developer Utilities");
+  assert.equal(found.status, "available");
+  assert.equal(found.localProcessing, true);
+  assert.equal(routeForHash(found.route).tool.id, "api-playground-tool");
+
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.equal(appSource.includes(`"api-playground-tool"`), true, "wired into ToolRenderer");
+  assert.equal(appSource.includes("ApiPlaygroundTool"), true, "component defined");
+
+  const searchable = [found.name, found.description, ...found.keywords].join(" ").toLowerCase();
+  for (const term of ["api", "local", "programmatic"]) assert.match(searchable, new RegExp(term));
+});
+
+// --- PDF/A-2b hardening -------------------------------------------------------
+
+test("archivalPrepPdf defaults to PDF/A-2b, sets /Lang + Title, and keeps a raster page font-free", async () => {
+  const { archivalPrepPdf } = await import("../src/services/pdf-review.service.js");
+  const { PDFDocument, PDFName } = window.PDFLib;
+
+  // A self-contained, image-only page (an image XObject, no fonts) — what the
+  // raster path produces.
+  const png1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  const doc = await PDFDocument.create();
+  const img = await doc.embedPng(new Uint8Array(png1x1));
+  doc.addPage([200, 200]).drawImage(img, { x: 0, y: 0, width: 200, height: 200 });
+  const srcBytes = await doc.save();
+
+  const { bytes, report } = await archivalPrepPdf(srcBytes, { title: "Scanned archive", lang: "en" });
+  const out = await PDFDocument.load(bytes);
+
+  // Default conformance is PDF/A-2b: XMP pdfaid part=2 / conformance=B.
+  const xmp = Buffer.from(out.context.lookup(out.catalog.get(PDFName.of("Metadata"))).contents).toString("utf8");
+  assert.match(xmp, /pdfaid:part>2</, "XMP declares PDF/A part 2");
+  assert.match(xmp, /pdfaid:conformance>B</, "XMP declares conformance B");
+  assert.match(report.conformance, /PDF\/A-2B/);
+
+  // sRGB OutputIntent + document /ID present (same metadata as the non-raster path).
+  assert.ok(out.context.lookup(out.catalog.get(PDFName.of("OutputIntents"))), "OutputIntent present");
+  assert.ok(out.context.trailerInfo.ID, "document /ID present");
+
+  // Document language (/Lang) and Title are set.
+  assert.match(String(out.catalog.get(PDFName.of("Lang"))), /en/, "/Lang set");
+  assert.equal(out.getTitle(), "Scanned archive", "Title set");
+
+  // The raster page has an image XObject and NO font (no unembedded font).
+  const resources = out.context.lookup(out.getPages()[0].node.get(PDFName.of("Resources")));
+  const fontDict = out.context.lookup(resources.get(PDFName.of("Font")));
+  const fontCount = fontDict && typeof fontDict.entries === "function" ? fontDict.entries().length : 0;
+  assert.equal(fontCount, 0, "raster page carries no font resource");
+  assert.ok(out.context.lookup(resources.get(PDFName.of("XObject"))), "raster page has an image XObject");
+});
+
+// --- Edit PDF Text: wrap-within-block reflow ---------------------------------
+
+test("wrapToWidth wraps within the block width using the font's own metrics", async () => {
+  const { wrapToWidth } = await import("../src/services/pdf-textedit.service.js");
+  const { PDFDocument, StandardFonts } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+
+  // A short replacement stays on one line.
+  assert.equal(wrapToWidth("Hi", 120, font, 12).length, 1);
+
+  // A long replacement wraps to several lines, none wider than the block.
+  const long = "The quick brown fox jumps over the lazy dog and then keeps running";
+  const lines = wrapToWidth(long, 120, font, 12);
+  assert.ok(lines.length > 1, "wrapped to multiple lines");
+  for (const line of lines) assert.ok(font.widthOfTextAtSize(line, 12) <= 121, `line "${line}" fits the block`);
+  assert.equal(lines.join(" ").replace(/\s+/g, " ").trim(), long, "no words dropped by wrapping");
+});
+
+test("applyTextEdits wraps a longer replacement to multiple lines within the block, keeps a short one on one", async () => {
+  const { applyTextEdits } = await import("../src/services/pdf-textedit.service.js");
+  const { PDFDocument, StandardFonts } = window.PDFLib;
+
+  // A synthetic block 120pt wide at size 12 on a blank page (only the edit draws text).
+  const rect = { x: 72, y: 700, w: 120, h: 14, baseline: 700, fontSize: 12 };
+  const blank = async () => { const d = await PDFDocument.create(); d.addPage([612, 792]); return d.save(); };
+
+  const long = "The quick brown fox jumps over the lazy dog and then keeps running";
+  const outLong = await applyTextEdits(await blank(), [{ page: 1, rect, text: long, fontKey: "Helvetica", color: { r: 0.1, g: 0.1, b: 0.1 } }]);
+  const opsLong = await decodePageOps(outLong);
+
+  // Each drawn line is its own BT...ET text object; long text yields several.
+  const lineTexts = opsLong.split(/\bBT\b/).slice(1)
+    .map((block) => { const m = block.match(/<([0-9A-Fa-f]+)>/); return m ? Buffer.from(m[1], "hex").toString("latin1") : ""; })
+    .filter(Boolean);
+  assert.ok(lineTexts.length > 1, "longer replacement wrapped to more than one line");
+
+  // No drawn line exceeds the block width (measured with the same standard font).
+  const measureDoc = await PDFDocument.create();
+  const font = await measureDoc.embedFont(StandardFonts.Helvetica);
+  for (const line of lineTexts) assert.ok(font.widthOfTextAtSize(line, 12) <= 121, `drawn line "${line}" within block width`);
+  assert.equal(lineTexts.join(" ").replace(/\s+/g, " ").trim(), long, "wrapped lines reconstruct the text");
+
+  // A short replacement stays on a single line.
+  const outShort = await applyTextEdits(await blank(), [{ page: 1, rect, text: "Fixed", fontKey: "Helvetica" }]);
+  const opsShort = await decodePageOps(outShort);
+  assert.equal((opsShort.match(/\bBT\b/g) || []).length, 1, "short replacement is a single line");
+});

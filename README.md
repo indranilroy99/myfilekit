@@ -23,7 +23,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-[![Version](https://img.shields.io/badge/version-3.16.0-2563eb)](./package.json)
+[![Version](https://img.shields.io/badge/version-3.17.0-2563eb)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-213%20passing-16a34a)](./tests/core.test.js)
 [![Tools](https://img.shields.io/badge/tools-96%20local-2563eb)](./src/registry/tools.registry.js)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20known%20vulnerabilities-16a34a)](./SECURITY.md)
@@ -161,6 +161,12 @@ Every engine the app needs at runtime is vendored into `assets/vendor/` and serv
 
 The OCR tool is the one place the size shows: the first run in a browser session loads about 7 MB from this origin (one WebAssembly core variant plus the English model) before recognition starts. Picking a different recognition language fetches only that language's model (0.7–2.8 MB) the first time it is used — never the whole set. The tool states the download size for the chosen language before it begins, the load is one-time per session, and the worker is terminated when you leave the tool.
 
+## Programmatic API
+
+MyFileKit exposes a stable, namespaced JavaScript API over the same services the UI uses — `MyFileKit.pdf.merge(files)`, `.split(file, "1-3,5")`, `.encrypt(file, opts)`, `.sanitize(file)`, `.archivalPrep(file)`, `.accessibility.check(file)`, `.ocr.pdf(file)`, `.batch.run(op, files)`, `.workflow.run(steps, file)`, and more. It is available as an `import` from `src/api/myfilekit.js` and as `window.MyFileKit` in the browser.
+
+Unlike the server-side APIs of iLovePDF or Stirling PDF — which require uploading your file and holding a key — this one runs 100% in your own browser or Node process: **no server, no upload, no key**, and it opens no network connection. Full reference: [docs/API.md](./docs/API.md).
+
 ## Privacy And Security
 
 MyFileKit has no application backend, account system, analytics integration, or remote file storage. File contents stay in the active browser session unless a user explicitly downloads an output.
@@ -198,7 +204,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md), run `npm run preflight`, and keep eve
 
 ## Versioning
 
-The current version is `3.16.0`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
+The current version is `3.17.0`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
 
 ```bash
 npm run version:patch

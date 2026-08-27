@@ -50,6 +50,7 @@ import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.
 import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, getPdfLib, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
 import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip, rasterRebuild } from "./services/pdf-render.service.js";
 import { applyTextEdits, mapPdfFontToStandard, standardFontKey, textItemToPageRect } from "./services/pdf-textedit.service.js";
+import { MyFileKit } from "./api/myfilekit.js";
 import { applyAnnotations, screenToPagePoint, pagePointToScreen, HIGHLIGHT_PALETTE, MAX_ANNOTATIONS_PER_PAGE } from "./services/annotate.service.js";
 import { archivalPrepPdf, assertPdfDecryptable, comparePdfText, comparePdfReportText, estimateSkewAngle } from "./services/pdf-review.service.js";
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
@@ -1225,6 +1226,7 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "diff-checker-tool") return <DiffCheckerTool />;
   if (tool.id === "word-counter-tool") return <WordCounterTool />;
   if (tool.id === "metadata-cleaner") return <MetadataCleanerTool tool={tool} />;
+  if (tool.id === "api-playground-tool") return <ApiPlaygroundTool tool={tool} />;
   if (tool.id === "base64-tool") return <Base64Tool />;
   if (tool.id === "file-hash-tool") return <FileHashTool tool={tool} />;
   if (tool.id === "hash-compare-tool") return <HashCompareTool tool={tool} />;
@@ -1605,7 +1607,7 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
         <p className="text-xs font-black uppercase text-neutral-500">How this works — and its limits</p>
         <p className="text-[var(--foreground)]">Click a line of existing text, edit the string, and Apply. On export the original glyphs are covered with a rectangle in the sampled background colour and your new text is drawn on top at the same spot.</p>
         <ul className="ml-4 list-disc">
-          <li>This is an <strong>overlay edit, not a reflow</strong>: text does not re-wrap. A longer replacement can overflow its box; a shorter one leaves a gap. Only the clicked run changes — nothing around it moves.</li>
+          <li>This is a <strong>block-level overlay edit, not full-page reflow</strong>: a longer replacement now <strong>re-wraps within the clicked block's width</strong> onto multiple lines instead of overflowing off the edge; a shorter one still fits on one line. Only the clicked run is touched — surrounding text never moves, so wrapped lines can run over content directly beneath the block.</li>
           <li>Font matching is <strong>approximate</strong> (Helvetica / Times / Courier substitute). The original embedded font is not reused, so glyph shapes and spacing may differ slightly.</li>
           <li>The original text is <strong>visually covered, not stripped</strong> from the file — for permanent removal use <a className="underline" href="#redact-pdf-tool">Redact PDF</a>.</li>
           <li>Needs a real text layer. Scanned / image-only PDFs have no text runs — run <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a> first.</li>
@@ -1706,10 +1708,10 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
           background: edit.background || undefined,
         })));
         downloadBytes(out, withExtension(`${safeFilename(fileName)}-edited`, "pdf"), "application/pdf");
-        return `Applied ${editList.length} edit${editList.length === 1 ? "" : "s"} to ${fileName}. Remember: text was overlaid, not reflowed.`;
+        return `Applied ${editList.length} edit${editList.length === 1 ? "" : "s"} to ${fileName}. Longer edits wrap within their block; surrounding text was not reflowed.`;
       })} />
 
-      <ResultConsequenceNote>Edits are applied by covering and redrawing — the surrounding text is never re-flowed, and the original text remains in the file underneath the cover. For permanent removal of sensitive text, use Redact PDF instead.</ResultConsequenceNote>
+      <ResultConsequenceNote>Edits are applied by covering and redrawing — a longer replacement re-wraps within its own block, but the surrounding text is never re-flowed, and the original text remains in the file underneath the cover. For permanent removal of sensitive text, use Redact PDF instead.</ResultConsequenceNote>
     </ToolForm>
   );
 }
@@ -4607,42 +4609,71 @@ function DeskewPdfTool({ tool }: { tool: Tool }) {
 function PdfaPrepTool({ tool }: { tool: Tool }) {
   const [files, setFiles] = useState<File[]>([]);
   const [raster, setRaster] = useState(false);
+  const [ocrLayer, setOcrLayer] = useState(false);
+  const [ocrLang, setOcrLang] = useState(DEFAULT_OCR_LANG);
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
+  const [lang, setLang] = useState("en");
   const [report, setReport] = useState<{ applied: string[]; removed: string[]; conformance: string } | null>(null);
   const [status, setStatus] = useState(initialStatus);
 
-  const reset = () => { setFiles([]); setRaster(false); setTitle(""); setAuthor(""); setReport(null); setStatus(initialStatus); };
+  const reset = () => { setFiles([]); setRaster(false); setOcrLayer(false); setOcrLang(DEFAULT_OCR_LANG); setTitle(""); setAuthor(""); setLang("en"); setReport(null); setStatus(initialStatus); };
 
   return <ToolForm status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Best-effort archival hygiene — <strong>not</strong> a certified, veraPDF-validated PDF/A conversion. It adds an sRGB OutputIntent with an embedded ICC profile, writes XMP metadata carrying the PDF/A conformance identifier, sets the document Info, /ID, and /MarkInfo, and strips things PDF/A forbids where it can (JavaScript, auto-run OpenAction, and Launch actions). True PDF/A also needs every font embedded and a strict validation pass, which a browser cannot guarantee — so this does not claim compliance it cannot prove.
+      Aims for a structurally valid <strong>PDF/A-2b</strong> via the self-contained path — but this is <strong>not</strong> a certified, veraPDF-validated conversion. It adds an sRGB OutputIntent with an embedded ICC profile, writes XMP carrying the PDF/A-2B conformance identifier, sets the document Title, language (/Lang), Info, /ID, and /MarkInfo, and strips things PDF/A forbids where it can (JavaScript, auto-run OpenAction, and Launch actions). We cannot run veraPDF in the browser, so <strong>run veraPDF to certify before relying on it for legal compliance</strong> — this does not claim compliance it cannot prove.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
     <Checkbox label="Guaranteed self-contained (rasterise every page)" checked={raster} onChange={setRaster} />
     {raster && (
-      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-        Rasterising renders each page to an image, which removes any missing-font or transparency risk — the most reliable client-side path — but makes text non-selectable. You can re-add a searchable text layer afterwards with the OCR / Searchable PDF tool.
+      <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold leading-6 text-neutral-600">
+        <p>Rasterising renders each page to an image, so every page becomes an image XObject with no unembedded fonts — the most reliable client-side path to PDF/A-2b — but plain rasterised text is not selectable.</p>
+        <Checkbox label="Add a searchable OCR text layer (self-contained AND searchable)" checked={ocrLayer} onChange={setOcrLayer} />
+        {ocrLayer && (
+          <>
+            <p>OCR reads the text back with the local engine and draws it as an invisible, selectable layer over the image. The archival PDF is then <strong>both</strong> self-contained <strong>and</strong> searchable — a real advantage over a plain raster. The OCR text uses an embedded glyphless font, so the file stays self-contained. First run loads {OCR_ENGINE_SIZE_LABEL}.</p>
+            <Select label="OCR language" value={ocrLang} onChange={setOcrLang} options={OCR_LANGUAGES.map((entry) => entry.code)} labels={OCR_LANGUAGES.map((entry) => entry.label)} />
+          </>
+        )}
       </div>
     )}
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid gap-3 sm:grid-cols-3">
       <Input label="Title (optional)" value={title} onChange={setTitle} placeholder="Document title" />
       <Input label="Author (optional)" value={author} onChange={setAuthor} placeholder="Author" />
+      <Input label="Language (BCP-47)" value={lang} onChange={setLang} placeholder="en" />
     </div>
     <PrimaryButton label="Prepare for archiving" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       const originalBytes = new Uint8Array(await file.arrayBuffer());
-      let source = originalBytes;
+      const docTitle = title.trim() || safeFilename(file.name);
+      const docLang = lang.trim() || "en";
+      let source: Uint8Array = originalBytes;
+      let ocrApplied = false;
       if (raster) {
         // Refuse encrypted originals with a clear message before rasterising.
         await assertPdfDecryptable(originalBytes);
-        source = await rasterRebuild(file, { format: "png", onProgress: pageProgress(setStatus, "Rasterising") });
+        if (ocrLayer) {
+          // OCR rasterises internally and returns a searchable image PDF (page
+          // image + invisible text layer). Feed those bytes to archival prep.
+          const ocr = await ocrPdf(file, {
+            lang: ocrLang,
+            searchablePdf: true,
+            onRender: pageProgress(setStatus, "Rasterising"),
+            onStage: (page: number, total: number, stage: string) => setStatus({ tone: "idle", message: `OCR page ${page} of ${total}: ${stage}`, progress: { value: page, total, label: "OCR…" } }),
+          });
+          if (!ocr.bytes) throw new Error("OCR did not produce a searchable PDF for every page.");
+          source = ocr.bytes;
+          ocrApplied = true;
+        } else {
+          source = await rasterRebuild(file, { format: "png", onProgress: pageProgress(setStatus, "Rasterising") });
+        }
       }
-      const { bytes, report: prepReport } = await archivalPrepPdf(source, { title: title.trim(), author: author.trim() });
-      if (raster) prepReport.removed.unshift("rasterised all pages (text no longer selectable)");
+      const { bytes, report: prepReport } = await archivalPrepPdf(source, { title: docTitle, author: author.trim(), lang: docLang });
+      if (raster) prepReport.removed.unshift(ocrApplied ? "rasterised all pages, then added a searchable OCR text layer" : "rasterised all pages (text no longer selectable)");
+      if (ocrApplied) prepReport.applied.push("searchable OCR text layer over the raster (invisible, selectable)");
       setReport(prepReport);
       downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-archival`, "pdf"), "application/pdf");
-      return `Prepped for archiving (${prepReport.conformance}). Applied ${prepReport.applied.length} change(s); removed ${prepReport.removed.length} item(s). This is best-effort hygiene, not certified PDF/A.`;
+      return `Prepped for archiving (${prepReport.conformance}). Applied ${prepReport.applied.length} change(s); removed ${prepReport.removed.length} item(s). Aims for PDF/A-2b — run veraPDF to certify.`;
     })} />
 
     {report && (
@@ -6561,6 +6592,78 @@ function WordCounterTool() {
       ))}
     </div>
   </ToolForm>;
+}
+
+// Developer API playground. Documents the local, client-side MyFileKit API and
+// proves it works end to end: pick 2+ PDFs, merge them THROUGH the API
+// (window.MyFileKit.pdf.merge), and download the result — no server, no upload.
+const API_EXAMPLE_CODE = `// 100% local — no server, no upload, no key.\n// The same object is available as window.MyFileKit.\nimport { MyFileKit } from "myfilekit";\n\nconst merged = await MyFileKit.pdf.merge([fileA, fileB]);\n// merged is a Uint8Array of PDF bytes, produced in this process.\n\nconst pages = await MyFileKit.pdf.split(file, "1-3,5");\nconst { bytes } = await MyFileKit.pdf.encrypt(file, { userPassword: "hunter2" });\nconst text = await MyFileKit.pdf.extractText(file);`;
+
+function apiSurface() {
+  // Enumerate the live API so the docs cannot drift from the real object.
+  const groups: { name: string; methods: string[] }[] = [];
+  for (const [key, value] of Object.entries(MyFileKit as Record<string, any>)) {
+    if (typeof value !== "object" || value === null) continue;
+    const methods: string[] = [];
+    for (const [name, member] of Object.entries(value)) {
+      if (typeof member === "function") methods.push(`${name}()`);
+      else if (member && typeof member === "object") {
+        for (const sub of Object.keys(member)) {
+          if (typeof (member as any)[sub] === "function") methods.push(`${name}.${sub}()`);
+        }
+      }
+    }
+    if (methods.length) groups.push({ name: `MyFileKit.${key}`, methods });
+  }
+  return groups;
+}
+
+function ApiPlaygroundTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  const groups = apiSurface();
+  const onWindow = typeof window !== "undefined" && Boolean((window as any).MyFileKit);
+
+  return (
+    <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+      <div className="surface-muted wabi-card-edge grid gap-1 p-4 text-sm font-semibold leading-6 text-neutral-600">
+        <p className="text-xs font-black uppercase text-neutral-500">The privacy differentiator</p>
+        <p className="text-[var(--foreground)]">MyFileKit ships a <strong>local, client-side</strong> programmatic API. Unlike iLovePDF or Stirling PDF — whose APIs are server-side and require you to upload your file and hold a key — this one runs 100% in your own browser or Node process. There is <strong>no server, no upload, and no key</strong>; your bytes never leave the process. Every method wraps the same service the matching tool uses.</p>
+        <p>It is exposed here as <code className="font-mono">window.MyFileKit</code> {onWindow ? "(loaded on this page)" : ""} and as an <code className="font-mono">import</code> from the module. Full reference: <a className="underline" href="https://github.com/indranilroy99/myfilekit/blob/main/docs/API.md" target="_blank" rel="noreferrer">docs/API.md</a>.</p>
+      </div>
+
+      <div className="surface-card wabi-card-edge grid gap-2 p-4">
+        <p className="font-black">API surface</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {groups.map((group) => (
+            <div key={group.name} className="grid gap-1">
+              <p className="font-mono text-xs font-black text-[var(--foreground)]">{group.name}</p>
+              <p className="font-mono text-xs leading-5 text-neutral-500">{group.methods.join(", ")}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="surface-card wabi-card-edge grid gap-2 p-4">
+        <p className="font-black">Example</p>
+        <pre className="overflow-auto rounded-lg border border-[var(--border)] bg-[var(--paper-soft)] p-3 font-mono text-xs leading-5 text-neutral-600"><code>{API_EXAMPLE_CODE}</code></pre>
+      </div>
+
+      <div className="surface-card wabi-card-edge grid gap-3 p-4">
+        <p className="font-black">Live example — merge PDFs through the API</p>
+        <p className="text-sm font-semibold leading-6 text-neutral-600">Pick two or more PDFs. This calls <code className="font-mono">window.MyFileKit.pdf.merge(files)</code> — the exact API a developer would call — and downloads the merged bytes, proving the API works end to end.</p>
+        <FileControl accept="application/pdf" multiple files={files} setFiles={setFiles} label="Choose PDFs to merge" />
+        <PrimaryButton label="Run MyFileKit.pdf.merge & download" onClick={() => runSafely(setStatus, async () => {
+          const valid = validateFiles(files, tool.file);
+          if (valid.length < 2) throw new Error("Choose at least two PDFs to merge.");
+          const api = (typeof window !== "undefined" && (window as any).MyFileKit) || MyFileKit;
+          const merged = await api.pdf.merge(valid);
+          downloadBytes(merged, "myfilekit-api-merged.pdf", "application/pdf");
+          return `Merged ${valid.length} PDFs through MyFileKit.pdf.merge — entirely in this browser.`;
+        })} />
+      </div>
+    </ToolForm>
+  );
 }
 
 function Base64Tool() {

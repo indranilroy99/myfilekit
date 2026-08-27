@@ -480,8 +480,12 @@ export async function assertPdfDecryptable(bytes) {
 export async function archivalPrepPdf(sourceBytes, options = {}) {
   const { PDFDocument, PDFName, PDFArray, PDFNumber, PDFString, PDFHexString, PDFBool } = getPdfLib();
   const pdfFalse = PDFBool.False;
-  const part = String(options.part || "1");
+  // Default to PDF/A-2b: the self-contained raster path (image-only pages, no
+  // unembedded fonts) targets 2b, which allows the JPEG/Flate image compression
+  // rasterising produces (PDF/A-1 does not). Callers can still pass part "1".
+  const part = String(options.part || "2");
   const conformance = String(options.conformance || "B");
+  const lang = String(options.lang || "en").trim() || "en";
 
   let pdf;
   try {
@@ -535,17 +539,23 @@ export async function archivalPrepPdf(sourceBytes, options = {}) {
 
   // --- Info metadata --------------------------------------------------------
   const now = options.date instanceof Date ? options.date : new Date();
-  const title = String(options.title || "");
+  // PDF/A recommends a document title; always set one (defaulting when none is
+  // given) so the title is present in both Info and the XMP dc:title below.
+  const title = String(options.title || "").trim() || "Archived document";
   const author = String(options.author || "");
   const subject = String(options.subject || "");
   const producer = "MyFileKit Archival Prep";
-  if (title) pdf.setTitle(title);
+  pdf.setTitle(title);
   if (author) pdf.setAuthor(author);
   if (subject) pdf.setSubject(subject);
   pdf.setProducer(producer);
   pdf.setCreator(producer);
   try { pdf.setModificationDate(now); pdf.setCreationDate(now); } catch { /* date setters are best-effort */ }
   applied.push("document Info metadata (Title/Author/Producer/dates)");
+
+  // --- document language (/Lang) — required by PDF/UA, recommended by PDF/A --
+  catalog.set(PDFName.of("Lang"), PDFString.of(lang));
+  applied.push(`document language /Lang (${lang})`);
 
   // --- /MarkInfo (honest: not tagged, so Marked = false for level B) --------
   const markInfo = ctx.obj({});
