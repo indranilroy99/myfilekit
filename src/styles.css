@@ -409,6 +409,16 @@ button {
   opacity: 1;
 }
 
+/* Card content must sit above the glow layer (which is a z-index:0 ::before).
+   Tool cards do this via .tool-card-link{z-index:1}; category/why cards have no
+   inner wrapper, so lift their direct children instead. */
+.spotlight-card.category-card > *,
+.spotlight-card.why-card > *,
+.spotlight-card.command-stat > * {
+  position: relative;
+  z-index: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .spotlight-card::before {
     transition: none;

@@ -556,13 +556,13 @@ function ProductCommandStrip() {
       <SectionHeader title="Privacy And Trust" subtitle="Simple guarantees for everyday file work." />
       <div className="command-strip" aria-label="Product highlights">
       {stats.map(({ icon: Icon, label, note }) => (
-        <div className="command-stat" key={label}>
+        <SpotlightCard className="command-stat" key={label}>
           <span className="command-stat-icon"><Icon size={17} /></span>
           <span>
             <span className="block text-sm font-black">{label}</span>
             <span className="block text-xs font-bold text-neutral-500">{note}</span>
           </span>
-        </div>
+        </SpotlightCard>
       ))}
       </div>
     </section>
@@ -581,14 +581,14 @@ function CategoryOverview() {
         const Icon = categoryIcons[category] || Sparkles;
         const count = tools.filter((tool: Tool) => tool.category === category).length;
         return (
-          <a key={category} className="category-card" href={categoryRoute(category)}>
+          <SpotlightCard key={category} href={categoryRoute(category)} className="category-card">
             <span className="category-icon"><Icon size={19} /></span>
             <span className="grid gap-1">
               <span className="font-black">{category}</span>
               <span className="text-sm font-semibold text-neutral-500">{categoryDetails[category]?.description}</span>
             </span>
             <span className="category-count">{count}</span>
-          </a>
+          </SpotlightCard>
         );
       })}
       </div>
@@ -608,10 +608,10 @@ function WhyMyFileKit() {
       <SectionHeader title="Why MyFileKit" subtitle="A quiet utility workspace for files you handle every day." />
       <div className="why-grid">
         {points.map(([title, description]) => (
-          <article className="why-card" key={title}>
+          <SpotlightCard className="why-card" key={title}>
             <p className="font-black">{title}</p>
             <p className="mt-2 text-sm font-semibold leading-6 text-neutral-600">{description}</p>
-          </article>
+          </SpotlightCard>
         ))}
       </div>
     </section>
