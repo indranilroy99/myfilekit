@@ -37,7 +37,7 @@ import { Icons } from "@/components/ui/icons";
 import { NumberedPagination } from "@/components/ui/pagination";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { SpotlightCard } from "@/components/ui/spotlight-card";
-import { categories, tools } from "./registry/tools.registry.js";
+import { categories, categoryGroups, tools } from "./registry/tools.registry.js";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { filterTools, searchableText } from "./lib/search.js";
 import { formatBytes, parsePageRanges, simpleMarkdownToHtml } from "./utils/format.js";
@@ -126,10 +126,12 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
   "Sharing & Collaboration": { description: "Send files browser-to-browser and sketch together over a direct connection — still no server.", accent: "Sharing" },
 };
 
-const quickSearches = ["Redact PII", "Check for malware", "Encrypt PDF", "Merge PDF", "Compress Image", "Invoice", "File Hash"];
+const quickSearches = ["Edit PDF text", "Annotate PDF", "Sign PDF", "Compare PDFs", "Redact PII", "Check for malware", "Encrypt PDF", "Merge PDF", "Compress Image", "Invoice", "File Hash"];
 const recentToolsStorageKey = "myfilekit:recentTools";
 const themeStorageKey = "myfilekit:theme";
-const popularToolIds = ["auto-redact-pii-tool", "pdf-analyzer-tool", "merge-pdf-tool", "compress-image-tool", "invoice-generator-tool", "file-hash-tool"];
+const popularToolIds = ["auto-redact-pii-tool", "edit-pdf-text-tool", "pdf-analyzer-tool", "sign-pdf-tool", "merge-pdf-tool", "compress-image-tool", "invoice-generator-tool", "file-hash-tool"];
+// The newest flagship tools, surfaced in a "New & Notable" shelf on the dashboard.
+const newAndNotableIds = ["edit-pdf-text-tool", "annotate-pdf-tool", "sign-pdf-tool", "compare-pdf-tool", "smart-split-pdf-tool", "create-form-tool"];
 const browseToolsPageSize = 10;
 
 // Set by Cmd/Ctrl+K when it navigates to the dashboard from another route, so the
@@ -392,6 +394,7 @@ function Dashboard() {
   const matches = useMemo(() => filterTools(query), [query]);
   const isSearching = Boolean(query.trim());
   const popularTools = popularToolIds.map(findToolById).filter(Boolean) as Tool[];
+  const newTools = newAndNotableIds.map(findToolById).filter(Boolean) as Tool[];
   const distinctRecentTools = recentTools.filter((tool) => !popularToolIds.includes(tool.id)).slice(0, 4);
   const updateQuery = (value: string) => {
     setQuery(value);
@@ -511,6 +514,15 @@ function Dashboard() {
           <SectionHeader title="Popular Tools" subtitle="Fast paths for the most common file tasks." />
           <div className="dashboard-tool-row">
             {popularTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
+          </div>
+        </section>
+      )}
+
+      {!isSearching && newTools.length > 0 && (
+        <section className="dashboard-shelf">
+          <SectionHeader title="New & Notable" subtitle="The latest tools added to the kit." />
+          <div className="dashboard-tool-row">
+            {newTools.map((tool) => <ToolCard key={tool.id} tool={tool} compact />)}
           </div>
         </section>
       )}
@@ -687,6 +699,7 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
           <p className={`tool-description mt-1 text-sm font-semibold leading-6 text-neutral-600 ${compact ? "tool-description-compact" : ""}`}>{tool.description}</p>
         </div>
         <div className="mt-auto flex flex-wrap gap-2">
+          {tool.isNew && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">New</span>}
           <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{primaryBadge}</span>
           {!compact && visibleBadges.map((badge: string) => <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>)}
           {!compact && multiFile && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{multiFile}</span>}
@@ -763,6 +776,7 @@ function CategoryPage({ category }: { category: string }) {
     : categoryTools;
   const Icon = categoryIcons[category] || Sparkles;
   const details = categoryDetails[category];
+  const groupOrder = (categoryGroups as Record<string, string[]>)[category];
   return (
     <div className="grid gap-6">
       <PageHeader
@@ -783,9 +797,27 @@ function CategoryPage({ category }: { category: string }) {
           />
           {query && <button type="button" aria-label="Clear category search" onClick={() => setQuery("")}>×</button>}
         </div>
-        <div className="tool-grid">
-          {visibleTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} />)}
-        </div>
+        {groupOrder && visibleTools.some((tool: Tool) => tool.group) ? (
+          <div className="grid gap-8">
+            {groupOrder.map((group) => {
+              const groupTools = visibleTools.filter((tool: Tool) => tool.group === group);
+              if (!groupTools.length) return null;
+              return (
+                <div key={group} className="grid gap-4">
+                  {/* Reuses the dashboard/browse sub-heading style (see ToolSection). */}
+                  <h3 className="font-display text-xl font-black">{group}</h3>
+                  <div className="tool-grid">
+                    {groupTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} />)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="tool-grid">
+            {visibleTools.map((tool: Tool) => <ToolCard key={tool.id} tool={tool} />)}
+          </div>
+        )}
         {!visibleTools.length && <EmptyState query={query} onPick={setQuery} />}
       </section>
     </div>
@@ -1595,7 +1627,7 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
               const cls = isSelected
                 ? "border-[var(--moss)] bg-[color-mix(in_srgb,var(--moss)_22%,transparent)]"
                 : edited
-                  ? "border-amber-400 bg-[color-mix(in_srgb,#f59e0b_20%,transparent)]"
+                  ? "border-amber-400 bg-[color-mix(in_srgb,var(--warning)_20%,transparent)]"
                   : "border-transparent hover:border-[var(--moss)] hover:bg-[color-mix(in_srgb,var(--moss)_12%,transparent)]";
               return (
                 <button
@@ -3099,6 +3131,7 @@ function RedactPdfTool({ tool }: { tool: Tool }) {
       downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-redacted`, "pdf"), "application/pdf");
       return `Applied ${rects.length} redaction${rects.length === 1 ? "" : "s"} and flattened ${file.name} to images.`;
     })} />
+    {status.tone === "success" && <ResultConsequenceNote>The covered text is permanently removed and the page is flattened to an image. Verify nothing sensitive remains before sharing.</ResultConsequenceNote>}
   </ToolForm>;
 }
 
@@ -4226,7 +4259,7 @@ function ComparePdfTool({ tool }: { tool: Tool }) {
                           .filter((row) => row.type !== "same")
                           .slice(0, 60)
                           .map((row, index) => (
-                            <div key={index} className={row.type === "added" ? "text-[#31631f] [.dark_&]:text-[#bfe3b0]" : "text-red-700 [.dark_&]:text-[#f8b4b4]"}>
+                            <div key={index} className={row.type === "added" ? "text-[var(--success-fg)]" : "text-red-700 [.dark_&]:text-[#f8b4b4]"}>
                               {row.type === "added" ? `+ ${row.right}` : `- ${row.left}`}
                             </div>
                           ))}
@@ -4550,7 +4583,7 @@ function SignPdfTool({ tool }: { tool: Tool }) {
 
 const SIGNATURE_VERDICTS: Record<string, { label: string; tone: string }> = {
   valid: { label: "Valid — document unchanged since signing", tone: "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f] [.dark_&]:border-[#3f5136] [.dark_&]:bg-[#16241a] [.dark_&]:text-[#bfe3b0]" },
-  "valid-partial": { label: "Valid for the signed revision — bytes were added afterwards", tone: "border-amber-200 bg-amber-50 text-amber-900 [.dark_&]:border-[#7a5a1e] [.dark_&]:bg-[#241c0f] [.dark_&]:text-[#f3d79a]" },
+  "valid-partial": { label: "Valid for the signed revision — bytes were added afterwards", tone: "border-[var(--warning)] bg-[var(--warning-bg)] text-[var(--warning-fg)]" },
   modified: { label: "Document MODIFIED after signing", tone: "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]" },
   invalid: { label: "Signature INVALID", tone: "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]" },
   unsupported: { label: "Not verified (unsupported key type)", tone: "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]" },

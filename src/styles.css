@@ -89,13 +89,19 @@
   --success: #b9c6a7;
   --success-bg: #edf4e3;
   --success-fg: #31412f;
-  /* Named radius scale matching the current ad-hoc values (cards 6px, search 12px).
-     --radius is intentionally left untouched above: it already renders live at
-     1.15rem in light for skip-link, pdf panels and the rounded-* normalization, so
-     redefining it would change the look. */
+  /* Named radius scale. Now wired: --radius-sm replaces the card/surface/icon 6px
+     literals and --radius-lg the search 12px literal (both value-identical). The
+     ad-hoc 8px input/button radii are intentionally left as literals — no token
+     equals 8px (--radius is 1.15rem light / 6px dark), so pointing them at a token
+     would change the rendered value. --radius itself is untouched: it already
+     renders live at 1.15rem in light for skip-link, pdf panels and the rounded-*
+     normalization. */
   --radius-sm: 6px;
   --radius-lg: 12px;
-  /* Common transition durations used across the file. */
+  /* Common transition durations. --dur (180ms) is wired into a couple of the .18s
+     transitions (value-identical). --dur-fast (150ms) is kept as the canonical
+     token but left unwired: no transition literal in this file uses 150ms, so
+     wiring it would change the perceived timing. */
   --dur-fast: 150ms;
   --dur: 180ms;
   font-family: var(--font-sans);
@@ -224,15 +230,9 @@ button {
   color: var(--moss);
 }
 
-.ink-button,
-.icon-tile,
-.available-badge {
+.icon-tile {
   background: linear-gradient(135deg, #101828, #1d2939);
   color: var(--background);
-}
-
-.ink-button {
-  box-shadow: 0 18px 44px rgba(16, 24, 40, .18);
 }
 
 .tool-card:hover {
@@ -401,7 +401,7 @@ button {
     transparent 60%
   );
   opacity: 0;
-  transition: opacity .18s ease;
+  transition: opacity var(--dur) ease;
 }
 
 .spotlight-card:hover::before,
@@ -447,11 +447,6 @@ button {
   border: 1px solid rgba(15, 23, 42, .07);
   background: rgba(255, 255, 255, .56);
   color: var(--stone);
-}
-
-.local-badge {
-  background: rgba(255, 255, 255, .68);
-  color: var(--foreground);
 }
 
 .app-badge {
@@ -692,7 +687,7 @@ button {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, .16),
     0 14px 34px rgba(16, 24, 40, .16);
-  transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+  transition: transform var(--dur) ease, box-shadow var(--dur) ease, background var(--dur) ease;
 }
 
 .search-submit-button:hover,
@@ -1159,7 +1154,6 @@ html.dark .search-result-card:focus-visible {
 }
 
 html.dark .tag-badge,
-html.dark .local-badge,
 html.dark .app-badge,
 html.dark .quick-chip,
 html.dark .icon-tile,
@@ -1194,9 +1188,7 @@ html.dark .pdf-preview-frame {
   background: rgba(15, 23, 42, .82);
 }
 
-html.dark .ink-button,
 html.dark .icon-tile,
-html.dark .available-badge,
 html.dark .command-stat-icon,
 html.dark .search-result-icon,
 html.dark .primary-button,
@@ -1358,7 +1350,12 @@ html.dark .site-footer {
   }
 }
 
-/* Production-grade dark utility redesign. Copy and tool data remain unchanged. */
+/* Production-grade dark utility redesign. Copy and tool data remain unchanged.
+   FUTURE WORK: the flat-surface rules below hardcode #111113 / #1f1f23, which now
+   have canonical tokens (var(--card) / var(--border)). Repointing every surface to
+   the tokens is bounded-but-real and high-regression (specificity + !important
+   cascade across the light/dark overrides), so it is deliberately NOT bundled with
+   the single-accent fix. */
 .dark {
   --card: #111113;
   --ring: #3b82f6;
@@ -1383,7 +1380,7 @@ html.dark .site-footer {
   --paper-soft: #111113;
   --stone: #a1a1aa;
   --line: #1f1f23;
-  --moss: #a1a1aa;
+  --moss: var(--primary);
   --shadow-soft: none;
   --shadow-lift: none;
   /* Dark values for the canonical semantic status tokens — mirror the [.dark_&]
@@ -1705,7 +1702,7 @@ html.dark .spotlight-search:focus-within {
   min-height: 56px !important;
   max-width: 680px !important;
   border: 1px solid #2a2a30 !important;
-  border-radius: 12px !important;
+  border-radius: var(--radius-lg) !important;
   background: #111113 !important;
   box-shadow: none !important;
   transform: none !important;
@@ -1741,7 +1738,7 @@ html.dark .command-stat-icon,
 html.dark .search-result-icon {
   width: 32px !important;
   height: 32px !important;
-  border-radius: 6px !important;
+  border-radius: var(--radius-sm) !important;
   background: transparent !important;
   color: #a1a1aa !important;
   box-shadow: none !important;
@@ -1756,7 +1753,7 @@ html.dark .search-result-icon {
 .quick-chip {
   min-height: 32px !important;
   border: 1px solid #2a2a30 !important;
-  border-radius: 6px !important;
+  border-radius: var(--radius-sm) !important;
   background: transparent !important;
   color: #a1a1aa !important;
   box-shadow: none !important;
@@ -1818,7 +1815,7 @@ html.dark .search-result-icon {
 html.dark .tool-card {
   min-height: 176px !important;
   border: .5px solid #1f1f23 !important;
-  border-radius: 6px !important;
+  border-radius: var(--radius-sm) !important;
   background: #111113 !important;
   background-color: #111113 !important;
   box-shadow: none !important;
@@ -1837,7 +1834,7 @@ html.dark .tool-card:hover {
 .tool-card-link {
   min-height: 176px !important;
   gap: 16px !important;
-  border-radius: 6px !important;
+  border-radius: var(--radius-sm) !important;
   padding: 20px !important;
 }
 
@@ -1926,7 +1923,7 @@ html.dark .tool-form-status,
 html.dark .search-result-card,
 html.dark .hero-empty-result {
   border-color: #1f1f23 !important;
-  border-radius: 6px !important;
+  border-radius: var(--radius-sm) !important;
   background: #111113 !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
@@ -1956,7 +1953,7 @@ html.dark .hero-empty-result {
 }
 
 .category-icon {
-  border-radius: 6px !important;
+  border-radius: var(--radius-sm) !important;
   background: transparent !important;
   color: #a1a1aa !important;
   box-shadow: none !important;

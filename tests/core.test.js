@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createHash } from "node:crypto";
-import { tools, categories } from "../src/registry/tools.registry.js";
+import { tools, categories, categoryGroups } from "../src/registry/tools.registry.js";
 import { filterTools } from "../src/lib/search.js";
 import { csvToJson, jsonToCsv } from "../src/services/csv.service.js";
 import { addPdfPageNumbers, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "../src/services/pdf.service.js";
@@ -4735,4 +4735,133 @@ test("OCR stays offline: the service names no CDN / tessdata / http(s) URL", () 
   // targets actual URL forms and known tessdata hosts, not the word "CDN".
   assert.doesNotMatch(serviceSource, /https?:\/\//);
   assert.doesNotMatch(serviceSource, /tessdata|cdnjs|unpkg|jsdelivr/i);
+});
+
+// --- IA / discovery / naming (post 38->96 tool growth) ----------------------
+
+test("every PDF tool has a valid sub-group from the allowed set (no PDF tool left ungrouped)", () => {
+  const allowed = categoryGroups["PDF Tools"];
+  assert.deepEqual(allowed, ["Organize", "Convert", "Edit & Annotate", "Forms", "Secure", "Archival & Print"]);
+  const pdfTools = tools.filter((tool) => tool.category === "PDF Tools");
+  assert.ok(pdfTools.length >= 46, `expected the full PDF page, saw ${pdfTools.length}`);
+  for (const tool of pdfTools) {
+    assert.ok(allowed.includes(tool.group), `${tool.id} has invalid/missing group ${JSON.stringify(tool.group)}`);
+  }
+  // The groups actually used must be a subset of the declared order (used for rendering).
+  const usedGroups = new Set(pdfTools.map((tool) => tool.group));
+  for (const group of usedGroups) assert.ok(allowed.includes(group));
+});
+
+test("Text & Data tools are fully grouped too", () => {
+  const allowed = categoryGroups["Text & Data Tools"];
+  const textTools = tools.filter((tool) => tool.category === "Text & Data Tools");
+  for (const tool of textTools) {
+    assert.ok(allowed.includes(tool.group), `${tool.id} has invalid/missing group ${JSON.stringify(tool.group)}`);
+  }
+});
+
+test("isNew is boolean everywhere and flags the newest tools", () => {
+  for (const tool of tools) assert.equal(typeof tool.isNew, "boolean");
+  const expectedNew = [
+    "edit-pdf-text-tool", "annotate-pdf-tool", "compare-pdf-tool", "sign-pdf-tool", "verify-signature-tool",
+    "batch-process-tool", "smart-split-pdf-tool", "impose-pdf-tool", "bookmarks-editor-tool",
+    "create-form-tool", "deskew-pdf-tool", "pdfa-prep-tool",
+  ];
+  for (const id of expectedNew) {
+    assert.equal(tools.find((tool) => tool.id === id).isNew, true, `${id} should be isNew`);
+  }
+  // The multi-language OCR tool is pre-existing and must NOT be flagged new.
+  assert.equal(tools.find((tool) => tool.id === "ocr-pdf-tool").isNew, false);
+  // Exactly the newest ~13 tools are flagged (12 here) — a legacy tool creeping in would break this.
+  assert.equal(tools.filter((tool) => tool.isNew).length, expectedNew.length);
+});
+
+test("dashboard discovery references resolve to real, sensible tools", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  // New quick chips exist and a couple of new tools are in the popular/new shelves.
+  for (const chip of ["Edit PDF text", "Annotate PDF", "Sign PDF", "Compare PDFs"]) {
+    assert.ok(appSource.includes(`"${chip}"`), `quick chip ${chip} missing`);
+  }
+  for (const id of ["edit-pdf-text-tool", "sign-pdf-tool"]) {
+    assert.ok(appSource.includes(id), `popular/new shelf should reference ${id}`);
+  }
+  assert.match(appSource, /newAndNotableIds/);
+  assert.match(appSource, /New & Notable/);
+  // Every id in the new & notable shelf resolves to a tool that is actually isNew.
+  const shelf = appSource.match(/newAndNotableIds = \[(.*?)\]/s)[1].match(/"([^"]+)"/g).map((s) => s.replace(/"/g, ""));
+  assert.ok(shelf.length >= 4 && shelf.length <= 6);
+  for (const id of shelf) {
+    const tool = tools.find((t) => t.id === id);
+    assert.ok(tool && tool.isNew, `${id} in New & Notable shelf must exist and be isNew`);
+  }
+});
+
+test("flagship search terms resolve to the right tool", () => {
+  const top = (query) => filterTools(query)[0];
+  assert.equal(top("edit pdf text").id, "edit-pdf-text-tool");
+  assert.equal(top("annotate pdf").id, "annotate-pdf-tool");
+  assert.equal(top("compare pdfs").id, "compare-pdf-tool");
+  // "sign pdf" is the everyday, visual signing action (not the cryptographic tool).
+  assert.equal(top("sign pdf").id, "add-signature-to-pdf-tool");
+  // The cryptographic tool is discoverable by its own name.
+  assert.equal(top("digital signature").id, "sign-pdf-tool");
+});
+
+test("confusable tool pairs carry disambiguating cross-references", () => {
+  const byId = (id) => tools.find((tool) => tool.id === id).description;
+  // Add Text vs Edit PDF Text vs Annotate
+  assert.match(byId("add-text-to-pdf-tool"), /Edit PDF Text/);
+  assert.match(byId("add-text-to-pdf-tool"), /Annotate PDF/);
+  assert.match(byId("edit-pdf-text-tool"), /Add Text to PDF/);
+  assert.match(byId("annotate-pdf-tool"), /Edit PDF Text/);
+  // Add Signature (non-cryptographic) vs Digital Signature vs Verify
+  assert.match(byId("add-signature-to-pdf-tool"), /not a cryptographic signature/i);
+  assert.match(byId("add-signature-to-pdf-tool"), /Digital Signature/);
+  assert.match(byId("sign-pdf-tool"), /Add Signature to PDF/);
+  assert.match(byId("verify-signature-tool"), /Digital Signature/);
+  // Split vs Smart Split vs PDF to ZIP
+  assert.match(byId("split-pdf-tool"), /Smart Split PDF/);
+  assert.match(byId("smart-split-pdf-tool"), /Split \/ Extract PDF Pages/);
+  assert.match(byId("pdf-to-zip-tool"), /Smart Split PDF|Split \/ Extract PDF Pages/);
+  // Page numbers vs Headers & Footers vs Bates
+  assert.match(byId("pdf-page-numbers-tool"), /Headers & Footers/);
+  assert.match(byId("pdf-page-numbers-tool"), /Bates Numbering/);
+  assert.match(byId("headers-footers-tool"), /Add PDF Page Numbers/);
+  assert.match(byId("bates-numbering-tool"), /Add PDF Page Numbers|Headers & Footers/);
+  // Fill vs Create form
+  assert.match(byId("fill-pdf-form-tool"), /Create PDF Form/);
+  assert.match(byId("create-form-tool"), /Fill PDF Form/);
+});
+
+test("Redact PDF has a persistent post-result consequence note", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const redactBody = appSource.slice(appSource.indexOf("function RedactPdfTool"), appSource.indexOf("function AutoRedactPiiTool"));
+  assert.match(redactBody, /status\.tone === "success" && <ResultConsequenceNote>/);
+  assert.match(redactBody, /permanently removed and the page is flattened to an image/);
+});
+
+test("semantic tone literals are consolidated onto canonical tokens", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  // The near-duplicate drifts the critics flagged are gone...
+  assert.doesNotMatch(appSource, /#31631f/);        // added-line green drift
+  assert.doesNotMatch(appSource, /#f59e0b/);        // edited-run raw amber
+  assert.doesNotMatch(appSource, /#7a5a1e|#241c0f|#f3d79a/); // valid-partial dark drift
+  // ...replaced by the canonical tokens.
+  assert.match(appSource, /text-\[var\(--success-fg\)\]/);
+  assert.match(appSource, /color-mix\(in_srgb,var\(--warning\)_20%/);
+  assert.match(appSource, /border-\[var\(--warning\)\] bg-\[var\(--warning-bg\)\] text-\[var\(--warning-fg\)\]/);
+});
+
+test("Input/Label primitives mirror the app's .field-input look", () => {
+  const inputSource = fs.readFileSync(new URL("../src/components/ui/input.tsx", import.meta.url), "utf8");
+  const labelSource = fs.readFileSync(new URL("../src/components/ui/label.tsx", import.meta.url), "utf8");
+  // Aligned to .field-input: 44px, card bg, --input border, 8px radius, focus ring.
+  assert.match(inputSource, /h-11/);
+  assert.match(inputSource, /bg-card/);
+  assert.match(inputSource, /border-input/);
+  assert.match(inputSource, /rounded-lg/);
+  assert.match(inputSource, /focus-visible:ring-\[3px\]/);
+  assert.doesNotMatch(inputSource, /bg-background/); // the old divergent look is gone
+  assert.match(inputSource, /field-input/);          // comment noting the mirror
+  assert.match(labelSource, /field-input/);
 });
