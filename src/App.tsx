@@ -131,12 +131,12 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
   "Sharing & Collaboration": { description: "Send files browser-to-browser and sketch together over a direct connection — still no server.", accent: "Sharing" },
 };
 
-const quickSearches = ["Edit PDF text", "Annotate PDF", "Sign PDF", "Compare PDFs", "Redact PII", "Check for malware", "Encrypt PDF", "Merge PDF", "Compress Image", "Invoice", "File Hash"];
+const quickSearches = ["Edit PDF text", "Annotate PDF", "Sign PDF", "Compare PDFs", "Make PDF accessible", "Remove JavaScript", "Redact PII", "Check for malware", "Encrypt PDF", "Merge PDF", "Compress Image", "Invoice"];
 const recentToolsStorageKey = "myfilekit:recentTools";
 const themeStorageKey = "myfilekit:theme";
 const popularToolIds = ["auto-redact-pii-tool", "edit-pdf-text-tool", "pdf-analyzer-tool", "sign-pdf-tool", "merge-pdf-tool", "compress-image-tool", "invoice-generator-tool", "file-hash-tool"];
 // The newest flagship tools, surfaced in a "New & Notable" shelf on the dashboard.
-const newAndNotableIds = ["edit-pdf-text-tool", "annotate-pdf-tool", "sign-pdf-tool", "compare-pdf-tool", "smart-split-pdf-tool", "create-form-tool"];
+const newAndNotableIds = ["sanitize-pdf-tool", "accessibility-check-tool", "tag-pdf-tool", "translate-pdf-tool", "batch-workflow-tool", "extract-images-tool"];
 const browseToolsPageSize = 10;
 
 // Set by Cmd/Ctrl+K when it navigates to the dashboard from another route, so the
@@ -4525,7 +4525,7 @@ function ComparePdfTool({ tool }: { tool: Tool }) {
                           .filter((row) => row.type !== "same")
                           .slice(0, 60)
                           .map((row, index) => (
-                            <div key={index} className={row.type === "added" ? "text-[var(--success-fg)]" : "text-red-700 [.dark_&]:text-[#f8b4b4]"}>
+                            <div key={index} className={row.type === "added" ? "text-[var(--success-fg)]" : "text-[var(--danger-fg)]"}>
                               {row.type === "added" ? `+ ${row.right}` : `- ${row.left}`}
                             </div>
                           ))}
@@ -4998,7 +4998,7 @@ function EncryptPdfTool({ tool }: { tool: Tool }) {
     <PasswordField label="Owner password (optional)" value={ownerPassword} onChange={setOwnerPassword} helper="A second, different password that can change the permissions below. Leave it blank to reuse the password above." />
     <Select label="Encryption" value={algorithm} onChange={setAlgorithm} options={offeredAlgorithmIds} labels={offeredAlgorithmIds.map((id) => encryptionAlgorithms[id].label)} />
     {algorithm === "rc4-128" && (
-      <p className="text-xs font-black uppercase text-red-700 [.dark_&]:text-[#f8b4b4]">RC4 is broken and offers no real protection. Only pick it for a reader too old to handle AES.</p>
+      <p className="text-xs font-black uppercase text-[var(--danger-fg)]">RC4 is broken and offers no real protection. Only pick it for a reader too old to handle AES.</p>
     )}
     <fieldset className="grid gap-2">
       <legend className="text-xs font-black uppercase text-neutral-500">Allow anyone with the password to</legend>
@@ -8412,7 +8412,7 @@ function BatchProcessTool({ tool }: { tool: Tool }) {
         )}
         {result.failures.length > 0 && (
           <div className="grid gap-1">
-            <p className="text-xs font-black uppercase text-red-700 [.dark_&]:text-[#f8b4b4]">Failed / skipped ({result.failures.length})</p>
+            <p className="text-xs font-black uppercase text-[var(--danger-fg)]">Failed / skipped ({result.failures.length})</p>
             <ul className="grid gap-1">
               {result.failures.map((item) => <li key={`${item.name}-${item.reason}`} className="break-words text-neutral-600">{item.name} — {item.reason}</li>)}
             </ul>
@@ -8552,7 +8552,7 @@ function BatchWorkflowTool({ tool }: { tool: Tool }) {
         )}
         {result.failures.length > 0 && (
           <div className="grid gap-1">
-            <p className="text-xs font-black uppercase text-red-700 [.dark_&]:text-[#f8b4b4]">Failed / skipped ({result.failures.length})</p>
+            <p className="text-xs font-black uppercase text-[var(--danger-fg)]">Failed / skipped ({result.failures.length})</p>
             <ul className="grid gap-1">
               {result.failures.map((item) => <li key={`${item.name}-${item.reason}`} className="break-words text-neutral-600">{item.name} — {item.reason}</li>)}
             </ul>

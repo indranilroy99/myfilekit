@@ -23,12 +23,12 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-[![Version](https://img.shields.io/badge/version-3.18.2-2563eb)](./package.json)
-[![Tests](https://img.shields.io/badge/tests-213%20passing-16a34a)](./tests/core.test.js)
-[![Tools](https://img.shields.io/badge/tools-96%20local-2563eb)](./src/registry/tools.registry.js)
+[![Version](https://img.shields.io/badge/version-3.18.3-2563eb)](./package.json)
+[![Tests](https://img.shields.io/badge/tests-275%20passing-16a34a)](./tests/core.test.js)
+[![Tools](https://img.shields.io/badge/tools-104%20local-2563eb)](./src/registry/tools.registry.js)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20known%20vulnerabilities-16a34a)](./SECURITY.md)
 
-MyFileKit is a local-first browser toolkit for common file workflows. It combines 96 working tools in one searchable interface and processes selected files in the browser wherever the underlying format allows it.
+MyFileKit is a local-first browser toolkit for common file workflows. It combines 104 working tools in one searchable interface and processes selected files in the browser wherever the underlying format allows it.
 
 ## Product Principles
 
@@ -40,17 +40,17 @@ MyFileKit is a local-first browser toolkit for common file workflows. It combine
 
 ## Available Tools
 
-96 tools across 8 categories. This table is checked against `src/registry/tools.registry.js`, which is the single source of truth for the dashboard.
+104 tools across 8 categories. This table is checked against `src/registry/tools.registry.js`, which is the single source of truth for the dashboard.
 
 | Category | Tools |
 | --- | --- |
-| PDF (46) | Merge PDF, Split / Extract PDF Pages, Delete PDF Pages, Rotate PDF Pages, Add Text to PDF, Edit PDF Text, Add Signature to PDF, Annotate PDF, Add PDF Page Numbers, Watermark PDF, PDF to Image, Compress PDF, PDF to ZIP, Flatten PDF, Invert PDF Colours, Images to PDF, Organize Pages, Crop & Resize PDF, Headers & Footers, Fill PDF Form, Redact PDF, Create PDF, HTML to PDF, Word to PDF, Excel to PDF, PowerPoint to PDF, eBook to PDF, PDF to Word, PDF to Excel, PDF to HTML, PDF to EPUB, OCR / Searchable PDF, PDF to Audio, Handwriting to PDF, Scan to PDF, Repair PDF, Workflow Builder, Batch Processing, Smart Split PDF, Bates Numbering, N-up / Booklet, Bookmarks / Outline, Create PDF Form, Compare PDFs, Deskew / Straighten, PDF/A Archival Prep |
+| PDF (50) | Merge PDF, Split / Extract PDF Pages, Delete PDF Pages, Rotate PDF Pages, Add Text to PDF, Edit PDF Text, Add Signature to PDF, Annotate PDF, Add PDF Page Numbers, Watermark PDF, PDF to Image, Compress PDF, PDF to ZIP, Flatten PDF, Invert PDF Colours, Images to PDF, Organize Pages, Crop & Resize PDF, Headers & Footers, Fill PDF Form, Redact PDF, Create PDF, HTML to PDF, Word to PDF, Excel to PDF, PowerPoint to PDF, eBook to PDF, PDF to Word, PDF to Excel, PDF to HTML, PDF to EPUB, OCR / Searchable PDF, PDF to Audio, Handwriting to PDF, Scan to PDF, Repair PDF, Extract Images & Attachments, Workflow Builder, Batch Processing, Batch Workflow, Smart Split PDF, Bates Numbering, N-up / Booklet, Bookmarks / Outline, Create PDF Form, Compare PDFs, Deskew / Straighten, PDF/A Archival Prep, Accessibility Check, Make Accessible (Auto-Tag) |
 | Image (10) | Compress Image, Batch Compress Images, Resize Image, Batch Resize Images, Convert Image, Crop Image, Rotate / Flip Image, Add Text to Image, Image Metadata Inspector, Equation to Image |
 | Business (4) | Invoice Generator, GST Invoice, POS Billing, GST Filing Prep |
 | Signature (3) | Add Signature to Image, Draw Signature, Type Signature |
-| Text & Data (15) | Extract Text from PDF, PDF Summarizer, Ask Your PDF, Text to PDF, Markdown Preview, Markdown to PDF, CSV to PDF, Audio to PDF, JSON Formatter, CSV to JSON, JSON to CSV, JSON to YAML, URL Encode / Decode, Text Diff Checker, Word Counter |
-| Security & Privacy (11) | PDF Metadata Cleaner, PDF Fingerprint, Encrypt PDF, Remove Password, Auto-Redact PII, Privacy Scanner, PDF Analyser, Unlock PDF, Digital Signature, Verify Signature, EXIF & Metadata Cleaner |
-| Developer Utilities (5) | Base64 Encode / Decode, File Hash Generator, Hash Compare, Password Generator, QR Code Generator |
+| Text & Data (16) | Extract Text from PDF, PDF Summarizer, Ask Your PDF, Translate PDF, Text to PDF, Markdown Preview, Markdown to PDF, CSV to PDF, Audio to PDF, JSON Formatter, CSV to JSON, JSON to CSV, JSON to YAML, URL Encode / Decode, Text Diff Checker, Word Counter |
+| Security & Privacy (13) | PDF Metadata Cleaner, PDF Fingerprint, Encrypt PDF, Remove Password, Auto-Redact PII, Privacy Scanner, PDF Analyser, Sanitize PDF, Unlock PDF, Digital Signature, Verify Signature, Request e-Signature, EXIF & Metadata Cleaner |
+| Developer Utilities (6) | Developer API, Base64 Encode / Decode, File Hash Generator, Hash Compare, Password Generator, QR Code Generator |
 | Sharing & Collaboration (2) | P2P File Share, Whiteboard |
 
 Image Metadata Inspector reads EXIF, XMP, ICC, GPS, and container metadata from supported JPEG, PNG, and WebP files locally, without changing the source file. EXIF & Metadata Cleaner uses the same local inspection capability and can re-encode a cleaned image copy; re-encoding may change file size or encoding details. The PDF metadata cleaner removes common document information fields; it does not sanitize visible content, attachments, or every possible custom PDF object. PDF Fingerprint embeds a traceable identifier in PDF metadata; it is a provenance marker, not a steganographic or tamper-proof mark.
@@ -165,11 +165,11 @@ The OCR tool is the one place the size shows: the first run in a browser session
 
 MyFileKit exposes a stable, namespaced JavaScript API over the same services the UI uses — `MyFileKit.pdf.merge(files)`, `.split(file, "1-3,5")`, `.encrypt(file, opts)`, `.sanitize(file)`, `.archivalPrep(file)`, `.accessibility.check(file)`, `.ocr.pdf(file)`, `.batch.run(op, files)`, `.workflow.run(steps, file)`, and more. It is available as an `import` from `src/api/myfilekit.js` and as `window.MyFileKit` in the browser.
 
-Unlike the server-side APIs of iLovePDF or Stirling PDF — which require uploading your file and holding a key — this one runs 100% in your own browser or Node process: **no server, no upload, no key**, and it opens no network connection. Full reference: [docs/API.md](./docs/API.md).
+Unlike the server-side APIs of iLovePDF or Stirling PDF — which require uploading your file and holding a key — this one runs 100% locally by default in your own browser or Node process: **no server, no upload, no key**. The only exceptions are opt-in and off by default: the bring-your-own-LLM adapter (Summarize / Ask / Translate), the optional RFC 3161 timestamp on Digital Signature, and the opt-in Request e-Signature backend — each contacts only an endpoint you configure, and the shipped `connect-src 'self'` CSP blocks all of them until an operator allows that origin. Full reference: [docs/API.md](./docs/API.md).
 
 ## Privacy And Security
 
-MyFileKit has no application backend, account system, analytics integration, or remote file storage. File contents stay in the active browser session unless a user explicitly downloads an output.
+MyFileKit is 100% local by default: no account system, no analytics integration, and — on a default install — no application backend or remote file storage. File contents stay in the active browser session unless a user explicitly downloads an output. Three features are opt-in exceptions, off by default and blocked by the shipped `connect-src 'self'` CSP until an operator allows a specific origin: the bring-your-own-LLM adapter for PDF Summarizer / Ask Your PDF / Translate PDF, the optional RFC 3161 trusted timestamp on Digital Signature (a SHA-256 hash of the signature, never the document, is sent to the TSA you enter), and the Request e-Signature tool, which uploads the PDF only to a signing backend the operator deploys. See [SECURITY.md](./SECURITY.md) for the exact boundary of each.
 
 This local-first model reduces network exposure, but it does not make untrusted files inherently safe. Keep the browser updated, avoid opening suspicious outputs, and review [SECURITY.md](./SECURITY.md) before deploying publicly.
 
@@ -189,7 +189,7 @@ The tool list has grown, so this section lists what MyFileKit still does not do,
 - **PDF text drawing is Latin-1 (WinAnsi) only.** The standard pdf-lib fonts cannot encode CJK characters or emoji; the affected tools say so instead of failing cryptically.
 - **In-place text editing is overlay, not reflow.** Edit PDF Text locates each existing text run with pdf.js, covers the original glyphs with a background-sampled rectangle, and redraws the replacement at the same baseline and size. Surrounding text never moves, so a longer replacement can overflow and a shorter one leaves a gap; the redraw uses an approximate base-14 substitute font rather than the page's embedded font; and the original text is visually covered but still present in the file, so the tool routes to Redact PDF for true removal. Latin-1 only, and scanned pages with no text layer route to OCR.
 - **Annotations are flattened markup, not editable /Annot objects.** Annotate PDF burns highlights, ink, shapes, text, and sticky notes into the page content on export. They render identically in every reader and cannot be tampered with as data, but they are not reader-editable annotation objects; removal routes to Redact PDF, and note text is Latin-1.
-- **Digital signatures are RSA-only and verify offline.** Digital Signature produces a real detached PKCS#7/CMS `SignedData` via an incremental update, and Verify Signature recomputes the ByteRange digest to report whether a document was modified after signing. Verification is cryptographic-integrity and signer-field extraction only: it does **not** validate a trust chain to a root CA (no CA store), does **not** check revocation (no OCSP/CRL, which need a network), and is **not** RFC 3161 timestamped. Only RSA keys are supported; EC keys are refused rather than mishandled. Self-signed certificates verify as valid with an unknown identity.
+- **Digital signatures are RSA-only and verify offline.** Digital Signature produces a real detached PKCS#7/CMS `SignedData` via an incremental update, and Verify Signature recomputes the ByteRange digest to report whether a document was modified after signing. Verification is cryptographic-integrity and signer-field extraction only: it does **not** validate a trust chain to a root CA (no CA store) and does **not** check revocation (no OCSP/CRL, which need a network). A trusted RFC 3161 timestamp is now supported, but it is optional and off by default: enable it and signing POSTs a SHA-256 hash of the signature (never the document) to a TSA endpoint you supply. Verify Signature then checks that timestamp token's own signature and that it covers the signature — but not the TSA's trust chain, which stays offline with no CA store. Only RSA keys are supported; EC keys are refused rather than mishandled. Self-signed certificates verify as valid with an unknown identity.
 - **PDF/A Archival Prep is best-effort, not certified.** It adds an sRGB OutputIntent with an embedded ICC profile, the pdfaid XMP identifier, and Info/MarkInfo/ID, and strips OpenAction, `/AA`, and JavaScript/Launch actions. It does not embed fonts or run a PDF/A validation pass, so the output is archival hygiene rather than a conformance-verified PDF/A file. Encrypted input is refused.
 - **PDF encryption protects, it does not crack.** Encrypt PDF writes the real PDF standard security handler (AES-256 by default, AES-128 and legacy RC4-128 as labelled options) with user/owner passwords and permission bits. Remove Password decrypts a document you can already open at the object level, and Unlock PDF strips owner-password permission restrictions from a file that opens without a user password; neither cracks or bypasses a password you do not have. Re-serialisation invalidates any existing digital signature, and SASLprep is not applied to R5/R6 passwords (ASCII/Latin works; exotic Unicode may differ from Acrobat).
 - **PDF to Audio plays but cannot export.** Playback uses the browser's own speech engine and the operating system's voices. The Web Speech API gives no access to the rendered samples, so there is no audio file to download. Audio to PDF uses browser dictation, which may be unavailable — or not fully on-device — depending on the browser; the tool warns you about what your browser actually does and always offers a manual transcript path that stays entirely offline.
@@ -204,7 +204,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md), run `npm run preflight`, and keep eve
 
 ## Versioning
 
-The current version is `3.18.2`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
+The current version is `3.18.3`. See [CHANGELOG.md](./CHANGELOG.md) and use the repository scripts to create intentional releases:
 
 ```bash
 npm run version:patch

@@ -20,6 +20,23 @@ export const SEARCH_SYNONYMS = {
   pii: ["auto-redact", "redact"],
   protect: ["encrypt"],
   password: ["encrypt"],
+  // Security intent (strip active content / CDR) resolves to the Sanitize tool.
+  javascript: ["sanitize"],
+  strip: ["sanitize"],
+  disarm: ["sanitize"],
+  cdr: ["sanitize"],
+  sanitize: ["sanitize"],
+  // Accessibility intent resolves to the accessibility tools ("Accessibility
+  // Check" and "Make Accessible (Auto-Tag)" — both names contain "accessib").
+  screen: ["accessib"],
+  reader: ["accessib"],
+  tag: ["accessib"],
+  a11y: ["accessib"],
+  accessible: ["accessib"],
+  wcag: ["accessib"],
+  ua: ["accessib"],
+  // Embedded-image intent resolves to Extract Images & Attachments.
+  embedded: ["extract images"],
 };
 
 export function searchableText(tool) {
@@ -49,6 +66,22 @@ export function filterTools(query) {
       // ("encrypt" would hit "encrypted"/"unprotect" in unrelated tools).
       for (const phrase of SEARCH_SYNONYMS[part] || []) {
         if (name.includes(phrase)) score += 50;
+      }
+    }
+    // Phrase / exact-name boost: when the whole multi-word query matches a tool's
+    // name exactly, or a keyword phrase contains it, that tool is the intended
+    // one — it must beat generic single-token ties that otherwise fall back to
+    // registry order (e.g. "extract images from pdf" vs "Extract Text from PDF").
+    if (score > 0 && parts.length > 1) {
+      const phrase = parts.join(" ");
+      if (name === phrase) score += 200;
+      else if (name.includes(phrase)) score += 120;
+      else {
+        for (const keyword of tool.keywords || []) {
+          const kw = keyword.toLowerCase();
+          if (kw === phrase) { score += 120; break; }
+          if (kw.includes(phrase)) { score += 80; break; }
+        }
       }
     }
     if (score > 0) scored.push({ tool, score });

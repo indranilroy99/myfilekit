@@ -4768,14 +4768,14 @@ test("isNew is boolean everywhere and flags the newest tools", () => {
     "batch-process-tool", "smart-split-pdf-tool", "impose-pdf-tool", "bookmarks-editor-tool",
     "create-form-tool", "deskew-pdf-tool", "pdfa-prep-tool", "sanitize-pdf-tool", "extract-images-tool",
     "accessibility-check-tool", "tag-pdf-tool", "translate-pdf-tool", "batch-workflow-tool",
-    "request-signature-tool",
+    "request-signature-tool", "api-playground-tool",
   ];
   for (const id of expectedNew) {
     assert.equal(tools.find((tool) => tool.id === id).isNew, true, `${id} should be isNew`);
   }
   // The multi-language OCR tool is pre-existing and must NOT be flagged new.
   assert.equal(tools.find((tool) => tool.id === "ocr-pdf-tool").isNew, false);
-  // Exactly the newest ~13 tools are flagged (12 here) — a legacy tool creeping in would break this.
+  // Exactly the newest flagship tools are flagged — a legacy tool creeping in would break this.
   assert.equal(tools.filter((tool) => tool.isNew).length, expectedNew.length);
 });
 
@@ -6401,4 +6401,61 @@ test("extract: a FlateDecode attachment that inflates past the cap is skipped as
   const result = await extractPdfAssets(await pdf.save({ useObjectStreams: false }));
   assert.equal(result.attachments.length, 0, "the bomb attachment was not decoded");
   assert.ok(result.skipped.some((s) => /bomb|too large/i.test(s.reason)), `the attachment was skipped with a clear reason, got: ${JSON.stringify(result.skipped)}`);
+});
+
+// --- CEO product-judge fixes: discoverability of this release's flagships.
+// Security/accessibility/extraction intent must resolve to the right new tool,
+// the "New" badge must fire for every flagship, and the dashboard discovery
+// surfaces (New & Notable shelf, quick-search chips) must point at real tools.
+
+test("flagship intent queries resolve to this release's new tools", () => {
+  const top = (query) => filterTools(query)[0]?.id;
+  // Sanitize / CDR intent — beats the metadata cleaner and converters.
+  assert.equal(top("remove javascript from pdf"), "sanitize-pdf-tool");
+  assert.equal(top("strip pdf threats"), "sanitize-pdf-tool");
+  // Accessibility intent — either accessibility tool is an acceptable top hit.
+  const accessibilityIds = new Set(["tag-pdf-tool", "accessibility-check-tool"]);
+  assert.ok(accessibilityIds.has(top("make pdf accessible")), `make pdf accessible -> ${top("make pdf accessible")}`);
+  assert.ok(accessibilityIds.has(top("tag pdf for screen reader")), `tag pdf for screen reader -> ${top("tag pdf for screen reader")}`);
+  // Embedded-image extraction — beats "Extract Text from PDF".
+  assert.equal(top("extract images from pdf"), "extract-images-tool");
+});
+
+test("every quick-search chip resolves to a real tool", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const chips = appSource.match(/const quickSearches = \[(.*?)\]/s)[1].match(/"([^"]+)"/g).map((s) => s.replace(/"/g, ""));
+  assert.ok(chips.length >= 6, "quick searches should offer a useful set");
+  for (const chip of chips) {
+    const results = filterTools(chip);
+    assert.ok(results.length > 0 && tools.some((t) => t.id === results[0].id), `chip "${chip}" resolves to a real tool`);
+  }
+  // The two new flagship chips exist and land on the intended tools.
+  assert.ok(chips.includes("Make PDF accessible"), "accessibility chip present");
+  assert.ok(chips.includes("Remove JavaScript"), "sanitize chip present");
+  assert.equal(filterTools("Make PDF accessible")[0].id, "tag-pdf-tool");
+  assert.equal(filterTools("Remove JavaScript")[0].id, "sanitize-pdf-tool");
+});
+
+test("the eight flagship new tools carry the New badge", () => {
+  const flagships = [
+    "sanitize-pdf-tool", "extract-images-tool", "accessibility-check-tool", "tag-pdf-tool",
+    "translate-pdf-tool", "batch-workflow-tool", "request-signature-tool", "api-playground-tool",
+  ];
+  for (const id of flagships) {
+    const tool = tools.find((t) => t.id === id);
+    assert.ok(tool, `${id} exists in the registry`);
+    assert.equal(tool.isNew, true, `${id} should be isNew:true`);
+  }
+});
+
+test("New & Notable shelf points at real, isNew flagship tools", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const shelf = appSource.match(/newAndNotableIds = \[(.*?)\]/s)[1].match(/"([^"]+)"/g).map((s) => s.replace(/"/g, ""));
+  assert.ok(shelf.length >= 4 && shelf.length <= 6, "shelf stays a sensible size");
+  for (const id of shelf) {
+    const tool = tools.find((t) => t.id === id);
+    assert.ok(tool && tool.isNew, `${id} must exist and be isNew`);
+  }
+  // The shelf features this release's flagships, not the previous one.
+  assert.ok(shelf.includes("sanitize-pdf-tool"), "shelf features the Sanitize flagship");
 });
