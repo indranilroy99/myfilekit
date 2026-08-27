@@ -3507,3 +3507,286 @@ test("search strips stopwords and resolves natural security queries to the right
 test("search stopword-only queries fall back to the full tool list", () => {
   assert.equal(filterTools("how do i").length, tools.length);
 });
+
+// --- Advanced PDF tools (Phase 1): smart split, Bates, imposition, outline,
+// form creation. Pure pdf-lib + fflate logic, unit-testable in Node against the
+// same vendored bundle loaded above.
+
+async function makeContentPdf(pageCount, tag = "p") {
+  const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let i = 0; i < pageCount; i += 1) {
+    const page = doc.addPage([200, 300]);
+    page.drawText(`${tag}${i + 1}`, { x: 20, y: 250, size: 24, font, color: rgb(0, 0, 0) });
+  }
+  return new File([await doc.save()], "content.pdf", { type: "application/pdf" });
+}
+
+async function unzipPdfPageCounts(zipped) {
+  const { unzipSync } = await import("fflate");
+  const { PDFDocument } = window.PDFLib;
+  const entries = unzipSync(zipped);
+  const names = Object.keys(entries).sort();
+  const counts = [];
+  for (const name of names) counts.push((await PDFDocument.load(entries[name])).getPageCount());
+  return { names, counts };
+}
+
+test("computeSplitGroups: every-N, equal parts (with remainder), and split-at-pages", async () => {
+  const { computeSplitGroups } = await import("../src/services/pdf-advanced.service.js");
+  // every N: ceil(P/N) parts, last shorter
+  const everyN = computeSplitGroups({ mode: "everyN", pageCount: 10, everyN: 4 });
+  assert.equal(everyN.length, 3);
+  assert.deepEqual(everyN.map((g) => g.length), [4, 4, 2]);
+  assert.deepEqual(everyN[0], [0, 1, 2, 3]);
+
+  // K equal parts with a remainder: 10 into 3 -> 4,3,3
+  const equal = computeSplitGroups({ mode: "equalParts", pageCount: 10, parts: 3 });
+  assert.deepEqual(equal.map((g) => g.length), [4, 3, 3]);
+  assert.equal(equal.reduce((sum, g) => sum + g.length, 0), 10);
+  assert.deepEqual(equal[2], [7, 8, 9]);
+
+  // split at pages 5 and 8 (1-based) over 10 pages -> [1-4],[5-7],[8-10]
+  const at = computeSplitGroups({ mode: "atPages", pageCount: 10, atPages: [5, 8] });
+  assert.deepEqual(at.map((g) => g[0] + 1), [1, 5, 8]);
+  assert.deepEqual(at.map((g) => g.length), [4, 3, 3]);
+
+  assert.throws(() => computeSplitGroups({ mode: "equalParts", pageCount: 2, parts: 5 }), /Cannot split/);
+  assert.throws(() => computeSplitGroups({ mode: "atPages", pageCount: 5, atPages: [9] }), /between 2 and 5/);
+  assert.throws(() => computeSplitGroups({ mode: "everyN", pageCount: 5, everyN: 0 }), /at least 1/);
+});
+
+test("smartSplitPdf writes valid part PDFs with the expected page counts (incl. 1-page)", async () => {
+  const { smartSplitPdf } = await import("../src/services/pdf-advanced.service.js");
+  const file = await makeContentPdf(10);
+
+  const everyN = await smartSplitPdf(file, { mode: "everyN", everyN: 4 });
+  assert.equal(everyN.partCount, 3);
+  let unzipped = await unzipPdfPageCounts(everyN.zipped);
+  assert.deepEqual(unzipped.counts, [4, 4, 2]);
+  assert.match(unzipped.names[0], /part-1\.pdf$/);
+
+  const equal = await smartSplitPdf(file, { mode: "equalParts", parts: 3 });
+  unzipped = await unzipPdfPageCounts(equal.zipped);
+  assert.deepEqual(unzipped.counts, [4, 3, 3]);
+
+  const at = await smartSplitPdf(file, { mode: "atPages", atPages: "5, 8" });
+  unzipped = await unzipPdfPageCounts(at.zipped);
+  assert.deepEqual(unzipped.counts, [4, 3, 3]);
+
+  // 1-page input still splits into a single valid part.
+  const single = await smartSplitPdf(await makeContentPdf(1), { mode: "everyN", everyN: 4 });
+  assert.equal(single.partCount, 1);
+  assert.deepEqual((await unzipPdfPageCounts(single.zipped)).counts, [1]);
+});
+
+test("smartSplitPdf bookmark mode splits at top-level outline pages, or explains its absence", async () => {
+  const { smartSplitPdf, setOutline } = await import("../src/services/pdf-advanced.service.js");
+  const plain = await makeContentPdf(9);
+  await assert.rejects(() => smartSplitPdf(plain, { mode: "bookmarks" }), /no top-level bookmarks/);
+
+  // Add an outline at pages 1, 4, 7, then split by bookmark.
+  const { bytes } = await setOutline(plain, [
+    { title: "One", page: 1, level: 0 },
+    { title: "Two", page: 4, level: 0 },
+    { title: "Three", page: 7, level: 0 },
+  ]);
+  const withOutline = new File([bytes], "outlined.pdf", { type: "application/pdf" });
+  const split = await smartSplitPdf(withOutline, { mode: "bookmarks" });
+  assert.equal(split.partCount, 3);
+  const { counts } = await unzipPdfPageCounts(split.zipped);
+  assert.deepEqual(counts, [3, 3, 3]);
+});
+
+test("formatBates pads correctly and never truncates a wider number", async () => {
+  const { formatBates } = await import("../src/services/pdf-advanced.service.js");
+  assert.equal(formatBates("ABC", 1, 6, ""), "ABC000001");
+  assert.equal(formatBates("ABC", 42, 6, "-X"), "ABC000042-X");
+  // Number wider than the pad renders in full (no truncation).
+  assert.equal(formatBates("ABC", 1234567, 6, ""), "ABC1234567");
+  assert.equal(formatBates("", 5, 0, ""), "5");
+});
+
+test("batesNumberPdf increments with prefix+padding, reports first/last, rejects non-Latin", async () => {
+  const { batesNumberPdf } = await import("../src/services/pdf-advanced.service.js");
+  const { PDFDocument } = window.PDFLib;
+  const file = await makeContentPdf(3);
+
+  const res = await batesNumberPdf(file, { prefix: "ABC", start: 1, padding: 6, position: "bottom-right", fontSize: 10, startPage: 1 });
+  assert.equal(res.count, 3);
+  assert.equal(res.first, "ABC000001");
+  assert.equal(res.last, "ABC000003");
+  assert.equal((await PDFDocument.load(res.bytes)).getPageCount(), 3);
+
+  // start page partway through: only later pages stamped, numbering starts at `start`.
+  const partial = await batesNumberPdf(file, { prefix: "P", start: 100, padding: 4, startPage: 2 });
+  assert.equal(partial.count, 2);
+  assert.equal(partial.first, "P0100");
+  assert.equal(partial.last, "P0101");
+
+  // Non-Latin prefix -> friendly error (not a raw pdf-lib crash).
+  await assert.rejects(() => batesNumberPdf(file, { prefix: "机密", start: 1, padding: 6 }), /Latin-1 characters only/);
+
+  // 1-page input.
+  const one = await batesNumberPdf(await makeContentPdf(1), { prefix: "A", start: 1, padding: 3 });
+  assert.equal(one.count, 1);
+  assert.equal(one.first, "A001");
+});
+
+test("computeBookletOrder produces the correct saddle-stitch sequence and pads to multiples of 4", async () => {
+  const { computeBookletOrder } = await import("../src/services/pdf-advanced.service.js");
+  const eight = computeBookletOrder(8);
+  assert.equal(eight.padded, 8);
+  assert.deepEqual(eight.order, [8, 1, 2, 7, 6, 3, 4, 5]);
+
+  const four = computeBookletOrder(4);
+  assert.deepEqual(four.order, [4, 1, 2, 3]);
+
+  // 6 pages pad up to 8; the two highest slots (7, 8) are blank fillers.
+  const six = computeBookletOrder(6);
+  assert.equal(six.padded, 8);
+  assert.equal(six.order.length, 8);
+  assert.deepEqual(six.order.filter((n) => n > 6).sort((a, b) => a - b), [7, 8]);
+});
+
+test("imposePdf N-up yields ceil(P/N) sheets each embedding the source pages", async () => {
+  const { imposePdf } = await import("../src/services/pdf-advanced.service.js");
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const file = await makeContentPdf(8);
+
+  const res = await imposePdf(file, { mode: "nup", n: 4, pageSize: "A4", orientation: "portrait" });
+  assert.equal(res.sheets, 2);
+  const doc = await PDFDocument.load(res.bytes);
+  assert.equal(doc.getPageCount(), 2);
+  // Each sheet embeds 4 source pages as XObjects.
+  for (let i = 0; i < 2; i += 1) {
+    const xobj = doc.getPage(i).node.Resources().get(PDFName.of("XObject"));
+    assert.equal(xobj.keys().length, 4, `sheet ${i} should embed 4 pages`);
+  }
+
+  // Booklet on the same 8-page doc: 8 slots -> 4 printable sides, 2 sheets.
+  const booklet = await imposePdf(file, { mode: "booklet", pageSize: "A4" });
+  assert.equal(booklet.sheets, 2);
+  assert.equal(booklet.outputPages, 4);
+  assert.equal((await PDFDocument.load(booklet.bytes)).getPageCount(), 4);
+
+  // 1-page input: single N-up sheet.
+  const one = await imposePdf(await makeContentPdf(1), { mode: "nup", n: 4 });
+  assert.equal(one.sheets, 1);
+  await assert.rejects(() => imposePdf(file, { mode: "nup", n: 5 }), /2, 4, 6, 8, 9, or 16/);
+});
+
+test("parseOutlineInput parses titles, pages, nesting, and rejects bad lines", async () => {
+  const { parseOutlineInput } = await import("../src/services/pdf-advanced.service.js");
+  const entries = parseOutlineInput("Intro | 1\n  Background | 2\nChapter 2 | 5", 10);
+  assert.deepEqual(entries, [
+    { title: "Intro", page: 1, level: 0 },
+    { title: "Background", page: 2, level: 1 },
+    { title: "Chapter 2", page: 5, level: 0 },
+  ]);
+  assert.throws(() => parseOutlineInput("No separator here", 5), /Title \| pageNumber/);
+  assert.throws(() => parseOutlineInput("Bad | 99", 5), /outside 1–5/);
+  assert.throws(() => parseOutlineInput("", 5), /at least one/);
+});
+
+test("setOutline writes an /Outlines tree that reloads with correct pages and nesting", async () => {
+  const { setOutline, readOutline } = await import("../src/services/pdf-advanced.service.js");
+  const { PDFDocument, PDFName, PDFDict } = window.PDFLib;
+  const file = await makeContentPdf(6);
+
+  const { bytes, topLevel, total } = await setOutline(file, [
+    { title: "Introduction", page: 1, level: 0 },
+    { title: "Details", page: 3, level: 1 },
+    { title: "Conclusion", page: 6, level: 0 },
+  ]);
+  assert.equal(topLevel, 2);
+  assert.equal(total, 3);
+
+  const reloaded = await PDFDocument.load(bytes);
+  const outlinesRef = reloaded.catalog.get(PDFName.of("Outlines"));
+  const outlines = reloaded.context.lookup(outlinesRef);
+  assert.ok(outlines instanceof PDFDict, "/Outlines dictionary exists");
+  assert.equal(outlines.get(PDFName.of("Count")).toString(), "2");
+
+  // Re-read via the service: destinations resolve to the intended pages.
+  const outFile = new File([bytes], "out.pdf", { type: "application/pdf" });
+  const read = await readOutline(outFile);
+  assert.deepEqual(read, [
+    { title: "Introduction", page: 1, level: 0 },
+    { title: "Details", page: 3, level: 1 },
+    { title: "Conclusion", page: 6, level: 0 },
+  ]);
+
+  // The nested child's /Parent points at its top-level entry (not the root).
+  const rpages = reloaded.getPages();
+  const top1 = reloaded.context.lookup(outlines.get(PDFName.of("First")));
+  const child = reloaded.context.lookup(top1.get(PDFName.of("First")));
+  assert.equal(reloaded.context.lookup(child.get(PDFName.of("Parent"))), top1);
+  const childDest = reloaded.context.lookup(child.get(PDFName.of("Dest")));
+  assert.equal(rpages.findIndex((p) => p.ref === childDest.get(0)), 2);
+});
+
+test("createFormPdf builds fillable fields that round-trip through fillPdfForm", async () => {
+  const { createFormPdf } = await import("../src/services/pdf-advanced.service.js");
+  const { fillPdfForm } = await import("../src/services/pdf-edit.service.js");
+  const { PDFDocument, PDFTextField, PDFCheckBox, PDFDropdown, PDFRadioGroup } = window.PDFLib;
+
+  const { bytes, fieldCount } = await createFormPdf(null, [
+    { type: "text", name: "full_name", page: 1, x: 10, y: 10, w: 50, h: 5, unit: "percent" },
+    { type: "checkbox", name: "agree", page: 1, x: 10, y: 20, w: 4, h: 3, unit: "percent" },
+    { type: "dropdown", name: "colour", page: 1, x: 10, y: 30, w: 40, h: 4, unit: "percent", options: ["Red", "Green", "Blue"] },
+    { type: "radio", name: "plan", page: 1, x: 10, y: 45, w: 30, h: 20, unit: "percent", options: ["Basic", "Pro"] },
+  ], { pageSize: "A4" });
+  assert.equal(fieldCount, 4);
+
+  const doc = await PDFDocument.load(bytes);
+  const form = doc.getForm();
+  const byName = Object.fromEntries(form.getFields().map((f) => [f.getName(), f]));
+  assert.ok(byName.full_name instanceof PDFTextField);
+  assert.ok(byName.agree instanceof PDFCheckBox);
+  assert.ok(byName.colour instanceof PDFDropdown);
+  assert.ok(byName.plan instanceof PDFRadioGroup);
+  assert.deepEqual(byName.colour.getOptions().sort(), ["Blue", "Green", "Red"]);
+
+  // Cross-tool eval: fill the text + checkbox via the existing Fill PDF Form tool.
+  const formFile = new File([bytes], "created-form.pdf", { type: "application/pdf" });
+  const filled = await PDFDocument.load(await fillPdfForm(formFile, { full_name: "Ada Lovelace", agree: true }, false));
+  assert.equal(filled.getForm().getTextField("full_name").getText(), "Ada Lovelace");
+  assert.equal(filled.getForm().getCheckBox("agree").isChecked(), true);
+});
+
+test("createFormPdf validates fields onto an uploaded PDF and rejects bad input", async () => {
+  const { createFormPdf } = await import("../src/services/pdf-advanced.service.js");
+  const { PDFDocument, PDFTextField } = window.PDFLib;
+  const base = await makeContentPdf(2);
+
+  // Add a field onto page 2 of an existing PDF.
+  const { bytes } = await createFormPdf(base, [
+    { type: "text", name: "note", page: 2, x: 10, y: 10, w: 60, h: 6, unit: "percent" },
+  ]);
+  const doc = await PDFDocument.load(bytes);
+  assert.equal(doc.getPageCount(), 2);
+  assert.ok(doc.getForm().getFields()[0] instanceof PDFTextField);
+
+  await assert.rejects(() => createFormPdf(null, []), /at least one form field/);
+  await assert.rejects(() => createFormPdf(null, [{ type: "text", name: "a.b", page: 1, x: 1, y: 1, w: 10, h: 5 }]), /only letters/);
+  await assert.rejects(() => createFormPdf(null, [{ type: "text", name: "d", page: 1, x: 1, y: 1, w: 10, h: 5 }, { type: "text", name: "d", page: 1, x: 1, y: 20, w: 10, h: 5 }]), /Duplicate field/);
+  await assert.rejects(() => createFormPdf(null, [{ type: "dropdown", name: "one", page: 1, x: 1, y: 1, w: 10, h: 5, options: ["only"] }]), /at least two options/);
+  await assert.rejects(() => createFormPdf(base, [{ type: "text", name: "off", page: 9, x: 1, y: 1, w: 10, h: 5 }]), /page 9/);
+});
+
+test("advanced PDF tools are registered, routed, and rendered", () => {
+  const ids = ["smart-split-pdf-tool", "bates-numbering-tool", "impose-pdf-tool", "bookmarks-editor-tool", "create-form-tool"];
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  for (const id of ids) {
+    const found = tools.find((tool) => tool.id === id);
+    assert.ok(found, `${id} registered`);
+    assert.equal(found.category, "PDF Tools");
+    assert.equal(found.status, "available");
+    assert.equal(found.localProcessing, true);
+    assert.deepEqual(found.acceptedTypes, ["application/pdf"]);
+    assert.equal(routeForHash(found.route).tool.id, id);
+    assert.equal(appSource.includes(`"${id}"`), true, `${id} wired into ToolRenderer`);
+  }
+});

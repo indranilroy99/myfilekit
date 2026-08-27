@@ -50,6 +50,7 @@ import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.
 import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
 import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip } from "./services/pdf-render.service.js";
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
+import { BATES_POSITION_IDS, NUP_COUNTS, batesNumberPdf, createFormPdf, imposePdf, parseOutlineInput, parseSplitPages, readOutline, setOutline, smartSplitPdf } from "./services/pdf-advanced.service.js";
 import { ALL_PERMISSIONS_ALLOWED, PDF_ENCRYPTION_ALGORITHMS, PDF_PERMISSION_LABELS, decryptPdf, encryptPdf, unlockPdf } from "./services/pdf-crypto.service.js";
 import { CONFIDENCE as PII_CONFIDENCE, PII_TYPE_LABELS, buildPrivacyReportText, confidenceLabel, extractPdfPiiHits, isPersonalType, scanPdfStructure } from "./services/pii.service.js";
 import { analyzePdfBytes, buildAnalyzerReportText } from "./services/pdf-analyzer.service.js";
@@ -1095,6 +1096,11 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "pos-billing-tool") return <PosBillingTool />;
   if (tool.id === "gst-filing-prep-tool") return <GstFilingPrepTool tool={tool} />;
   if (tool.id === "workflow-builder-tool") return <WorkflowBuilderTool tool={tool} />;
+  if (tool.id === "smart-split-pdf-tool") return <SmartSplitPdfTool tool={tool} />;
+  if (tool.id === "bates-numbering-tool") return <BatesNumberingTool tool={tool} />;
+  if (tool.id === "impose-pdf-tool") return <ImposePdfTool tool={tool} />;
+  if (tool.id === "bookmarks-editor-tool") return <BookmarksEditorTool tool={tool} />;
+  if (tool.id === "create-form-tool") return <CreateFormTool tool={tool} />;
   if (tool.id === "merge-pdf-tool") return <PdfFileTool tool={tool} action="Merge PDFs" multiple run={(files) => mergePdfs(files).then((bytes) => downloadBytes(bytes, "myfilekit-merged.pdf", "application/pdf"))} />;
   if (tool.id === "split-pdf-tool") return <PageRangeTool tool={tool} action="Extract pages" suffix="extracted" run={extractPdfPages} />;
   if (tool.id === "delete-pdf-pages-tool") return <PageRangeTool tool={tool} action="Delete pages" suffix="pages-deleted" run={deletePdfPages} />;
@@ -2555,6 +2561,247 @@ function FingerprintPdfTool({ tool }: { tool: Tool }) {
       const { bytes, id } = await fingerprintPdf(file);
       downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-fingerprinted`, "pdf"), "application/pdf");
       return `Embedded fingerprint id:\n${id}\nKeep this id to identify this copy later.`;
+    })} />
+  </ToolForm>;
+}
+
+function SmartSplitPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [mode, setMode] = useState("everyN");
+  const [everyN, setEveryN] = useState("5");
+  const [parts, setParts] = useState("2");
+  const [atPages, setAtPages] = useState("");
+  const [outline, setOutlineEntries] = useState<Array<{ title: string; page: number | null; level: number }> | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => { setFiles([]); setMode("everyN"); setEveryN("5"); setParts("2"); setAtPages(""); setOutlineEntries(null); setStatus(initialStatus); };
+  const topBookmarks = outline ? outline.filter((entry) => entry.level === 0 && entry.page) : [];
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Splits one PDF into several files and bundles them into a ZIP. Choose how to split: fixed page counts, a number of equal parts, specific page numbers, or one file per top-level bookmark.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setOutlineEntries(null); }} />
+    <Select label="Split mode" value={mode} onChange={setMode} options={["everyN", "equalParts", "atPages", "bookmarks"]} labels={["Every N pages", "Into K equal parts", "At specific page numbers", "One file per bookmark"]} />
+    {mode === "everyN" && <Input label="Pages per file" value={everyN} onChange={setEveryN} type="number" helper="Each output file gets this many pages (the last may have fewer)." />}
+    {mode === "equalParts" && <Input label="Number of parts" value={parts} onChange={setParts} type="number" helper="Pages are distributed as evenly as possible; any remainder goes to the earliest parts." />}
+    {mode === "atPages" && <Input label="Split at pages" value={atPages} onChange={setAtPages} placeholder="Example: 5, 12, 20" helper="Each listed page starts a new file." />}
+    {mode === "bookmarks" && (
+      <div className="grid gap-3">
+        <SecondaryButton label="Read bookmarks" onClick={() => runSafely(setStatus, async () => {
+          const [file] = validateFiles(files, tool.file);
+          const entries = await readOutline(file);
+          setOutlineEntries(entries);
+          const top = entries.filter((entry) => entry.level === 0 && entry.page);
+          return top.length ? `Found ${top.length} top-level bookmark${top.length === 1 ? "" : "s"}.` : "This PDF has no top-level bookmarks. Choose another split mode.";
+        })} />
+        {topBookmarks.length > 0 && (
+          <div className="surface-muted wabi-card-edge grid gap-1 p-4 text-sm font-semibold text-neutral-600">
+            {topBookmarks.map((entry, index) => <p key={index} className="break-words text-[var(--foreground)]">{entry.title || "(untitled)"} · page {entry.page}</p>)}
+          </div>
+        )}
+      </div>
+    )}
+    <PrimaryButton label="Split into ZIP" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const opts: any = { mode, onProgress: pageProgress(setStatus, "Writing") };
+      if (mode === "everyN") opts.everyN = Number(everyN);
+      if (mode === "equalParts") opts.parts = Number(parts);
+      if (mode === "atPages") opts.atPages = parseSplitPages(atPages);
+      const { zipped, partCount, sizes } = await smartSplitPdf(file, opts);
+      const buffer = new ArrayBuffer(zipped.byteLength);
+      new Uint8Array(buffer).set(zipped);
+      downloadBlob(new Blob([buffer], { type: "application/zip" }), `${safeFilename(file.name)}-split.zip`);
+      return `Produced ${partCount} file${partCount === 1 ? "" : "s"} (pages per file: ${sizes.join(", ")}).`;
+    })} />
+  </ToolForm>;
+}
+
+function BatesNumberingTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [prefix, setPrefix] = useState("ABC");
+  const [start, setStart] = useState("1");
+  const [padding, setPadding] = useState("6");
+  const [suffix, setSuffix] = useState("");
+  const [position, setPosition] = useState("bottom-right");
+  const [fontSize, setFontSize] = useState("10");
+  const [startPage, setStartPage] = useState("1");
+  const [status, setStatus] = useState(initialStatus);
+
+  const positionLabels: Record<string, string> = { "bottom-right": "Bottom right", "bottom-left": "Bottom left", "bottom-center": "Bottom center", "top-right": "Top right", "top-left": "Top left", "top-center": "Top center" };
+
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Stamps continuous legal Bates numbers on every page, e.g. prefix "ABC" with padding 6 starting at 1 gives ABC000001, ABC000002… Unlike plain page numbers, the number is continuous with a fixed-width prefix. Text supports Latin-1 characters only.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Input label="Prefix" value={prefix} onChange={setPrefix} placeholder="e.g. ABC" />
+      <Input label="Suffix" value={suffix} onChange={setSuffix} placeholder="Optional" />
+      <Input label="Starting number" value={start} onChange={setStart} type="number" />
+      <Input label="Digit padding" value={padding} onChange={setPadding} type="number" helper="e.g. 6 → 000001" />
+      <Input label="Start page" value={startPage} onChange={setStartPage} type="number" helper="Stamp from this page onward." />
+      <Input label="Font size" value={fontSize} onChange={setFontSize} type="number" />
+    </div>
+    <Select label="Position" value={position} onChange={setPosition} options={BATES_POSITION_IDS} labels={BATES_POSITION_IDS.map((id) => positionLabels[id] || id)} />
+    <PrimaryButton label="Apply Bates numbers" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const { bytes, first, last, count } = await batesNumberPdf(file, {
+        prefix, suffix, start: Number(start), padding: Number(padding),
+        position, fontSize: Number(fontSize), startPage: Number(startPage),
+      });
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-bates`, "pdf"), "application/pdf");
+      return `Stamped ${count} page${count === 1 ? "" : "s"} from ${first} to ${last}.`;
+    })} />
+  </ToolForm>;
+}
+
+function ImposePdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [mode, setMode] = useState("nup");
+  const [n, setN] = useState("4");
+  const [pageSize, setPageSize] = useState("A4");
+  const [orientation, setOrientation] = useState("portrait");
+  const [margin, setMargin] = useState("18");
+  const [gutter, setGutter] = useState("8");
+  const [status, setStatus] = useState(initialStatus);
+
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      N-up places several source pages on each sheet for handouts. Booklet reorders pages 2-up so the printout folds into a saddle-stitched booklet (pages are padded to a multiple of 4 with blanks). Source pages are scaled to fit each cell, preserving aspect ratio.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Select label="Mode" value={mode} onChange={setMode} options={["nup", "booklet"]} labels={["N-up (handout)", "Booklet (foldable)"]} />
+    {mode === "nup" && <Select label="Pages per sheet" value={n} onChange={setN} options={NUP_COUNTS.map(String)} labels={NUP_COUNTS.map((count) => `${count}-up`)} />}
+    <Select label="Sheet size" value={pageSize} onChange={setPageSize} options={["A4", "A3", "A5", "Letter", "Legal"]} labels={["A4", "A3", "A5", "US Letter", "US Legal"]} />
+    {mode === "nup" && <Select label="Orientation" value={orientation} onChange={setOrientation} options={["portrait", "landscape"]} labels={["Portrait", "Landscape"]} />}
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Input label="Margin (pt)" value={margin} onChange={setMargin} type="number" />
+      <Input label="Gutter (pt)" value={gutter} onChange={setGutter} type="number" helper="Space between cells." />
+    </div>
+    <PrimaryButton label={mode === "booklet" ? "Create booklet" : "Impose N-up"} onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const { bytes, sheets, outputPages } = await imposePdf(file, {
+        mode, n: Number(n), pageSize, orientation, margin: Number(margin), gutter: Number(gutter),
+        onProgress: pageProgress(setStatus, "Imposing"),
+      });
+      const suffix = mode === "booklet" ? "booklet" : `${n}up`;
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-${suffix}`, "pdf"), "application/pdf");
+      return mode === "booklet"
+        ? `Built a booklet: ${outputPages} printable side${outputPages === 1 ? "" : "s"} across ${sheets} sheet${sheets === 1 ? "" : "s"}.`
+        : `Placed ${n} pages per sheet across ${sheets} sheet${sheets === 1 ? "" : "s"}.`;
+    })} />
+  </ToolForm>;
+}
+
+function BookmarksEditorTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [entries, setEntries] = useState("");
+  const [existing, setExisting] = useState<Array<{ title: string; page: number | null; level: number }> | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => { setFiles([]); setEntries(""); setExisting(null); setStatus(initialStatus); };
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Replaces the PDF's outline (table of contents). Enter one entry per line as <span className="font-mono">Title | pageNumber</span>. Indent a line with a space or tab to nest it one level under the entry above. Titles support Latin-1 and beyond (stored as Unicode).
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setExisting(null); }} />
+    <SecondaryButton label="Read current outline" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const found = await readOutline(file);
+      setExisting(found);
+      if (found.length) {
+        setEntries(found.map((entry) => `${entry.level === 1 ? "  " : ""}${entry.title} | ${entry.page ?? 1}`).join("\n"));
+      }
+      return found.length ? `Found ${found.length} outline entr${found.length === 1 ? "y" : "ies"} (loaded into the editor below).` : "This PDF has no outline yet. Add entries below.";
+    })} />
+    {existing && existing.length > 0 && (
+      <div className="surface-muted wabi-card-edge grid gap-1 p-4 text-sm font-semibold text-neutral-600">
+        <p className="text-xs font-black uppercase text-neutral-500">Current outline</p>
+        {existing.map((entry, index) => <p key={index} className="break-words text-[var(--foreground)]">{entry.level === 1 ? "— " : ""}{entry.title || "(untitled)"} · page {entry.page ?? "?"}</p>)}
+      </div>
+    )}
+    <Textarea label="Outline entries" value={entries} onChange={setEntries} rows={10} />
+    <PrimaryButton label="Write outline" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const pdf = await loadPdf(file);
+      const parsed = parseOutlineInput(entries, pdf.getPageCount());
+      const { bytes, topLevel, total } = await setOutline(file, parsed);
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-bookmarks`, "pdf"), "application/pdf");
+      return `Wrote ${total} outline entr${total === 1 ? "y" : "ies"} (${topLevel} top-level).`;
+    })} />
+  </ToolForm>;
+}
+
+type FormFieldDraft = { id: number; type: "text" | "checkbox" | "dropdown" | "radio"; name: string; page: string; x: string; y: string; w: string; h: string; options: string };
+
+function CreateFormTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [useBlank, setUseBlank] = useState(false);
+  const [pageSize, setPageSize] = useState("A4");
+  const [pageCount, setPageCount] = useState("1");
+  const [nextId, setNextId] = useState(2);
+  const [fields, setFields] = useState<FormFieldDraft[]>([{ id: 1, type: "text", name: "full_name", page: "1", x: "10", y: "10", w: "50", h: "5", options: "" }]);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => { setFiles([]); setUseBlank(false); setPageSize("A4"); setPageCount("1"); setFields([{ id: 1, type: "text", name: "full_name", page: "1", x: "10", y: "10", w: "50", h: "5", options: "" }]); setNextId(2); setStatus(initialStatus); };
+  const addField = () => { setFields((prev) => [...prev, { id: nextId, type: "text", name: `field_${nextId}`, page: "1", x: "10", y: "20", w: "50", h: "5", options: "" }]); setNextId((id) => id + 1); };
+  const updateField = (id: number, patch: Partial<FormFieldDraft>) => setFields((prev) => prev.map((field) => field.id === id ? { ...field, ...patch } : field));
+  const removeField = (id: number) => setFields((prev) => prev.filter((field) => field.id !== id));
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Designs a fillable form. Add fields onto an uploaded PDF or a blank page. Positions are in percent of the page, measured from the top-left corner. The result is a real AcroForm you can fill in any reader or with the Fill PDF Form tool.
+    </div>
+    <Checkbox label="Start from a blank page instead of a PDF" checked={useBlank} onChange={setUseBlank} />
+    {useBlank ? (
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Select label="Page size" value={pageSize} onChange={setPageSize} options={["A4", "A3", "A5", "Letter", "Legal"]} labels={["A4", "A3", "A5", "US Letter", "US Legal"]} />
+        <Input label="Page count" value={pageCount} onChange={setPageCount} type="number" helper="1 to 200 pages." />
+      </div>
+    ) : (
+      <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    )}
+    <div className="grid gap-4">
+      {fields.map((field) => (
+        <div key={field.id} className="surface-card grid gap-3 rounded-2xl p-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-black uppercase text-neutral-500">Field</span>
+            {fields.length > 1 && <button type="button" className="secondary-button" onClick={() => removeField(field.id)}>Remove</button>}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Select label="Type" value={field.type} onChange={(value) => updateField(field.id, { type: value as FormFieldDraft["type"] })} options={["text", "checkbox", "dropdown", "radio"]} labels={["Text field", "Checkbox", "Dropdown", "Radio group"]} />
+            <Input label="Name" value={field.name} onChange={(value) => updateField(field.id, { name: value })} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-5">
+            <Input label="Page" value={field.page} onChange={(value) => updateField(field.id, { page: value })} type="number" />
+            <Input label="X %" value={field.x} onChange={(value) => updateField(field.id, { x: value })} type="number" />
+            <Input label="Y %" value={field.y} onChange={(value) => updateField(field.id, { y: value })} type="number" />
+            <Input label="W %" value={field.w} onChange={(value) => updateField(field.id, { w: value })} type="number" />
+            <Input label="H %" value={field.h} onChange={(value) => updateField(field.id, { h: value })} type="number" />
+          </div>
+          {(field.type === "dropdown" || field.type === "radio") && (
+            <Input label="Options (comma-separated)" value={field.options} onChange={(value) => updateField(field.id, { options: value })} placeholder="e.g. Red, Green, Blue" />
+          )}
+        </div>
+      ))}
+      <SecondaryButton label="Add field" onClick={addField} />
+    </div>
+    <PrimaryButton label="Create form PDF" onClick={() => runSafely(setStatus, async () => {
+      const source = useBlank ? null : validateFiles(files, tool.file)[0];
+      const payload = fields.map((field) => ({
+        type: field.type,
+        name: field.name.trim(),
+        page: Number(field.page),
+        x: Number(field.x), y: Number(field.y), w: Number(field.w), h: Number(field.h),
+        unit: "percent" as const,
+        options: field.options.split(",").map((option) => option.trim()).filter(Boolean),
+      }));
+      const { bytes, fieldCount } = await createFormPdf(source, payload, { pageSize, pageCount: Number(pageCount), orientation: "portrait" });
+      const base = source ? `${safeFilename(source.name)}-form` : "myfilekit-form";
+      downloadBytes(bytes, withExtension(base, "pdf"), "application/pdf");
+      return `Created a fillable form with ${fieldCount} field${fieldCount === 1 ? "" : "s"}.`;
     })} />
   </ToolForm>;
 }
