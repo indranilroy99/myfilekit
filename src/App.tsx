@@ -63,7 +63,7 @@ import { extractPdfAssets, buildExtractionZip } from "./services/pdf-extract.ser
 import { LANGUAGE_OPTIONS, auditPdfAccessibility, buildAccessibilityReportText, extractAccessibilityContent, remediatePdfAccessibility } from "./services/pdf-accessibility.service.js";
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 import { canvasToPdf, canvasesToPdf, csvToPdf, markdownToPdf } from "./services/convert.service.js";
-import { STATE_CODES, WORKFLOW_PRESETS, computeGstInvoice, computePosBill, defaultStepOptions, formatAmount, gstInvoicePdf, gstr1SummaryCsv, gstr1SummaryPdf, gstr1SummaryXlsx, posReceiptPdf, presetSteps, readInvoiceRows, runWorkflow, summariseGstr1, summarisePosSession, workflowOpList } from "./services/business.service.js";
+import { MAX_WORKFLOW_BATCH_FILES, STATE_CODES, WORKFLOW_PRESETS, computeGstInvoice, computePosBill, defaultStepOptions, formatAmount, gstInvoicePdf, gstr1SummaryCsv, gstr1SummaryPdf, gstr1SummaryXlsx, posReceiptPdf, presetSteps, readInvoiceRows, runWorkflow, runWorkflowBatch, summariseGstr1, summarisePosSession, workflowOpList } from "./services/business.service.js";
 import { MAX_BATCH_FILES, batchAcceptFor, batchOpList, defaultBatchOptions, runBatch, zipOutputs } from "./services/batch.service.js";
 import { captureVideoFrame, enhanceCanvas, getHtml2Canvas, startCameraStream, stopCameraStream } from "./services/capture.service.js";
 import { docxToHtml, epubToHtml, pptxToSlides, readWorkbookSheets, sanitizeHtmlForOffline, sheetsToHtml } from "./services/office.service.js";
@@ -71,7 +71,7 @@ import { pdfToDocx, pdfToEpub, pdfToHtml, pdfToXlsx } from "./services/export.se
 import { DEFAULT_OCR_LANG, OCR_ENGINE_SIZE_LABEL, OCR_LANGUAGES, mergeSearchablePdfPages, ocrImages, ocrPdf, terminateOcrWorker } from "./services/ocr.service.js";
 import { createSpeechRecognizer, getSpeechSynthesis, loadSpeechVoices, speechRecognitionSupport, speechSynthesisSupported, splitTextForSpeech } from "./services/audio.service.js";
 import { buildPassageIndex, chunkPages, highlightSegments, searchPassages, summarizeText } from "./services/nlp.service.js";
-import { buildAnswerPrompt, buildSummaryPrompt, clearLlmSettings, endpointOrigin, isLlmConfigured, maskApiKey, readLlmSettings, requestChatCompletion, saveLlmSettings } from "./services/llm.service.js";
+import { buildAnswerPrompt, buildSummaryPrompt, clearLlmSettings, endpointOrigin, isLlmConfigured, maskApiKey, readLlmSettings, requestChatCompletion, saveLlmSettings, translateDocument } from "./services/llm.service.js";
 import { FRAME_KIND, MAX_TRANSFER_BYTES, createAssembler, createPeerLink, decodeJsonFrame, encodeJsonFrame, normalizeIncomingMeta, progressPercent, sendFileOverLink, transferRate, verifyBytes, webrtcSupported } from "./services/webrtc.service.js";
 import { MAX_STROKES, addStrokePoint, createStroke, deserializeStrokeChunk, drawStrokeSegment, exportBoardCanvas, mergeStrokeChunk, pointFromEvent, prepareCanvas, renderBoard, serializeStrokeChunk } from "./services/whiteboard.service.js";
 
@@ -1137,6 +1137,7 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "gst-filing-prep-tool") return <GstFilingPrepTool tool={tool} />;
   if (tool.id === "workflow-builder-tool") return <WorkflowBuilderTool tool={tool} />;
   if (tool.id === "batch-process-tool") return <BatchProcessTool tool={tool} />;
+  if (tool.id === "batch-workflow-tool") return <BatchWorkflowTool tool={tool} />;
   if (tool.id === "smart-split-pdf-tool") return <SmartSplitPdfTool tool={tool} />;
   if (tool.id === "bates-numbering-tool") return <BatesNumberingTool tool={tool} />;
   if (tool.id === "impose-pdf-tool") return <ImposePdfTool tool={tool} />;
@@ -1162,6 +1163,7 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "extract-text-tool") return <ExtractTextTool tool={tool} />;
   if (tool.id === "summarize-pdf-tool") return <SummarizePdfTool tool={tool} />;
   if (tool.id === "chat-with-pdf-tool") return <ChatWithPdfTool tool={tool} />;
+  if (tool.id === "translate-pdf-tool") return <TranslatePdfTool tool={tool} />;
   if (tool.id === "compress-pdf-tool") return <CompressPdfTool tool={tool} />;
   if (tool.id === "pdf-to-zip-tool") return <PdfToZipTool tool={tool} />;
   if (tool.id === "flatten-pdf-tool") return <FlattenPdfTool tool={tool} />;
@@ -2934,6 +2936,97 @@ function ChatWithPdfTool({ tool }: { tool: Tool }) {
       })} />
     </div>
     <LlmEndpointPanel settings={settings} onChange={setSettings} />
+  </ToolForm>;
+}
+
+const TRANSLATE_LANGUAGES = [
+  "Arabic", "Bengali", "Chinese (Simplified)", "Dutch", "English", "French", "German",
+  "Gujarati", "Hindi", "Indonesian", "Italian", "Japanese", "Kannada", "Korean",
+  "Malayalam", "Marathi", "Portuguese", "Punjabi", "Russian", "Spanish", "Tamil",
+  "Telugu", "Thai", "Turkish", "Ukrainian", "Vietnamese",
+];
+
+function TranslatePdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [text, setText] = useState("");
+  const [language, setLanguage] = useState("Spanish");
+  const [translation, setTranslation] = useState("");
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [settings, setSettings] = useState<LlmSettings>(() => readLlmSettings());
+  const [status, setStatus] = useState(initialStatus);
+
+  const configured = isLlmConfigured(settings);
+  const baseName = safeFilename(files[0]?.name || "document");
+
+  const reset = () => {
+    setFiles([]); setText(""); setTranslation(""); setProgress(null); setStatus(initialStatus);
+  };
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Extracting the PDF's text is <strong>100% local</strong>. Translation is not: it needs your own OpenAI-compatible endpoint, configured below and <strong>off by default</strong>. Until you turn one on, nothing is sent and no translation happens — this tool does not pretend to translate offline. Long documents are split into ordered chunks that fit the model, translated one at a time, and reassembled.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setText(""); setTranslation(""); setProgress(null); }} label="Choose the PDF to translate" />
+    <Select label="Translate into" value={language} onChange={setLanguage} options={TRANSLATE_LANGUAGES} />
+    <SecondaryButton label="Extract text (local)" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const source = await extractPdfText(file, { onProgress: pageProgress(setStatus, "Reading") });
+      if (!source.trim()) throw new Error(NO_PDF_TEXT_MESSAGE);
+      setText(source);
+      setTranslation("");
+      return `Extracted ${source.length.toLocaleString()} characters. ${configured ? "Press Translate to send them to your endpoint." : "Configure your endpoint below to translate."}`;
+    })} />
+    {text && (
+      <div className="surface-card grid gap-2 rounded-3xl p-5">
+        <p className="text-xs font-black uppercase text-neutral-500">Extracted text (local, not yet sent anywhere)</p>
+        <p className="max-h-40 overflow-auto whitespace-pre-line text-sm font-semibold leading-6 text-[var(--foreground)]">{text.slice(0, 2000)}{text.length > 2000 ? "\n…" : ""}</p>
+      </div>
+    )}
+    <LlmEndpointPanel settings={settings} onChange={setSettings} />
+    {configured ? (
+      <PrimaryButton label={`Translate to ${language} (sends text to ${endpointOrigin(settings.baseUrl)})`} onClick={() => runSafely(setStatus, async () => {
+        let source = text;
+        if (!source.trim()) {
+          const [file] = validateFiles(files, tool.file);
+          source = await extractPdfText(file, { onProgress: pageProgress(setStatus, "Reading") });
+          if (!source.trim()) throw new Error(NO_PDF_TEXT_MESSAGE);
+          setText(source);
+        }
+        setTranslation("");
+        setProgress({ done: 0, total: 1 });
+        const result = await translateDocument(source, {
+          settings,
+          targetLanguage: language,
+          onProgress: (done: number, total: number) => setProgress({ done, total }),
+        });
+        setTranslation(result.text);
+        setProgress(null);
+        return `Translated ${result.chunks} chunk${result.chunks === 1 ? "" : "s"} into ${language} via ${endpointOrigin(settings.baseUrl)}.`;
+      })} />
+    ) : (
+      <p className="text-sm font-semibold leading-6 text-neutral-600">
+        No endpoint is configured, so translation is unavailable. Open the panel above, add your own OpenAI-compatible endpoint, and allow its origin in <span className="whitespace-pre">connect-src</span>. Nothing leaves this device until you do.
+      </p>
+    )}
+    {progress && <ProgressBar value={progress.done} total={progress.total} label={`Translating chunk ${Math.min(progress.done + 1, progress.total)} of ${progress.total} into ${language}`} />}
+    {translation && (
+      <div className="surface-card grid gap-3 rounded-3xl p-5">
+        <p className="text-xs font-black uppercase text-neutral-500">Translation — {language} · generated off this device</p>
+        <p className="whitespace-pre-line text-sm font-semibold leading-6 text-[var(--foreground)]">{translation}</p>
+        <div className="flex flex-wrap gap-2">
+          <SecondaryButton label="Copy translation" onClick={() => runSafely(setStatus, async () => { await copyText(translation); return "Copied."; })} />
+          <SecondaryButton label="Download .txt" onClick={() => runSafely(setStatus, async () => {
+            downloadText(requireOutput(translation), `${baseName}-${safeFilename(language)}`, "txt");
+            return "Text file ready to download.";
+          })} />
+          <SecondaryButton label="Download .pdf" onClick={() => runSafely(setStatus, async () => {
+            downloadBytes(await textToPdf(requireOutput(translation)), withExtension(`${baseName}-${safeFilename(language)}`, "pdf"), "application/pdf");
+            return "Translated PDF ready to download.";
+          })} />
+        </div>
+      </div>
+    )}
+    {translation && <ResultConsequenceNote>This translation was produced by <strong>your own endpoint</strong>, off this device — its accuracy and privacy are whatever that endpoint provides. A machine translation is a draft, not a certified translation. The text export uses Latin-1 fonts, so a PDF export of a non-Latin script may not render; use the .txt export for those.</ResultConsequenceNote>}
   </ToolForm>;
 }
 
@@ -4954,6 +5047,9 @@ function SignPdfTool({ tool }: { tool: Tool }) {
   const [location, setLocation] = useState("");
   const [visible, setVisible] = useState(false);
   const [page, setPage] = useState("1");
+  const [useTimestamp, setUseTimestamp] = useState(false);
+  const [tsaUrl, setTsaUrl] = useState("");
+  const [timestamped, setTimestamped] = useState(false);
   const [status, setStatus] = useState(initialStatus);
 
   // The certificate password lives only in this component's state — never
@@ -4964,10 +5060,11 @@ function SignPdfTool({ tool }: { tool: Tool }) {
   return <ToolForm status={status} onReset={() => {
     setFiles([]); setCertFiles([]); forgetPassword();
     setSignerName(""); setReason(""); setLocation(""); setVisible(false); setPage("1");
+    setUseTimestamp(false); setTsaUrl(""); setTimestamped(false);
     setStatus(initialStatus);
   }}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Applies a real cryptographic signature — a detached PKCS#7 / CMS SignedData over the document's bytes (SHA-256), added through an incremental update so any signatures already on the file stay valid. This is not a picture of a signature: it proves the document has not changed since signing and identifies the signer by their certificate. Everything runs in this browser; the certificate and its password never leave this page. There is no trusted timestamp (no RFC 3161 server), so the signing time is self-asserted.
+      Applies a real cryptographic signature — a detached PKCS#7 / CMS SignedData over the document's bytes (SHA-256), added through an incremental update so any signatures already on the file stay valid. This is not a picture of a signature: it proves the document has not changed since signing and identifies the signer by their certificate. Signing runs entirely in this browser; the certificate and its password never leave this page. By default there is no trusted timestamp, so the signing time is self-asserted — turn on the optional RFC 3161 timestamp below to have a third-party authority attest the time.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} label="Choose the PDF to sign" />
     <FileControl accept=".p12,.pfx,application/x-pkcs12" files={certFiles} setFiles={setCertFiles} label="Choose your certificate (.p12 / .pfx)" />
@@ -4977,24 +5074,45 @@ function SignPdfTool({ tool }: { tool: Tool }) {
     <Input label="Location (optional)" value={location} onChange={setLocation} placeholder="e.g. Bengaluru, IN" />
     <Checkbox label="Add a visible signature block (lower-left of the chosen page)" checked={visible} onChange={setVisible} />
     {visible && <Input label="Page for the visible block" value={page} onChange={setPage} type="number" helper="1 is the first page." />}
+    <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold leading-6 text-neutral-600">
+      <Checkbox label="Add a trusted RFC 3161 timestamp (contacts a third-party TSA over the network)" checked={useTimestamp} onChange={setUseTimestamp} />
+      {useTimestamp ? (
+        <div className="grid gap-2">
+          <p className="text-xs font-semibold text-neutral-500">
+            This is the one network request signing makes, and only because you asked: a SHA-256 hash of your signature (never the document) is POSTed to the TSA you enter. The default Content-Security-Policy blocks all outbound connections, so a TSA only works on a deploy where you have added <span className="whitespace-pre">connect-src 'self' &lt;TSA origin&gt;</span> to index.html and public/_headers. If it is blocked, the error tells you exactly what to add. With the box unticked, signing stays 100% local.
+          </p>
+          <Input label="TSA URL (RFC 3161)" value={tsaUrl} onChange={setTsaUrl} placeholder="https://freetsa.org/tsr" helper="Your own or a public RFC 3161 timestamp authority endpoint." />
+        </div>
+      ) : (
+        <p className="text-xs font-semibold text-neutral-500">Off: signing is 100% local and the signing time is self-asserted.</p>
+      )}
+    </div>
     <PrimaryButton label="Sign PDF" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       const [cert] = validateFiles(certFiles, CERT_FILE_OPTIONS);
       if (!password) throw new Error("Enter the certificate password.");
+      if (useTimestamp && !tsaUrl.trim()) throw new Error("Enter the TSA URL, or turn off the trusted timestamp.");
       const pageIndex = Math.max(1, parseInt(page, 10) || 1) - 1;
       const result = await signPdf(file, {
         p12: cert, password,
         name: signerName.trim(), reason: reason.trim(), location: location.trim(),
         visible, pageIndex,
+        timestamp: useTimestamp, tsaUrl: tsaUrl.trim(),
       });
       downloadBytes(result.bytes, withExtension(`${safeFilename(file.name)}-signed`, "pdf"), "application/pdf");
+      setTimestamped(Boolean(result.timestamp));
       const trust = result.selfSigned
         ? "This certificate is self-signed, so a reader will report \"signature valid, signer identity unknown\" until you add the certificate to its trust store."
         : "A reader will mark the signer trusted only if it already trusts the certificate's issuing CA.";
       const where = result.visible ? ` A visible block was drawn on page ${result.signedPage} of ${result.pageCount}.` : "";
-      return `Signed as ${result.subjectCommonName || "the certificate holder"} · serial ${result.serialHex}.\nDetached PKCS#7/CMS, SHA-256, signed ${result.signingTime.toLocaleString()}.${where}\n${trust}`;
+      const time = result.timestamp
+        ? `TSA-attested time ${result.timestamp.time ? new Date(result.timestamp.time).toLocaleString() : "(granted)"} from ${result.timestamp.tsa || "the TSA"}.`
+        : `Signing time (self-asserted) ${result.signingTime.toLocaleString()}.`;
+      return `Signed as ${result.subjectCommonName || "the certificate holder"} · serial ${result.serialHex}.\nDetached PKCS#7/CMS, SHA-256. ${time}${where}\n${trust}`;
     })} />
-    {status.tone === "success" && <ResultConsequenceNote>The signature proves document integrity and signer identity, but it is <strong>not</strong> timestamped by a trusted authority — the signing time is asserted by whoever signed. Whether a reader shows the signature as "trusted" depends on that reader trusting the certificate's CA.</ResultConsequenceNote>}
+    {status.tone === "success" && (timestamped
+      ? <ResultConsequenceNote>This signature carries a trusted RFC 3161 timestamp, so the signing time is attested by the TSA rather than self-asserted. Whether a reader shows the signature as "trusted" still depends on that reader trusting the certificate's CA (and the TSA's).</ResultConsequenceNote>
+      : <ResultConsequenceNote>The signature proves document integrity and signer identity, but it is <strong>not</strong> timestamped by a trusted authority — the signing time is asserted by whoever signed. Turn on the RFC 3161 timestamp to have a TSA attest it. Whether a reader shows the signature as "trusted" depends on that reader trusting the certificate's CA.</ResultConsequenceNote>)}
   </ToolForm>;
 }
 
@@ -5026,6 +5144,9 @@ function SignatureCard({ sig, index }: { sig: any; index: number }) {
         <InfoRow label="Serial" value={sig.serialHex || "—"} />
         <InfoRow label="Certificate valid" value={`${fmtDate(sig.notBefore)} → ${fmtDate(sig.notAfter)}`} />
         <InfoRow label="Signing time" value={sig.signingTime ? fmtDate(sig.signingTime) : (sig.declaredSigningTime || "—")} />
+        <InfoRow label="Timestamp" value={sig.timestamp?.present
+          ? `TSA-attested ${sig.timestamp.time ? fmtDate(sig.timestamp.time) : "(time unreadable)"}${sig.timestamp.tsaCommonName ? ` · ${sig.timestamp.tsaCommonName}` : ""}${sig.timestamp.imprintMatches === false ? " · WARNING: token does not cover this signature" : ""}`
+          : "None — signing time is self-asserted"} />
         <InfoRow label="Digest" value={`${sig.hashName || "SHA-256"} · integrity ${sig.integrity ? "matches" : "MISMATCH"}`} />
         <InfoRow label="Coverage" value={sig.coversWholeDocument ? "entire document" : "part of the document (additions after signing)"} />
         <InfoRow label="Type" value={sig.subFilter || "adbe.pkcs7.detached"} />
@@ -8020,6 +8141,146 @@ function BatchProcessTool({ tool }: { tool: Tool }) {
     })} />
 
     {progress && <ProgressBar value={progress.current} total={progress.total} label={`Processing ${progress.current} of ${progress.total} — ${progress.name}`} />}
+
+    {result && (result.outputs.length > 0 || result.failures.length > 0) && (
+      <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold">
+        {result.outputs.length > 0 && (
+          <div className="grid gap-1">
+            <p className="text-xs font-black uppercase text-neutral-500">Succeeded ({result.outputs.length})</p>
+            <ul className="grid gap-1">
+              {result.outputs.map((item) => <li key={item.name} className="break-words text-[var(--foreground)]">{item.name}</li>)}
+            </ul>
+          </div>
+        )}
+        {result.failures.length > 0 && (
+          <div className="grid gap-1">
+            <p className="text-xs font-black uppercase text-red-700 [.dark_&]:text-[#f8b4b4]">Failed / skipped ({result.failures.length})</p>
+            <ul className="grid gap-1">
+              {result.failures.map((item) => <li key={`${item.name}-${item.reason}`} className="break-words text-neutral-600">{item.name} — {item.reason}</li>)}
+            </ul>
+          </div>
+        )}
+      </div>
+    )}
+
+    {result && result.outputs.length > 0 && (
+      <PrimaryButton label={result.outputs.length === 1 ? "Download result" : "Download ZIP"} onClick={downloadResult} />
+    )}
+  </ToolForm>;
+}
+
+/**
+ * Shared workflow step editor (presets + add-step + per-step fields), so the
+ * Batch Workflow tool reuses the exact chain-building UI without duplicating it.
+ */
+function WorkflowStepsEditor({ steps, setSteps }: { steps: WorkflowStep[]; setSteps: React.Dispatch<React.SetStateAction<WorkflowStep[]>> }) {
+  const [nextOp, setNextOp] = useState(workflowOpIds[0]);
+
+  const move = (index: number, delta: number) => setSteps((previous) => {
+    const target = index + delta;
+    if (target < 0 || target >= previous.length) return previous;
+    const next = [...previous];
+    [next[index], next[target]] = [next[target], next[index]];
+    return next;
+  });
+  const setOption = (index: number, key: string, value: string) => setSteps((previous) =>
+    previous.map((step, position) => (position === index ? { ...step, options: { ...step.options, [key]: value } } : step)));
+
+  return (
+    <>
+      <div className="grid gap-2">
+        <p className="text-xs font-black uppercase text-neutral-500">Presets — one click fills a chain you can still edit</p>
+        <div className="flex flex-wrap gap-2">
+          {workflowPresets.map((preset) => (
+            <button key={preset.id} type="button" className="quick-chip" title={preset.hint} onClick={() => setSteps(presetSteps(preset.id) as WorkflowStep[])}>
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+        <Select label="Add a step" value={nextOp} onChange={setNextOp} options={workflowOpIds} labels={workflowOpLabels} />
+        <SecondaryButton label="Add step" onClick={() => setSteps((previous) => [...previous, { op: nextOp, options: defaultStepOptions(nextOp) as Record<string, string> }])} />
+      </div>
+      {steps.length ? (
+        <div className="grid gap-2">
+          {steps.map((step, index) => {
+            const definition = workflowOps.find((op) => op.id === step.op);
+            return (
+              <div key={`${step.op}-${index}`} className="surface-card wabi-card-edge grid gap-2 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-black">{index + 1}. {definition?.label || step.op}</span>
+                  <span className="flex gap-2">
+                    <button className="secondary-button" type="button" aria-label="Move step up" onClick={() => move(index, -1)}>Up</button>
+                    <button className="secondary-button" type="button" aria-label="Move step down" onClick={() => move(index, 1)}>Down</button>
+                    <button className="secondary-button" type="button" onClick={() => setSteps((previous) => previous.filter((_, position) => position !== index))}>Remove</button>
+                  </span>
+                </div>
+                {definition?.hint && <p className="text-xs font-semibold text-neutral-500">{definition.hint}</p>}
+                {definition?.fields.length ? (
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {definition.fields.map((field) => field.type === "select"
+                      ? <Select key={field.key} label={field.label} value={String(step.options[field.key] ?? "")} onChange={(value) => setOption(index, field.key, value)} options={field.options || []} />
+                      : <MiniField key={field.key} label={field.label} value={String(step.options[field.key] ?? "")} placeholder={field.placeholder} onChange={(value) => setOption(index, field.key, value)} />)}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : <p className="text-sm font-semibold text-neutral-500">No steps yet. Add one above, or pick a preset, to build a pipeline.</p>}
+    </>
+  );
+}
+
+function BatchWorkflowTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [steps, setSteps] = useState<WorkflowStep[]>([]);
+  const [progress, setProgress] = useState<{ file: number; files: number; name: string; step: number; steps: number; label: string } | null>(null);
+  const [result, setResult] = useState<{ outputs: { name: string; bytes: Uint8Array }[]; failures: { name: string; reason: string }[]; total: number } | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => { setFiles([]); setSteps([]); setProgress(null); setResult(null); setStatus(initialStatus); };
+
+  const downloadResult = () => runSafely(setStatus, async () => {
+    if (!result?.outputs.length) throw new Error("Run the batch first — there is nothing to download.");
+    if (result.outputs.length === 1) {
+      const [only] = result.outputs;
+      downloadBytes(only.bytes, only.name, "application/pdf");
+      return `${only.name} downloaded.`;
+    }
+    const zipName = withExtension("myfilekit-batch-workflow", "zip");
+    downloadBytes(zipOutputs(result.outputs), zipName, "application/zip");
+    return `${zipName} downloaded (${result.outputs.length} files).`;
+  });
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Build a workflow once — a chain of steps, or a one-click preset — and run it over many PDFs at once, up to {MAX_WORKFLOW_BATCH_FILES}. Each file goes through the identical pipeline; if one file fails, the rest keep going and you get a per-file report. Successful results download together as a ZIP (or as a single PDF when there is only one). Steps marked "rasterises pages" turn text into page images.
+    </div>
+
+    <WorkflowStepsEditor steps={steps} setSteps={setSteps} />
+
+    <FileControl accept="application/pdf" multiple files={files} setFiles={(next) => { setFiles(next); setResult(null); setProgress(null); }} label={`Choose or drop PDFs (up to ${MAX_WORKFLOW_BATCH_FILES})`} />
+    {files.length > 0 && <p className="text-xs font-semibold text-neutral-500">{files.length} file{files.length === 1 ? "" : "s"} selected.</p>}
+
+    <PrimaryButton label="Run workflow over all files" disabled={!files.length || !steps.length} onClick={() => runSafely(setStatus, async () => {
+      const valid = validateFiles(files, tool.file);
+      if (!steps.length) throw new Error("Add at least one step to the workflow.");
+      setResult(null);
+      setProgress(null);
+      const run = await runWorkflowBatch(valid, steps, {
+        maxFiles: MAX_WORKFLOW_BATCH_FILES,
+        onProgress: (info: any) => { if (info.phase !== "failed") setProgress(info); },
+      });
+      setProgress(null);
+      setResult(run);
+      if (!run.outputs.length) throw new Error(`No files could be processed. ${run.failures.length} failed — see the report below.`);
+      const failNote = run.failures.length ? ` ${run.failures.length} failed.` : "";
+      return `Processed ${run.outputs.length} of ${run.total} file${run.total === 1 ? "" : "s"} through ${steps.length} step${steps.length === 1 ? "" : "s"}.${failNote}`;
+    })} />
+
+    {progress && <ProgressBar value={progress.file} total={progress.files} label={`File ${progress.file} of ${progress.files} — ${progress.name} · step ${progress.step} of ${progress.steps} (${progress.label})`} />}
 
     {result && (result.outputs.length > 0 || result.failures.length > 0) && (
       <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold">

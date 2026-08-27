@@ -8,11 +8,47 @@
  * after a deploy. Bumping CACHE_VERSION invalidates every previous cache.
  */
 
-const CACHE_VERSION = "myfilekit-v1";
+const CACHE_VERSION = "myfilekit-v2";
 
-// install: activate the new worker immediately.
+// App-shell URLs to precache on install so the app opens offline after the first
+// visit. All are same-origin and local — NO CDN or cross-origin URL appears here,
+// which keeps the strict Content-Security-Policy intact. The hashed JS/CSS bundles
+// are named at build time, so they are cached at runtime (network-first) on first
+// load rather than listed here; this shell plus that runtime cache make the app
+// load with no network.
+const PRECACHE_URLS = [
+  "/",
+  "/index.html",
+  "/manifest.webmanifest",
+  "/register-sw.js",
+  "/icon-192.png",
+  "/icon-512.png",
+];
+
+// install: precache the app shell, then activate the new worker immediately.
 self.addEventListener("install", (event) => {
-  self.skipWaiting();
+  event.waitUntil(
+    (async () => {
+      try {
+        const cache = await caches.open(CACHE_VERSION);
+        // Precache each URL independently so one 404 (e.g. in dev) never fails the
+        // whole install, unlike cache.addAll.
+        await Promise.all(
+          PRECACHE_URLS.map(async (url) => {
+            try {
+              const response = await fetch(url, { cache: "reload" });
+              if (response && response.ok) await cache.put(url, response.clone());
+            } catch (err) {
+              // Best-effort: skip anything that cannot be fetched at install time.
+            }
+          })
+        );
+      } catch (err) {
+        // Never let precache failures block installation.
+      }
+      await self.skipWaiting();
+    })()
+  );
 });
 
 // activate: take control of open clients and purge any old cache versions.

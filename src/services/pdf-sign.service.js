@@ -54,6 +54,8 @@ const OID = {
   contentType: "1.2.840.113549.1.9.3",
   messageDigest: "1.2.840.113549.1.9.4",
   signingTime: "1.2.840.113549.1.9.5",
+  timeStampToken: "1.2.840.113549.1.9.16.2.14", // id-aa-timeStampToken (RFC 3161, unsigned attr)
+  sha256: "2.16.840.1.101.3.4.2.1",
   commonName: "2.5.4.3",
   organization: "2.5.4.10",
   rsaEncryption: "1.2.840.113549.1.1.1",
@@ -778,6 +780,9 @@ export async function loadPkcs12(source, password) {
 // Build the SignedData over `dataToSign`, with signed attributes (contentType,
 // signingTime, messageDigest). pkijs signs the DER of the signed attributes; we
 // compute and insert the messageDigest ourselves so the attribute is correct.
+// Returns the live pkijs objects so an OPTIONAL RFC-3161 timestamp (an *unsigned*
+// attribute, so it does not disturb the signature) can be attached before the
+// CMS is serialised.
 async function buildDetachedCms(dataToSign, signingDate, key, signerCert, chainCerts) {
   const eng = engine();
   const hashName = "SHA-256";
@@ -804,9 +809,130 @@ async function buildDetachedCms(dataToSign, signingDate, key, signerCert, chainC
   });
 
   await signedData.sign(key.privateKey, 0, hashName, new ArrayBuffer(0), eng);
+  return { signedData, signerInfo: signedData.signerInfos[0] };
+}
 
+function serializeCms(signedData) {
   const contentInfo = new pkijs.ContentInfo({ contentType: OID.signedData, content: signedData.toSchema(true) });
   return new Uint8Array(contentInfo.toSchema().toBER());
+}
+
+// ---------------------------------------------------------------------------
+// RFC 3161 trusted timestamp (OPTIONAL). Off by default; when on, this is the
+// ONE network call the signer makes — a POST to the user's own / a public TSA.
+// The TSA never sees the document, only a SHA-256 hash of the CMS signature.
+// ---------------------------------------------------------------------------
+
+export function tsaOrigin(tsaUrl) {
+  try { return new URL(String(tsaUrl || "")).origin; } catch { return ""; }
+}
+
+/** The exact CSP change an operator has to make to allow a TSA. */
+export function tsaCspGuidance(tsaUrl) {
+  const origin = tsaOrigin(tsaUrl) || "https://your-tsa.example";
+  return `Add "connect-src 'self' ${origin}" to the Content-Security-Policy in both index.html and public/_headers, then rebuild and redeploy. The default MyFileKit policy allows no outbound connections on purpose, so a TSA only works on a deploy you control.`;
+}
+
+/**
+ * Builds a DER-encoded RFC-3161 TimeStampReq whose message imprint is the given
+ * SHA-256 digest. Exported so its ASN.1 structure is unit-testable. `certReq`
+ * asks the TSA to return its certificate inside the token.
+ */
+export function buildTimestampRequest(messageImprintDigest, { nonce, certReq = true } = {}) {
+  const digest = toBytes(messageImprintDigest);
+  const request = new pkijs.TimeStampReq({
+    version: 1,
+    messageImprint: new pkijs.MessageImprint({
+      hashAlgorithm: new pkijs.AlgorithmIdentifier({ algorithmId: OID.sha256 }),
+      hashedMessage: new asn1js.OctetString({ valueHex: bufOf(digest) }),
+    }),
+    certReq,
+  });
+  if (nonce) request.nonce = new asn1js.Integer({ valueHex: bufOf(toBytes(nonce)) });
+  return new Uint8Array(request.toSchema().toBER());
+}
+
+// Pull { genTime, tsaCommonName, imprintDigest } out of an RFC-3161 token
+// (a CMS ContentInfo whose eContent is a TSTInfo). Best-effort; returns null on
+// anything unparseable so verification never crashes on a weird token.
+function readTstInfo(tokenContentInfo) {
+  try {
+    const signed = new pkijs.SignedData({ schema: tokenContentInfo.content });
+    const eContent = signed.encapContentInfo?.eContent;
+    if (!eContent) return null;
+    // The encapsulated TSTInfo can be a primitive OR a constructed OCTET STRING.
+    // A constructed one has an empty valueHexView, so fall back to getValue(),
+    // which concatenates the chunks.
+    let der = new Uint8Array(eContent.valueBlock.valueHexView);
+    if (!der.length && typeof eContent.getValue === "function") der = new Uint8Array(eContent.getValue());
+    if (!der.length) return null;
+    const asn1 = asn1js.fromBER(bufOf(der));
+    if (asn1.offset === -1) return null;
+    const tst = new pkijs.TSTInfo({ schema: asn1.result });
+    let tsaCommonName = "";
+    const tsaCert = (signed.certificates || []).find((c) => c instanceof pkijs.Certificate);
+    if (tsaCert) tsaCommonName = certCommonName(tsaCert, "subject");
+    return {
+      genTime: tst.genTime instanceof Date ? tst.genTime : null,
+      tsaCommonName,
+      imprintDigest: tst.messageImprint ? new Uint8Array(tst.messageImprint.hashedMessage.valueBlock.valueHexView) : null,
+      hashAlgorithm: tst.messageImprint?.hashAlgorithm?.algorithmId || "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Requests a timestamp token over `signatureBytes` (the CMS SignerInfo signature)
+ * from `tsaUrl`. This is a real network POST of application/timestamp-query. A
+ * blocked/unreachable TSA surfaces the same actionable connect-src guidance the
+ * LLM adapter uses. `fetchImpl` keeps the happy path testable without a live TSA.
+ */
+async function requestTimestampToken(tsaUrl, signatureBytes, { fetchImpl, signal } = {}) {
+  const url = String(tsaUrl || "").trim();
+  if (!url) throw new Error("Enter the URL of an RFC 3161 timestamp authority (TSA).");
+  let parsed;
+  try { parsed = new URL(url); } catch { throw new Error("The TSA URL must be a full URL, for example https://freetsa.org/tsr"); }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error("The TSA URL must use https:// (or http:// for a local TSA).");
+
+  const digest = await digestBytes("SHA-256", signatureBytes);
+  const nonce = new Uint8Array(16);
+  webcrypto.getRandomValues(nonce);
+  const requestDer = buildTimestampRequest(digest, { nonce, certReq: true });
+
+  const request = fetchImpl || (typeof fetch === "function" ? fetch : null);
+  if (!request) throw new Error("This environment has no fetch API, so a TSA cannot be contacted.");
+
+  let response;
+  try {
+    response = await request(url, {
+      method: "POST",
+      signal,
+      headers: { "Content-Type": "application/timestamp-query", Accept: "application/timestamp-reply" },
+      body: bufOf(requestDer),
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("The timestamp request was cancelled.");
+    throw new Error(`The browser blocked or could not reach the timestamp authority at ${tsaOrigin(url) || "the TSA"}. ${tsaCspGuidance(url)} If the policy already allows it, check that the TSA is reachable and sends CORS headers.`);
+  }
+  if (!response.ok) {
+    throw new Error(`The timestamp authority answered ${response.status}${response.statusText ? ` ${response.statusText}` : ""}. Check the TSA URL and that it speaks RFC 3161.`);
+  }
+
+  const replyBytes = new Uint8Array(await response.arrayBuffer());
+  const asn1 = asn1js.fromBER(bufOf(replyBytes));
+  if (asn1.offset === -1) throw new Error("The timestamp authority's reply is not valid DER.");
+  let resp;
+  try { resp = new pkijs.TimeStampResp({ schema: asn1.result }); }
+  catch { throw new Error("The timestamp authority's reply is not a valid RFC 3161 TimeStampResp."); }
+  const statusValue = resp.status?.status;
+  // 0 = granted, 1 = grantedWithMods; anything else is a rejection.
+  if (statusValue !== 0 && statusValue !== 1) {
+    throw new Error(`The timestamp authority rejected the request (PKIStatus ${statusValue ?? "unknown"}).`);
+  }
+  if (!resp.timeStampToken) throw new Error("The timestamp authority granted the request but returned no token.");
+  return resp.timeStampToken; // a pkijs.ContentInfo
 }
 
 // ---------------------------------------------------------------------------
@@ -1008,11 +1134,27 @@ export async function signPdf(pdfSource, options = {}) {
     idPair: existingIdPair(doc),
   });
 
-  // --- Measure ByteRange, patch it, sign, inject the CMS ---
+  // --- Measure ByteRange, patch it, sign, optionally timestamp, inject the CMS ---
   const withByteRange = fillByteRange(built.bytes, built.sigDictOffset);
-  const cmsDer = await buildDetachedCms(withByteRange.signedData, signingDate, key, key.signerCert, key.chain);
+  const { signedData, signerInfo } = await buildDetachedCms(withByteRange.signedData, signingDate, key, key.signerCert, key.chain);
+
+  // OPTIONAL: attach a trusted RFC-3161 timestamp as an unsigned attribute. This
+  // is the only network call signing ever makes, and only when the caller asks.
+  let timestamp = null;
+  if (options.timestamp) {
+    const signatureBytes = new Uint8Array(signerInfo.signature.valueBlock.valueHexView);
+    const token = await requestTimestampToken(options.tsaUrl, signatureBytes, { fetchImpl: options.fetchImpl, signal: options.signal });
+    signerInfo.unsignedAttrs = new pkijs.SignedAndUnsignedAttributes({
+      type: 1,
+      attributes: [new pkijs.Attribute({ type: OID.timeStampToken, values: [token.toSchema()] })],
+    });
+    const info = readTstInfo(token);
+    timestamp = { tsa: tsaOrigin(options.tsaUrl), time: info?.genTime || null, tsaCommonName: info?.tsaCommonName || "" };
+  }
+
+  const cmsDer = serializeCms(signedData);
   if (cmsDer.length > CONTENTS_BYTES) {
-    throw new Error(`The signature is larger than the reserved space (${cmsDer.length} > ${CONTENTS_BYTES} bytes). This certificate chain is unusually large.`);
+    throw new Error(`The signature is larger than the reserved space (${cmsDer.length} > ${CONTENTS_BYTES} bytes).${options.timestamp ? " The timestamp token pushed it over the limit — try a TSA that omits its certificate, or a smaller certificate chain." : " This certificate chain is unusually large."}`);
   }
   injectContents(withByteRange.bytes, withByteRange.contentsOpen, cmsDer);
 
@@ -1024,6 +1166,7 @@ export async function signPdf(pdfSource, options = {}) {
     keyType: key.keyType,
     chainLength: key.chain.length,
     signingTime: signingDate,
+    timestamp,
     visible,
     signedPage: pageIndex + 1,
     pageCount: pages.length,
@@ -1218,6 +1361,7 @@ export async function verifyPdfSignatures(pdfSource) {
       error: error?.message || "Could not verify this signature.",
       integrity: false,
       signatureValid: false,
+      timestamp: { present: false },
       verdict: "invalid",
       detail: error?.message || "Could not parse this signature.",
     }));
@@ -1304,6 +1448,26 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes) {
     signingTime = (t.toDate ? t.toDate() : t.valueBlock?.value) || null;
   }
 
+  // RFC-3161 trusted timestamp: an unsigned attribute carrying a TSA-issued token.
+  // When present the signing time is TSA-attested (not just self-asserted); we
+  // also confirm the token's imprint really is over THIS signature.
+  let timestamp = { present: false };
+  const tsAttr = signerInfo.unsignedAttrs?.attributes?.find((a) => a.type === OID.timeStampToken);
+  if (tsAttr && tsAttr.values[0]) {
+    try {
+      const tokenInfo = new pkijs.ContentInfo({ schema: tsAttr.values[0] });
+      const info = readTstInfo(tokenInfo);
+      let imprintMatches = null;
+      if (info?.imprintDigest && info.hashAlgorithm && HASH_BY_OID[info.hashAlgorithm]) {
+        const overSignature = await digestBytes(HASH_BY_OID[info.hashAlgorithm], new Uint8Array(signerInfo.signature.valueBlock.valueHexView));
+        imprintMatches = bytesEqual(info.imprintDigest, overSignature);
+      }
+      timestamp = { present: true, time: info?.genTime || null, tsaCommonName: info?.tsaCommonName || "", imprintMatches };
+    } catch {
+      timestamp = { present: true, time: null, tsaCommonName: "", imprintMatches: null, error: "The timestamp token could not be read." };
+    }
+  }
+
   let verdict;
   let detail;
   if (unsupported) {
@@ -1336,6 +1500,7 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes) {
     coversWholeDocument,
     byteRange: range,
     contentsBytes: contentsBytes.length,
+    timestamp,
     verdict,
     detail,
   };

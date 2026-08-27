@@ -170,6 +170,95 @@ export function buildSummaryPrompt(documentText, { maxWords = 180, limit = MAX_P
   };
 }
 
+/**
+ * Per-request character budget for translation. Deliberately well below
+ * MAX_PROMPT_CHARACTERS so the translated output (which is roughly as long as the
+ * input) also fits inside a typical model context alongside the source chunk.
+ */
+export const TRANSLATE_CHUNK_CHARACTERS = 4000;
+
+/**
+ * Splits a document into ordered chunks that each fit `limit` characters, so a
+ * long document can be translated piece by piece and reassembled in order.
+ *
+ * Breaks are preferred at a paragraph boundary, then a line, then a space, and
+ * only as a last resort mid-run (a single giant token). No non-whitespace
+ * character is ever dropped or reordered: the only bytes lost between chunks are
+ * the whitespace that separated them, so `chunks.join("")` with whitespace
+ * removed equals the source with whitespace removed. Pure and Node-testable.
+ */
+export function chunkForTranslation(text, limit = TRANSLATE_CHUNK_CHARACTERS) {
+  const value = String(text || "");
+  const max = Math.max(1, Math.trunc(Number(limit) || TRANSLATE_CHUNK_CHARACTERS));
+  if (!value.trim()) return [];
+  const chunks = [];
+  let remaining = value;
+  const floor = Math.floor(max * 0.5); // never accept a break that wastes over half a chunk
+  while (remaining.length > max) {
+    let cut = remaining.lastIndexOf("\n\n", max);
+    if (cut < floor) cut = remaining.lastIndexOf("\n", max);
+    if (cut < floor) cut = remaining.lastIndexOf(" ", max);
+    if (cut < floor) cut = max; // an unbroken run longer than a chunk: hard cut
+    chunks.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut).replace(/^\s+/, "");
+  }
+  if (remaining.trim()) chunks.push(remaining);
+  return chunks;
+}
+
+/** Prompt for translating one chunk into `targetLanguage`. Output is only the translation. */
+export function buildTranslationPrompt(chunk, targetLanguage) {
+  const language = String(targetLanguage || "").trim();
+  if (!language) throw new Error("Choose a target language first.");
+  const text = String(chunk || "");
+  if (!text.trim()) throw new Error("There is nothing to translate.");
+  return {
+    system: `You are a professional translator. Translate the user's text into ${language}. Preserve the meaning, tone, and line breaks. Output only the translation itself — no notes, no explanations, and do not repeat the original text.`,
+    prompt: text,
+    language,
+  };
+}
+
+/**
+ * Translates document text into `targetLanguage` through the user's own endpoint,
+ * one chunk at a time, reassembling the result in order.
+ *
+ * This makes network requests ONLY through `requestChatCompletion`, which refuses
+ * before touching `fetch` whenever the endpoint is off or incomplete — so an
+ * unconfigured install sends nothing, chunking or not. `onProgress(done, total)`
+ * fires before each chunk and once at the end for a determinate progress bar.
+ *
+ * @param {string} documentText
+ * @param {{ settings?: any, targetLanguage?: string, onProgress?: (done: number, total: number) => void, signal?: AbortSignal, fetchImpl?: typeof fetch, limit?: number }} [options]
+ * @returns {Promise<{ text: string, chunks: number, language: string }>}
+ */
+export async function translateDocument(documentText, { settings, targetLanguage, onProgress, signal, fetchImpl, limit = TRANSLATE_CHUNK_CHARACTERS } = {}) {
+  const language = String(targetLanguage || "").trim();
+  if (!language) throw new Error("Choose a target language first.");
+  const source = String(documentText || "");
+  if (!source.trim()) throw new Error("Extract the document text before translating.");
+
+  const chunks = chunkForTranslation(source, limit);
+  if (!chunks.length) throw new Error("There is nothing to translate.");
+
+  const parts = [];
+  for (let index = 0; index < chunks.length; index += 1) {
+    onProgress?.(index, chunks.length);
+    const { system, prompt } = buildTranslationPrompt(chunks[index], language);
+    // The refuse-before-fetch gate lives in requestChatCompletion: the first call
+    // throws without any network access when the endpoint is off or incomplete.
+    const translated = await requestChatCompletion({
+      settings, system, prompt, signal, fetchImpl,
+      temperature: 0.1,
+      // Translations run about as long as the source; give the reply ample room.
+      maxTokens: Math.max(512, Math.min(4000, Math.ceil(chunks[index].length / 2) + 256)),
+    });
+    parts.push(translated);
+  }
+  onProgress?.(chunks.length, chunks.length);
+  return { text: parts.join("\n\n"), chunks: chunks.length, language };
+}
+
 export function buildAnswerPrompt(question, passages, { limit = MAX_PROMPT_CHARACTERS } = {}) {
   const query = String(question || "").trim();
   if (!query) throw new Error("Ask a question first.");

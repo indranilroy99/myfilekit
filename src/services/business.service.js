@@ -14,6 +14,7 @@ import { sanitizePdf } from "./pdf-sanitize.service.js";
 import { loadXlsx } from "./office.service.js";
 import { parseCsv } from "./csv.service.js";
 import { parsePageRanges } from "../utils/format.js";
+import { safeFilename } from "../utils/safe-filename.js";
 
 const A4 = { width: 595.28, height: 841.89 };
 const MARGIN = 42;
@@ -1122,6 +1123,69 @@ export async function runWorkflow(sourceFile, steps, { onStep } = {}) {
     }
   }
   return { ok: true, bytes, completed, failed: null };
+}
+
+/** Hard cap on how many files one workflow batch may hold. */
+export const MAX_WORKFLOW_BATCH_FILES = 100;
+
+/**
+ * Applies the SAME workflow (a chain of steps, or a preset's steps) to MANY PDFs,
+ * one file at a time. This is the "many-ops x many-files" pipeline: it reuses
+ * runWorkflow per file, so each file goes through the identical chain the
+ * single-file Workflow Builder would run.
+ *
+ * Per-file failures are isolated — a file whose workflow fails (a bad step or a
+ * corrupt PDF) is recorded and the loop continues, so one bad file never aborts
+ * the batch. `onProgress` reports both axes for a determinate "file X of Y, step
+ * A of B" bar. Output names are de-duplicated. Pure loop core, Node-testable.
+ *
+ * @param {File[]} files
+ * @param {{ op: string, options?: Record<string, unknown> }[]} steps
+ * @param {{ onProgress?: (info: { file: number, files: number, name: string, step: number, steps: number, label: string, phase: string }) => void, maxFiles?: number }} [runtime]
+ * @returns {Promise<{ total: number, outputs: { name: string, bytes: Uint8Array }[], failures: { name: string, reason: string }[] }>}
+ */
+export async function runWorkflowBatch(files, steps, { onProgress, maxFiles = MAX_WORKFLOW_BATCH_FILES } = {}) {
+  const list = Array.from(files || []);
+  if (!list.length) throw new Error("Choose at least one PDF first.");
+  if (list.length > maxFiles) throw new Error(`Choose no more than ${maxFiles} files at a time. You selected ${list.length}.`);
+  const stepList = Array.isArray(steps) ? steps : [];
+  if (!stepList.length) throw new Error("Add at least one step to the workflow.");
+  for (const step of stepList) {
+    if (!Object.hasOwn(WORKFLOW_OPS, step?.op)) throw new Error(`"${step?.op}" is not a supported workflow step.`);
+  }
+
+  const outputs = [];
+  const failures = [];
+  const usedNames = new Set();
+  const uniqueName = (base, ext) => {
+    let candidate = `${base}.${ext}`;
+    let n = 2;
+    while (usedNames.has(candidate)) candidate = `${base}-${n++}.${ext}`;
+    usedNames.add(candidate);
+    return candidate;
+  };
+
+  for (let index = 0; index < list.length; index += 1) {
+    const file = list[index];
+    const name = String(file?.name || `file-${index + 1}`);
+    try {
+      const result = await runWorkflow(file, stepList, {
+        onStep: ({ step, total, label, phase }) => onProgress?.({
+          file: index + 1, files: list.length, name,
+          step, steps: total, label, phase,
+        }),
+      });
+      if (!result.ok) {
+        failures.push({ name, reason: `Step ${result.failed.step} (${result.failed.label}) failed: ${result.failed.message}` });
+        continue;
+      }
+      outputs.push({ name: uniqueName(`${safeFilename(name)}-workflow`, "pdf"), bytes: result.bytes });
+    } catch (error) {
+      failures.push({ name, reason: error?.message || "This file could not be processed." });
+    }
+  }
+
+  return { total: list.length, outputs, failures };
 }
 
 // --- Shared pdf-lib layout helpers -------------------------------------------

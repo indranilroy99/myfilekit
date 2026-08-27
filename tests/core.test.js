@@ -16,7 +16,8 @@ import { routeForHash } from "../src/router.js";
 import * as webrtc from "../src/services/webrtc.service.js";
 import * as whiteboard from "../src/services/whiteboard.service.js";
 import * as pdfCrypto from "../src/services/pdf-crypto.service.js";
-import { signPdf, verifyPdfSignatures, loadPkcs12 } from "../src/services/pdf-sign.service.js";
+import { signPdf, verifyPdfSignatures, loadPkcs12, buildTimestampRequest, tsaOrigin } from "../src/services/pdf-sign.service.js";
+import { chunkForTranslation, buildTranslationPrompt, translateDocument, TRANSLATE_CHUNK_CHARACTERS } from "../src/services/llm.service.js";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import { deflateSync, strToU8 } from "fflate";
@@ -4766,7 +4767,7 @@ test("isNew is boolean everywhere and flags the newest tools", () => {
     "edit-pdf-text-tool", "annotate-pdf-tool", "compare-pdf-tool", "sign-pdf-tool", "verify-signature-tool",
     "batch-process-tool", "smart-split-pdf-tool", "impose-pdf-tool", "bookmarks-editor-tool",
     "create-form-tool", "deskew-pdf-tool", "pdfa-prep-tool", "sanitize-pdf-tool", "extract-images-tool",
-    "accessibility-check-tool", "tag-pdf-tool",
+    "accessibility-check-tool", "tag-pdf-tool", "translate-pdf-tool", "batch-workflow-tool",
   ];
   for (const id of expectedNew) {
     assert.equal(tools.find((tool) => tool.id === id).isNew, true, `${id} should be isNew`);
@@ -5333,4 +5334,365 @@ test("Accessibility Check and Auto-Tag tools are registered, grouped, routed, an
 
   // The new Accessibility group is declared in the PDF Tools group order.
   assert.ok(categoryGroups["PDF Tools"].includes("Accessibility"), "Accessibility group registered in categoryGroups");
+});
+
+// ===========================================================================
+// Gap-closing features: Translate PDF, RFC-3161 timestamp, Batch Workflow, PWA
+// ===========================================================================
+
+// --- 1. Translate PDF (local-first: extraction local, translation opt-in) ---
+
+test("translate: an UNCONFIGURED endpoint sends ZERO network calls and refuses with configure guidance", async () => {
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error("network must not be reached"); };
+  try {
+    const off = { enabled: false, baseUrl: "", model: "", apiKey: "" };
+    await assert.rejects(
+      () => translateDocument("Some document text to translate.", { settings: off, targetLanguage: "French" }),
+      (error) => /switched off|Nothing was sent/i.test(error.message),
+      "an unconfigured endpoint refuses before any fetch",
+    );
+    // An incomplete-but-enabled endpoint must also refuse before fetch.
+    const incomplete = { enabled: true, baseUrl: "https://api.example/v1", model: "", apiKey: "" };
+    await assert.rejects(
+      () => translateDocument("Some text.", { settings: incomplete, targetLanguage: "French" }),
+      (error) => /incomplete|Nothing was sent/i.test(error.message),
+    );
+    assert.equal(calls, 0, "no network request was made for a default/unconfigured install");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("translate: chunkForTranslation splits a long doc into ordered, in-budget chunks losing no content", () => {
+  assert.deepEqual(chunkForTranslation(""), []);
+  assert.deepEqual(chunkForTranslation("   \n  "), []);
+  const short = "One short paragraph.";
+  assert.deepEqual(chunkForTranslation(short, 4000), [short]);
+
+  // Build a long document out of many paragraphs (each comfortably under the
+  // budget) so it must split on paragraph boundaries.
+  const paragraph = "The quick brown fox jumps over the lazy dog. ".repeat(10).trim();
+  const doc = Array.from({ length: 30 }, (_, i) => `Paragraph ${i + 1}. ${paragraph}`).join("\n\n");
+  const limit = 900;
+  const chunks = chunkForTranslation(doc, limit);
+  assert.ok(chunks.length > 1, "a long document splits into multiple chunks");
+  for (const chunk of chunks) assert.ok(chunk.length <= limit, `each chunk fits the ${limit}-char budget`);
+  // Order + completeness: concatenating the chunks (only inter-chunk whitespace is
+  // dropped) reproduces the source with whitespace removed.
+  const strip = (s) => s.replace(/\s+/g, "");
+  assert.equal(strip(chunks.join("")), strip(doc), "no non-whitespace character is dropped or reordered");
+  // Paragraph 1 appears in the first chunk and the last paragraph in the last.
+  assert.match(chunks[0], /Paragraph 1\./);
+  assert.match(chunks[chunks.length - 1], /Paragraph 30\./);
+});
+
+test("translate: an unbreakable run longer than a chunk is hard-cut, still in budget", () => {
+  const giant = "x".repeat(2500);
+  const chunks = chunkForTranslation(giant, 1000);
+  assert.ok(chunks.length >= 3);
+  for (const chunk of chunks) assert.ok(chunk.length <= 1000);
+  assert.equal(chunks.join(""), giant, "a hard cut keeps every character in order");
+});
+
+test("translate: buildTranslationPrompt names the language and validates input", () => {
+  const { system, prompt, language } = buildTranslationPrompt("Bonjour", "German");
+  assert.match(system, /German/);
+  assert.match(system, /only the translation/i);
+  assert.equal(prompt, "Bonjour");
+  assert.equal(language, "German");
+  assert.throws(() => buildTranslationPrompt("hi", ""), /target language/i);
+  assert.throws(() => buildTranslationPrompt("   ", "French"), /nothing to translate/i);
+});
+
+test("translate: with a fake endpoint, chunks are sent and reassembled IN ORDER (plumbing only)", async () => {
+  const settings = { enabled: true, baseUrl: "https://api.example/v1", model: "m", apiKey: "k" };
+  const seen = [];
+  // A fake OpenAI-compatible endpoint that tags each reply so order is observable.
+  const fetchImpl = async (url, opts) => {
+    assert.equal(url, "https://api.example/v1/chat/completions");
+    const body = JSON.parse(opts.body);
+    const user = body.messages.find((m) => m.role === "user").content;
+    seen.push(user);
+    return { ok: true, status: 200, statusText: "OK", json: async () => ({ choices: [{ message: { content: `T<${seen.length}>` } }] }) };
+  };
+  const doc = Array.from({ length: 12 }, (_, i) => `Block ${i + 1}. ${"word ".repeat(40).trim()}`).join("\n\n");
+  const limit = 600;
+  const expectedChunks = chunkForTranslation(doc, limit);
+  assert.ok(expectedChunks.length > 1);
+
+  const progress = [];
+  const result = await translateDocument(doc, { settings, targetLanguage: "Spanish", fetchImpl, limit, onProgress: (d, t) => progress.push([d, t]) });
+
+  assert.equal(result.chunks, expectedChunks.length, "one request per chunk");
+  assert.deepEqual(seen, expectedChunks, "chunks are sent to the endpoint in source order");
+  assert.equal(result.text, expectedChunks.map((_, i) => `T<${i + 1}>`).join("\n\n"), "replies are reassembled in order");
+  assert.deepEqual(progress[progress.length - 1], [expectedChunks.length, expectedChunks.length], "progress ends at 100%");
+});
+
+test("translate-pdf-tool is registered, routed, grouped under Work with PDFs, and wired", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const t = tools.find((tool) => tool.id === "translate-pdf-tool");
+  assert.ok(t, "translate-pdf-tool registered");
+  assert.equal(t.category, "Text & Data Tools");
+  assert.equal(t.group, "Work with PDFs");
+  assert.equal(t.status, "available");
+  assert.equal(t.localProcessing, true);
+  assert.deepEqual(t.acceptedTypes, ["application/pdf"]);
+  assert.equal(routeForHash(t.route).tool.id, "translate-pdf-tool");
+  assert.ok(appSource.includes('"translate-pdf-tool"'), "wired into ToolRenderer");
+  assert.ok(appSource.includes("translateDocument"), "uses the gated translate service");
+});
+
+// --- 2. RFC-3161 trusted timestamp ------------------------------------------
+
+test("timestamp: buildTimestampRequest is a well-formed TimeStampReq with a SHA-256 imprint of the input", () => {
+  const digest = new Uint8Array(32);
+  for (let i = 0; i < 32; i += 1) digest[i] = (i * 7 + 3) & 0xff;
+  const der = buildTimestampRequest(digest, { certReq: true });
+  // Assert the ASN.1 structure by parsing it back through pkijs.
+  const parsed = new pkijs.TimeStampReq({ schema: asn1js.fromBER(bufOf(der)).result });
+  assert.equal(parsed.version, 1, "TimeStampReq version 1");
+  assert.equal(parsed.messageImprint.hashAlgorithm.algorithmId, "2.16.840.1.101.3.4.2.1", "SHA-256 imprint algorithm");
+  assert.equal(parsed.certReq, true, "certReq asks the TSA to return its certificate");
+  const imprint = new Uint8Array(parsed.messageImprint.hashedMessage.valueBlock.valueHexView);
+  assert.equal(imprint.length, 32, "SHA-256 imprint is 32 bytes");
+  assert.deepEqual([...imprint], [...digest], "the imprint is exactly the supplied digest");
+  assert.equal(tsaOrigin("https://freetsa.org/tsr"), "https://freetsa.org", "tsaOrigin extracts the CSP origin");
+});
+
+test("timestamp: with the toggle OFF, signPdf makes NO network call and the signature has no timestamp", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("No TS", "No TS", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const pdf = await buildSamplePdf(false);
+
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error("signing must not touch the network when timestamp is off"); };
+  try {
+    const signed = await signPdf(pdf, { p12, password: "pw" }); // timestamp omitted == off
+    assert.equal(calls, 0, "no network request during local signing");
+    assert.equal(signed.timestamp, null, "no timestamp attached");
+    const report = await verifyPdfSignatures(signed.bytes);
+    assert.equal(report.signatures[0].verdict, "valid", "the local signature is valid, exactly as before");
+    assert.equal(report.signatures[0].timestamp.present, false, "verify reports NO timestamp for an untimestamped signature");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("timestamp: a blocked/unreachable TSA surfaces connect-src guidance and produces no output", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("TS Fail", "TS Fail", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const pdf = await buildSamplePdf(false);
+  const blockedFetch = async () => { throw new TypeError("Failed to fetch"); }; // what CSP/CORS look like
+  await assert.rejects(
+    () => signPdf(pdf, { p12, password: "pw", timestamp: true, tsaUrl: "https://tsa.example/tsr", fetchImpl: blockedFetch }),
+    (error) => /connect-src 'self' https:\/\/tsa\.example/.test(error.message),
+    "a blocked TSA tells the operator exactly what to add to connect-src",
+  );
+});
+
+// A fake RFC-3161 TSA that echoes the request imprint into a signed TSTInfo token,
+// so the embed + verify-reporting path is exercised offline (a LIVE TSA round-trip
+// is browser/network-only and is not attempted here).
+async function makeFakeTsaResponder(tsaCert, tsaKey) {
+  return async (url, opts) => {
+    const reqBytes = new Uint8Array(opts.body);
+    const req = new pkijs.TimeStampReq({ schema: asn1js.fromBER(bufOf(reqBytes)).result });
+    const tst = new pkijs.TSTInfo({
+      version: 1,
+      policy: "1.2.3.4.1",
+      messageImprint: req.messageImprint, // echo the imprint so it covers the signature
+      serialNumber: new asn1js.Integer({ value: 42 }),
+      genTime: new Date(),
+    });
+    const tstDer = new Uint8Array(tst.toSchema().toBER());
+    const signed = new pkijs.SignedData({
+      version: 3,
+      encapContentInfo: new pkijs.EncapsulatedContentInfo({ eContentType: "1.2.840.113549.1.9.16.1.4", eContent: new asn1js.OctetString({ valueHex: bufOf(tstDer) }) }),
+      signerInfos: [new pkijs.SignerInfo({ version: 1, sid: new pkijs.IssuerAndSerialNumber({ issuer: tsaCert.issuer, serialNumber: tsaCert.serialNumber }) })],
+      certificates: [tsaCert],
+    });
+    await signed.sign(tsaKey, 0, "SHA-256", undefined, signEngine);
+    const token = new pkijs.ContentInfo({ contentType: "1.2.840.113549.1.7.2", content: signed.toSchema(true) });
+    const resp = new pkijs.TimeStampResp({ status: new pkijs.PKIStatusInfo({ status: 0 }), timeStampToken: token });
+    const der = resp.toSchema().toBER();
+    return { ok: true, status: 200, statusText: "OK", arrayBuffer: async () => der };
+  };
+}
+
+test("timestamp: embedding a TSA token keeps the signature valid and verify reports the TSA time (offline fake TSA)", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("TS Signer", "TS Signer", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const tsaKeyPair = await genRsaKeyPair();
+  const tsaCert = await makeSelfSignedCert("Test TSA", "Test TSA", tsaKeyPair, tsaKeyPair.privateKey);
+  const fetchImpl = await makeFakeTsaResponder(tsaCert, tsaKeyPair.privateKey);
+  const pdf = await buildSamplePdf(false);
+
+  const signed = await signPdf(pdf, { p12, password: "pw", timestamp: true, tsaUrl: "https://tsa.example/tsr", fetchImpl });
+  assert.ok(signed.timestamp, "signPdf reports a timestamp result");
+  assert.equal(signed.timestamp.tsa, "https://tsa.example");
+  assert.ok(signed.timestamp.time instanceof Date, "signPdf surfaces the TSA genTime");
+
+  const report = await verifyPdfSignatures(signed.bytes);
+  const sig = report.signatures[0];
+  assert.equal(sig.verdict, "valid", "the unsigned timestamp attribute does not disturb the signature");
+  assert.equal(sig.integrity, true);
+  assert.equal(sig.timestamp.present, true, "verify REPORTS the timestamp");
+  assert.ok(sig.timestamp.time instanceof Date, "verify reports the TSA time");
+  assert.equal(sig.timestamp.imprintMatches, true, "the token's imprint really covers THIS signature");
+  assert.equal(sig.timestamp.tsaCommonName, "Test TSA", "verify names the TSA");
+});
+
+test("timestamp: the SignatureCard reports timestamp presence and SignPdfTool wires the toggle", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(appSource, /RFC 3161 timestamp/i, "the sign UI offers the timestamp toggle");
+  assert.match(appSource, /tsaUrl/, "the sign UI collects a TSA URL");
+  assert.match(appSource, /timestamp: useTimestamp/, "the toggle is passed to signPdf");
+  assert.match(appSource, /TSA-attested/, "the verify card labels a TSA-attested time");
+  assert.match(appSource, /self-asserted/, "the verify card labels an untimestamped signature");
+});
+
+// --- 3. Batch Workflow (many ops x many files) ------------------------------
+
+test("batch-workflow: runs a preset over 3 generated PDFs into 3 correctly-named outputs in a ZIP", async () => {
+  const { runWorkflowBatch, presetSteps } = await import("../src/services/business.service.js");
+  const { zipOutputs } = await import("../src/services/batch.service.js");
+  const { unzipSync } = await import("fflate");
+  const { PDFDocument } = window.PDFLib;
+
+  const files = [];
+  for (const base of ["alpha", "beta", "gamma"]) {
+    files.push(new File([await makeBatchPdf(2)], `${base}.pdf`, { type: "application/pdf" }));
+  }
+
+  const progress = [];
+  const run = await runWorkflowBatch(files, presetSteps("print-ready"), { onProgress: (info) => progress.push(info) });
+
+  assert.equal(run.total, 3);
+  assert.equal(run.failures.length, 0, "no failures for three good files");
+  assert.equal(run.outputs.length, 3);
+  assert.deepEqual(run.outputs.map((o) => o.name).sort(), ["alpha-workflow.pdf", "beta-workflow.pdf", "gamma-workflow.pdf"]);
+  // Determinate two-axis progress: file X of Y, step A of B.
+  assert.ok(progress.length > 0);
+  assert.ok(progress.every((p) => p.files === 3 && p.steps >= 1 && p.file >= 1 && p.step >= 1), "progress carries both axes");
+  assert.equal(progress[progress.length - 1].file, 3, "progress reaches the last file");
+
+  for (const out of run.outputs) {
+    const doc = await PDFDocument.load(out.bytes);
+    assert.equal(doc.getPageCount(), 2, "each output is a valid PDF that went through the whole chain");
+  }
+  const entries = unzipSync(zipOutputs(run.outputs));
+  assert.deepEqual(Object.keys(entries).sort(), ["alpha-workflow.pdf", "beta-workflow.pdf", "gamma-workflow.pdf"]);
+});
+
+test("batch-workflow: a corrupt 2nd file fails in isolation — 2 succeed, 1 reported, zip holds only the good two", async () => {
+  const { runWorkflowBatch } = await import("../src/services/business.service.js");
+  const { zipOutputs } = await import("../src/services/batch.service.js");
+  const { unzipSync } = await import("fflate");
+
+  const files = [
+    new File([await makeBatchPdf(1)], "good-1.pdf", { type: "application/pdf" }),
+    new File([new Uint8Array([1, 2, 3, 4, 5])], "broken.pdf", { type: "application/pdf" }),
+    new File([await makeBatchPdf(1)], "good-2.pdf", { type: "application/pdf" }),
+  ];
+
+  const run = await runWorkflowBatch(files, [{ op: "page-numbers", options: { prefix: "Page ", fontSize: "10" } }]);
+
+  assert.equal(run.total, 3);
+  assert.equal(run.outputs.length, 2, "the two good files succeed");
+  assert.equal(run.failures.length, 1, "the corrupt file is recorded, not thrown");
+  assert.equal(run.failures[0].name, "broken.pdf");
+  assert.ok(run.failures[0].reason && run.failures[0].reason.length > 0, "the failure carries a reason");
+  assert.deepEqual(run.outputs.map((o) => o.name).sort(), ["good-1-workflow.pdf", "good-2-workflow.pdf"]);
+
+  const entries = unzipSync(zipOutputs(run.outputs));
+  assert.deepEqual(Object.keys(entries).sort(), ["good-1-workflow.pdf", "good-2-workflow.pdf"]);
+  assert.equal(entries["broken.pdf"], undefined, "the failed file is absent from the zip");
+});
+
+test("batch-workflow: validates inputs (no files / no steps / bad op / over-limit)", async () => {
+  const { runWorkflowBatch, MAX_WORKFLOW_BATCH_FILES } = await import("../src/services/business.service.js");
+  const onePdf = [new File([await makeBatchPdf(1)], "a.pdf", { type: "application/pdf" })];
+  await assert.rejects(() => runWorkflowBatch([], [{ op: "rotate", options: {} }]), /at least one PDF/i);
+  await assert.rejects(() => runWorkflowBatch(onePdf, []), /at least one step/i);
+  await assert.rejects(() => runWorkflowBatch(onePdf, [{ op: "__proto__", options: {} }]), /not a supported workflow step/i);
+  const tooMany = Array.from({ length: MAX_WORKFLOW_BATCH_FILES + 1 }, (_, i) => new File([new Uint8Array([1])], `f${i}.pdf`));
+  await assert.rejects(() => runWorkflowBatch(tooMany, [{ op: "rotate", options: {} }]), new RegExp(`no more than ${MAX_WORKFLOW_BATCH_FILES} files`, "i"));
+});
+
+test("batch-workflow-tool is registered under Organize, routed, and wired", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const t = tools.find((tool) => tool.id === "batch-workflow-tool");
+  assert.ok(t, "batch-workflow-tool registered");
+  assert.equal(t.category, "PDF Tools");
+  assert.equal(t.group, "Organize");
+  assert.equal(t.status, "available");
+  assert.equal(t.file.maxFiles, 100);
+  assert.deepEqual(t.acceptedTypes, ["application/pdf"]);
+  assert.equal(routeForHash(t.route).tool.id, "batch-workflow-tool");
+  assert.ok(appSource.includes('"batch-workflow-tool"'), "wired into ToolRenderer");
+  assert.ok(appSource.includes("runWorkflowBatch"), "uses the batch workflow service");
+});
+
+// --- 4. PWA installability ---------------------------------------------------
+
+test("pwa: manifest.webmanifest is valid JSON with the required installability fields", () => {
+  const raw = fs.readFileSync(new URL("../public/manifest.webmanifest", import.meta.url), "utf8");
+  const manifest = JSON.parse(raw); // throws if invalid JSON
+  assert.equal(typeof manifest.name, "string");
+  assert.ok(manifest.name.length > 0, "name present");
+  assert.equal(typeof manifest.short_name, "string");
+  assert.equal(manifest.start_url, "/", "start_url is in scope");
+  assert.equal(manifest.scope, "/", "scope covers start_url");
+  assert.equal(manifest.display, "standalone", "installable display mode");
+  assert.match(String(manifest.theme_color), /^#/, "theme color set");
+  assert.match(String(manifest.background_color), /^#/, "background color set");
+  assert.ok(Array.isArray(manifest.icons) && manifest.icons.length >= 2, "icons array present");
+  const sizes = manifest.icons.map((icon) => icon.sizes);
+  assert.ok(sizes.includes("192x192"), "a 192 icon is declared");
+  assert.ok(sizes.includes("512x512"), "a 512 icon is declared");
+  assert.ok(manifest.icons.some((icon) => String(icon.purpose || "").includes("maskable")), "a maskable icon is declared");
+});
+
+test("pwa: declared PNG icons exist on disk at the right dimensions and no icon uses a CDN URL", () => {
+  const raw = fs.readFileSync(new URL("../public/manifest.webmanifest", import.meta.url), "utf8");
+  const manifest = JSON.parse(raw);
+  const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const readDims = (buf) => ({ w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) }); // IHDR
+  const expect = { "/icon-192.png": 192, "/icon-512.png": 512 };
+  for (const icon of manifest.icons) {
+    assert.ok(!/^https?:\/\//i.test(icon.src), `icon ${icon.src} is local, not a CDN URL`);
+    if (icon.src in expect) {
+      const buf = fs.readFileSync(new URL(`../public${icon.src}`, import.meta.url));
+      assert.ok(buf.subarray(0, 8).equals(pngHeader), `${icon.src} is a real PNG`);
+      const { w, h } = readDims(buf);
+      assert.equal(w, expect[icon.src], `${icon.src} is ${expect[icon.src]}px wide`);
+      assert.equal(h, expect[icon.src], `${icon.src} is ${expect[icon.src]}px tall`);
+    }
+  }
+});
+
+test("pwa: index.html links the manifest and registers the service worker, and sw.js precaches locally (no CDN)", () => {
+  const indexHtml = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(indexHtml, /<link\s+rel="manifest"\s+href="\/manifest\.webmanifest">/, "manifest is linked from index.html");
+  assert.match(indexHtml, /register-sw\.js/, "the SW registration script is included");
+
+  const registerSw = fs.readFileSync(new URL("../public/register-sw.js", import.meta.url), "utf8");
+  assert.match(registerSw, /serviceWorker\.register\("\/sw\.js"\)/, "register-sw registers /sw.js");
+
+  const sw = fs.readFileSync(new URL("../public/sw.js", import.meta.url), "utf8");
+  assert.match(sw, /addEventListener\("install"/, "sw handles install");
+  assert.match(sw, /caches\.open/, "sw opens a cache");
+  assert.match(sw, /PRECACHE_URLS/, "sw precaches an app-shell list on install");
+  assert.match(sw, /"\/"/, "the app shell root is precached");
+  assert.match(sw, /addEventListener\("fetch"/, "sw serves from cache when offline");
+  // No CDN / cross-origin URL anywhere in the service worker.
+  const externalUrls = (sw.match(/https?:\/\/[^\s"')]+/g) || []).filter((u) => !u.startsWith("http://www.w3.org"));
+  assert.deepEqual(externalUrls, [], "the service worker references no external/CDN URL");
 });
