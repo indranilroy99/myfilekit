@@ -4252,3 +4252,173 @@ test("edit-pdf-text tool is registered, routed, wired into ToolRenderer, and dis
   const searchable = [found.name, found.description, ...found.keywords].join(" ").toLowerCase();
   for (const term of ["edit", "replace", "text"]) assert.match(searchable, new RegExp(term));
 });
+
+// --- Annotate PDF (highlight / ink / shapes / notes / callouts) ---------------
+
+// Decodes every content stream of EACH page of a saved PDF to operator text.
+async function decodeAllPageOps(bytes) {
+  const { unzlibSync, inflateSync } = await import("fflate");
+  const { PDFDocument } = window.PDFLib;
+  const doc = await PDFDocument.load(bytes);
+  const decode = (raw) => {
+    for (const fn of [unzlibSync, inflateSync]) {
+      try { return new TextDecoder("latin1").decode(fn(raw)); } catch { /* try next */ }
+    }
+    return new TextDecoder("latin1").decode(raw);
+  };
+  return doc.getPages().map((page) => page.node.Contents().asArray().map((ref) => decode(doc.context.lookup(ref).contents)).join("\n"));
+}
+
+async function buildBlankPdf(pageCount = 2, size = [612, 792]) {
+  const { PDFDocument } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  for (let i = 0; i < pageCount; i += 1) doc.addPage(size);
+  return doc.save();
+}
+
+test("annotate normaliser clamps a hostile annotation to safe ranges", async () => {
+  const svc = await import("../src/services/annotate.service.js");
+  const page = { width: 612, height: 792 };
+
+  // Hostile freehand ink: poison colour, absurd width, 100k out-of-range points.
+  const ink = svc.normalizeAnnotation({
+    type: "ink",
+    color: "javascript:alert(1)",
+    width: 1e9,
+    points: Array.from({ length: 100000 }, (_, i) => ({ x: i % 2 ? -50 : 9999, y: i % 3 ? 9999 : -50 })),
+  }, page);
+  assert.equal(ink.color, svc.ACCENT_HEX, "poison colour falls back to accent");
+  assert.equal(ink.width, svc.MAX_STROKE_WIDTH, "absurd width clamped to max");
+  assert.ok(ink.points.length <= svc.MAX_INK_POINTS, `points capped (${ink.points.length})`);
+  assert.ok(ink.points.every((p) => p.x >= 0 && p.x <= 612 && p.y >= 0 && p.y <= 792), "every point clamped onto the page");
+
+  // Hostile note: off-page coords, 5000-char text, giant font.
+  const note = svc.normalizeAnnotation({ type: "note", x: -50, y: 9999, text: "z".repeat(5000), size: 1e9, color: "not-a-colour" }, page);
+  assert.equal(note.x, 0, "negative x clamped to 0");
+  assert.equal(note.y, 792, "over-height y clamped to page height");
+  assert.equal(note.text.length, svc.MAX_TEXT_LENGTH, "note text truncated to the cap");
+  assert.equal(note.size, svc.MAX_FONT_SIZE, "font size clamped to max");
+  assert.equal(note.color, "#111827", "invalid note colour falls back to the note default");
+
+  // A control-character injection in note text is stripped (built at runtime so the source stays clean).
+  const dirty = svc.normalizeAnnotation({ type: "note", x: 10, y: 10, text: `a${String.fromCharCode(1)}${String.fromCharCode(2)}bc` }, page);
+  assert.equal(dirty.text, "abc", "control characters stripped from note text");
+
+  // Highlight colour outside the functional palette falls back to the accent.
+  const hi = svc.normalizeAnnotation({ type: "highlight", x: 10, y: 10, w: 1e9, h: 1e9, color: "#ffffff", opacity: 5 }, page);
+  assert.equal(hi.color, svc.ACCENT_HEX, "off-palette highlight colour -> accent");
+  assert.ok(hi.w <= 612 && hi.h <= 792, "highlight box clamped within the page");
+  assert.ok(hi.opacity <= svc.MAX_HIGHLIGHT_OPACITY, "highlight opacity clamped");
+
+  // Unknown type is dropped entirely.
+  assert.equal(svc.normalizeAnnotation({ type: "script", x: 0, y: 0 }, page), null, "unknown type rejected");
+
+  // Per-page count cap.
+  const many = svc.normalizeAnnotations(Array.from({ length: svc.MAX_ANNOTATIONS_PER_PAGE + 50 }, () => ({ type: "note", x: 1, y: 1, text: "x" })), page);
+  assert.equal(many.length, svc.MAX_ANNOTATIONS_PER_PAGE, "annotation count capped per page");
+});
+
+test("annotate decimatePoints reduces a 50k stroke below the cap and keeps the endpoints", async () => {
+  const { decimatePoints, MAX_INK_POINTS } = await import("../src/services/annotate.service.js");
+  const pts = Array.from({ length: 50000 }, (_, i) => ({ x: i, y: i * 2 }));
+  const out = decimatePoints(pts);
+  assert.ok(out.length <= MAX_INK_POINTS, `reduced below cap (${out.length})`);
+  assert.ok(out.length > 1, "not collapsed to a single point");
+  assert.deepEqual(out[0], pts[0], "first point preserved");
+  assert.deepEqual(out[out.length - 1], pts[pts.length - 1], "last point preserved");
+  // A short stroke is returned untouched.
+  const short = [{ x: 1, y: 1 }, { x: 2, y: 2 }];
+  assert.deepEqual(decimatePoints(short), short);
+});
+
+test("annotate screenToPagePoint maps a top-origin screen pixel to bottom-origin page y", async () => {
+  const { screenToPagePoint } = await import("../src/services/annotate.service.js");
+  // Top-left of the page image (0,0) at 2x scale -> top of a 792pt page (y = height).
+  const topLeft = screenToPagePoint({ px: 0, py: 0 }, { scale: 2, pageWidth: 612, pageHeight: 792 });
+  assert.equal(topLeft.x, 0);
+  assert.equal(topLeft.y, 792, "screen top maps to page top (bottom-origin y = height)");
+  // A pixel 184px down at 2x is 92pt down from the top -> y = 792 - 92 = 700.
+  const mid = screenToPagePoint({ px: 144, py: 184 }, { scale: 2, pageWidth: 612, pageHeight: 792 });
+  assert.equal(mid.x, 72, "x = px / scale");
+  assert.equal(mid.y, 700, "y flipped to bottom-origin");
+  // Off-canvas pixels clamp onto the page.
+  const off = screenToPagePoint({ px: -100, py: 99999 }, { scale: 2, pageWidth: 612, pageHeight: 792 });
+  assert.equal(off.x, 0);
+  assert.equal(off.y, 0, "a pixel far below the page clamps to y = 0");
+});
+
+test("applyAnnotations burns a highlight, a line, and a note onto the correct pages", async () => {
+  const svc = await import("../src/services/annotate.service.js");
+  const src = await buildBlankPdf(2);
+  const out = await svc.applyAnnotations(src, {
+    1: [
+      { type: "highlight", x: 50, y: 700, w: 200, h: 18, color: "#facc15" },
+      { type: "line", x1: 50, y1: 120, x2: 300, y2: 120, color: "#2563eb", width: 2 },
+      { type: "note", x: 50, y: 400, text: "Note on page one", size: 14, color: "#111827" },
+    ],
+    2: [{ type: "note", x: 60, y: 500, text: "Second page note", size: 12 }],
+  }, [{ width: 612, height: 792 }, { width: 612, height: 792 }]);
+  assert.ok(out instanceof Uint8Array && out.byteLength > 0);
+
+  const pages = await decodeAllPageOps(out);
+  // Page 1: highlight -> a filled rectangle path; line -> a stroked path; note -> a hex show-string.
+  assert.match(pages[0], /\bf\b/, "page 1 has a fill (highlight rectangle)");
+  assert.match(pages[0], /\bS\b/, "page 1 has a stroked path (line)");
+  assert.ok(pages[0].includes(hexOf("Note on page one")), "page 1 note show-string present");
+  // Page 2 has its own note and NOT page 1's.
+  assert.ok(pages[1].includes(hexOf("Second page note")), "page 2 note present");
+  assert.ok(!pages[1].includes(hexOf("Note on page one")), "page 1 note does not leak onto page 2");
+  assert.ok(!pages[0].includes(hexOf("Second page note")), "page 2 note does not leak onto page 1");
+});
+
+test("applyAnnotations: non-Latin note raises the friendly error, empty and bad-page inputs rejected", async () => {
+  const svc = await import("../src/services/annotate.service.js");
+  const src = await buildBlankPdf(2);
+
+  await assert.rejects(() => svc.applyAnnotations(src, { 1: [{ type: "note", x: 50, y: 50, text: "日本語のメモ" }] }), /Latin-1 characters only/);
+  await assert.rejects(() => svc.applyAnnotations(src, { 1: [{ type: "callout", x: 40, y: 400, w: 180, h: 70, text: "报告说明" }] }), /Latin-1 characters only/);
+
+  // A page index beyond the document is rejected, naming the page and the count.
+  await assert.rejects(() => svc.applyAnnotations(src, { 5: [{ type: "note", x: 1, y: 1, text: "x" }] }), /page 5, which does not exist/);
+  await assert.rejects(() => svc.applyAnnotations(src, { 0: [{ type: "note", x: 1, y: 1, text: "x" }] }), /does not exist/);
+
+  // No annotations at all is rejected.
+  await assert.rejects(() => svc.applyAnnotations(src, {}), /No annotations to apply/);
+});
+
+test("applyAnnotations draws shapes, arrows, ink and a sticky callout without error", async () => {
+  const svc = await import("../src/services/annotate.service.js");
+  const src = await buildBlankPdf(1);
+  const out = await svc.applyAnnotations(src, {
+    1: [
+      { type: "rect", x: 40, y: 600, w: 120, h: 80, color: "#dc2626", width: 2, fill: "#dc2626", fillOpacity: 0.2 },
+      { type: "ellipse", x: 200, y: 600, w: 120, h: 80, color: "#16a34a", width: 3 },
+      { type: "arrow", x1: 40, y1: 300, x2: 240, y2: 360, color: "#2563eb", width: 2 },
+      { type: "ink", points: Array.from({ length: 40 }, (_, i) => ({ x: 300 + i * 3, y: 300 + Math.sin(i) * 20 })), color: "#7c3aed", width: 2 },
+      { type: "callout", x: 350, y: 500, w: 180, h: 70, text: "Please review this section carefully", size: 11, tx: 300, ty: 450 },
+    ],
+  });
+  assert.ok(out instanceof Uint8Array && out.byteLength > 0, "export produced bytes");
+  const [ops] = await decodeAllPageOps(out);
+  // A filled+stroked box (rect with fill, callout box) emits the `B` operator.
+  assert.match(ops, /\b[fB]\b/, "a fill is emitted (rect fill / callout box)");
+  assert.match(ops, /\bS\b/, "stroked paths emitted (ellipse / arrow / ink / line)");
+  assert.ok(ops.includes(hexOf("Please review this")), "callout text drawn");
+});
+
+test("annotate-pdf tool is registered, routed, wired into ToolRenderer, and discoverable", () => {
+  const found = tools.find((tool) => tool.id === "annotate-pdf-tool");
+  assert.ok(found, "annotate-pdf-tool registered");
+  assert.equal(found.category, "PDF Tools");
+  assert.equal(found.status, "available");
+  assert.equal(found.localProcessing, true);
+  assert.equal(found.file.maxFiles, 1);
+  assert.equal(routeForHash(found.route).tool.id, "annotate-pdf-tool");
+
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.equal(appSource.includes(`"annotate-pdf-tool"`), true, "wired into ToolRenderer");
+  assert.equal(appSource.includes("AnnotatePdfTool"), true, "component defined");
+
+  const searchable = [found.name, found.description, ...found.keywords].join(" ").toLowerCase();
+  for (const term of ["annotate", "highlight", "markup"]) assert.match(searchable, new RegExp(term));
+});

@@ -50,6 +50,7 @@ import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.
 import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, getPdfLib, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
 import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip, rasterRebuild } from "./services/pdf-render.service.js";
 import { applyTextEdits, mapPdfFontToStandard, standardFontKey, textItemToPageRect } from "./services/pdf-textedit.service.js";
+import { applyAnnotations, screenToPagePoint, pagePointToScreen, HIGHLIGHT_PALETTE, MAX_ANNOTATIONS_PER_PAGE } from "./services/annotate.service.js";
 import { archivalPrepPdf, assertPdfDecryptable, comparePdfText, comparePdfReportText, estimateSkewAngle } from "./services/pdf-review.service.js";
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
 import { BATES_POSITION_IDS, NUP_COUNTS, batesNumberPdf, createFormPdf, imposePdf, parseOutlineInput, parseSplitPages, readOutline, setOutline, smartSplitPdf } from "./services/pdf-advanced.service.js";
@@ -1115,6 +1116,7 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "add-text-to-pdf-tool") return <AddTextToPdfTool tool={tool} />;
   if (tool.id === "edit-pdf-text-tool") return <EditPdfTextTool tool={tool} />;
   if (tool.id === "add-signature-to-pdf-tool") return <AddSignatureToPdfTool tool={tool} />;
+  if (tool.id === "annotate-pdf-tool") return <AnnotatePdfTool tool={tool} />;
   if (tool.id === "pdf-page-numbers-tool") return <PdfPageNumbersTool tool={tool} />;
   if (tool.id === "watermark-pdf-tool") return <WatermarkPdfTool tool={tool} />;
   if (tool.id === "pdf-metadata-cleaner-tool") return <PdfMetadataCleanerTool tool={tool} />;
@@ -1689,6 +1691,803 @@ function AddSignatureToPdfTool({ tool }: { tool: Tool }) {
       return `Signature added to page ${page}.`;
     })} />
   </ToolForm>;
+}
+
+// --- Annotate PDF (highlight / ink / shapes / notes / callouts) --------------
+// Real markup layer. A page is rendered with pdf.js as a backdrop; the user
+// draws on an overlay canvas; on export the markup is BURNED into the page with
+// pdf-lib. Burned-in markup renders identically in every reader, but it is NOT
+// a set of reader-editable /Annot objects — the UI states this plainly. All the
+// data-model, clamping, coordinate mapping, and pdf-lib drawing lives in
+// services/annotate.service.js (Node-tested); only the browser canvas + pointer
+// handling is here. Annotations are stored in pdf-lib page space (bottom-origin
+// points), so they survive page navigation and export together.
+
+type AnnPt = { x: number; y: number };
+type Ann = { id: string; type: string; [key: string]: any };
+type AnnStore = Record<number, Ann[]>;
+type ScreenCtx = { scale: number; pointHeight: number };
+
+const ANNOTATE_TOOLS = [
+  { id: "select", label: "Select" },
+  { id: "highlight", label: "Highlight" },
+  { id: "ink", label: "Ink" },
+  { id: "rect", label: "Rectangle" },
+  { id: "ellipse", label: "Ellipse" },
+  { id: "line", label: "Line" },
+  { id: "arrow", label: "Arrow" },
+  { id: "note", label: "Text note" },
+  { id: "callout", label: "Sticky note" },
+];
+
+let annotateIdCounter = 0;
+const nextAnnotateId = () => `u${(annotateIdCounter += 1).toString(36)}`;
+const cloneStore = (store: AnnStore): AnnStore => JSON.parse(JSON.stringify(store));
+
+// page point (bottom-origin) -> overlay CSS pixel (top-origin), via the service.
+const toScreen = (x: number, y: number, sc: ScreenCtx) => pagePointToScreen({ x, y }, { scale: sc.scale, pageHeight: sc.pointHeight });
+
+// Screen-space bounding box of an annotation, for hit-testing and selection UI.
+function annScreenBox(ann: Ann, sc: ScreenCtx): { x: number; y: number; w: number; h: number } {
+  if (ann.type === "line" || ann.type === "arrow") {
+    const a = toScreen(ann.x1, ann.y1, sc);
+    const b = toScreen(ann.x2, ann.y2, sc);
+    return { x: Math.min(a.px, b.px), y: Math.min(a.py, b.py), w: Math.abs(a.px - b.px), h: Math.abs(a.py - b.py) };
+  }
+  if (ann.type === "ink") {
+    const pts = (ann.points || []).map((p: AnnPt) => toScreen(p.x, p.y, sc));
+    if (!pts.length) return { x: 0, y: 0, w: 0, h: 0 };
+    const xs = pts.map((p: any) => p.px);
+    const ys = pts.map((p: any) => p.py);
+    return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+  }
+  if (ann.type === "note") {
+    const p = toScreen(ann.x, ann.y, sc);
+    const w = Math.max(20, (ann.text?.length || 4) * ann.size * 0.5 * sc.scale);
+    const h = ann.size * 1.2 * sc.scale;
+    return { x: p.px, y: p.py - h, w, h };
+  }
+  // box types: highlight, rect, ellipse, callout — top-left is (x, y+h) in page space
+  const tl = toScreen(ann.x, ann.y + ann.h, sc);
+  return { x: tl.px, y: tl.py, w: ann.w * sc.scale, h: ann.h * sc.scale };
+}
+
+// Distance from a point to a segment, for line/arrow/ink hit-testing.
+function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+  const cx = ax + t * dx;
+  const cy = ay + t * dy;
+  return Math.hypot(px - cx, py - cy);
+}
+
+// Topmost annotation under a screen point (search from the end = most recent on top).
+function hitTestAnnotations(list: Ann[], sx: number, sy: number, sc: ScreenCtx): Ann | null {
+  const tol = 6;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const ann = list[i];
+    if (ann.type === "line" || ann.type === "arrow") {
+      const a = toScreen(ann.x1, ann.y1, sc);
+      const b = toScreen(ann.x2, ann.y2, sc);
+      if (distToSegment(sx, sy, a.px, a.py, b.px, b.py) <= tol + ann.width) return ann;
+      continue;
+    }
+    if (ann.type === "ink") {
+      const pts = (ann.points || []).map((p: AnnPt) => toScreen(p.x, p.y, sc));
+      for (let j = 0; j < pts.length - 1; j += 1) {
+        if (distToSegment(sx, sy, pts[j].px, pts[j].py, pts[j + 1].px, pts[j + 1].py) <= tol + ann.width) return ann;
+      }
+      if (pts.length === 1 && Math.hypot(sx - pts[0].px, sy - pts[0].py) <= tol + ann.width) return ann;
+      continue;
+    }
+    const box = annScreenBox(ann, sc);
+    if (sx >= box.x - tol && sx <= box.x + box.w + tol && sy >= box.y - tol && sy <= box.y + box.h + tol) return ann;
+  }
+  return null;
+}
+
+// Moves an annotation by a page-space delta (used by drag-to-move in select mode).
+function translateAnn(ann: Ann, dx: number, dy: number): Ann {
+  if (ann.type === "line" || ann.type === "arrow") return { ...ann, x1: ann.x1 + dx, y1: ann.y1 + dy, x2: ann.x2 + dx, y2: ann.y2 + dy };
+  if (ann.type === "ink") return { ...ann, points: (ann.points || []).map((p: AnnPt) => ({ x: p.x + dx, y: p.y + dy })) };
+  if (ann.type === "callout") return { ...ann, x: ann.x + dx, y: ann.y + dy, target: ann.target ? { x: ann.target.x + dx, y: ann.target.y + dy } : null };
+  return { ...ann, x: ann.x + dx, y: ann.y + dy };
+}
+
+// Wraps text to a pixel width for the on-canvas callout preview only.
+function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const lines: string[] = [];
+  for (const paragraph of String(text).split(/\r?\n/)) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    let line = "";
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (ctx.measureText(candidate).width > maxWidth && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = candidate;
+      }
+    }
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
+// Paints every annotation on the current page (plus an in-progress draft and the
+// selection outline) onto the overlay canvas, in screen space. Approximate on
+// purpose — pdf-lib produces the authoritative flattened output on export.
+function paintAnnotations(ctx: CanvasRenderingContext2D, cssW: number, cssH: number, list: Ann[], sc: ScreenCtx, selectedId: string | null, draft: Ann | null) {
+  ctx.clearRect(0, 0, cssW, cssH);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const ann of list) drawAnnScreen(ctx, ann, sc);
+  if (draft) drawAnnScreen(ctx, draft, sc);
+  if (selectedId) {
+    const sel = list.find((a) => a.id === selectedId);
+    if (sel) {
+      const box = annScreenBox(sel, sc);
+      ctx.save();
+      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "#2563eb";
+      ctx.strokeRect(box.x - 3, box.y - 3, box.w + 6, box.h + 6);
+      ctx.restore();
+    }
+  }
+}
+
+function drawAnnScreen(ctx: CanvasRenderingContext2D, ann: Ann, sc: ScreenCtx) {
+  ctx.save();
+  const lw = Math.max(1, (ann.width || 1) * sc.scale);
+  if (ann.type === "highlight") {
+    const tl = toScreen(ann.x, ann.y + ann.h, sc);
+    ctx.globalAlpha = ann.opacity ?? 0.4;
+    ctx.fillStyle = ann.color;
+    ctx.fillRect(tl.px, tl.py, ann.w * sc.scale, ann.h * sc.scale);
+  } else if (ann.type === "rect") {
+    const tl = toScreen(ann.x, ann.y + ann.h, sc);
+    if (ann.fill) { ctx.globalAlpha = ann.fillOpacity ?? 0.2; ctx.fillStyle = ann.fill; ctx.fillRect(tl.px, tl.py, ann.w * sc.scale, ann.h * sc.scale); ctx.globalAlpha = 1; }
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = ann.color;
+    ctx.strokeRect(tl.px, tl.py, ann.w * sc.scale, ann.h * sc.scale);
+  } else if (ann.type === "ellipse") {
+    const c = toScreen(ann.x + ann.w / 2, ann.y + ann.h / 2, sc);
+    ctx.beginPath();
+    ctx.ellipse(c.px, c.py, (ann.w / 2) * sc.scale, (ann.h / 2) * sc.scale, 0, 0, Math.PI * 2);
+    if (ann.fill) { ctx.globalAlpha = ann.fillOpacity ?? 0.2; ctx.fillStyle = ann.fill; ctx.fill(); ctx.globalAlpha = 1; }
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = ann.color;
+    ctx.stroke();
+  } else if (ann.type === "line" || ann.type === "arrow") {
+    const a = toScreen(ann.x1, ann.y1, sc);
+    const b = toScreen(ann.x2, ann.y2, sc);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = ann.color;
+    ctx.beginPath();
+    ctx.moveTo(a.px, a.py);
+    ctx.lineTo(b.px, b.py);
+    ctx.stroke();
+    if (ann.type === "arrow") {
+      const angle = Math.atan2(b.py - a.py, b.px - a.px);
+      const head = Math.max(8, lw * 3.5);
+      const spread = Math.PI / 7;
+      ctx.beginPath();
+      ctx.moveTo(b.px, b.py);
+      ctx.lineTo(b.px - head * Math.cos(angle - spread), b.py - head * Math.sin(angle - spread));
+      ctx.moveTo(b.px, b.py);
+      ctx.lineTo(b.px - head * Math.cos(angle + spread), b.py - head * Math.sin(angle + spread));
+      ctx.stroke();
+    }
+  } else if (ann.type === "ink") {
+    const pts = (ann.points || []).map((p: AnnPt) => toScreen(p.x, p.y, sc));
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = ann.color;
+    if (pts.length === 1) {
+      ctx.beginPath();
+      ctx.arc(pts[0].px, pts[0].py, lw / 2, 0, Math.PI * 2);
+      ctx.fillStyle = ann.color;
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      pts.forEach((p: any, i: number) => (i === 0 ? ctx.moveTo(p.px, p.py) : ctx.lineTo(p.px, p.py)));
+      ctx.stroke();
+    }
+  } else if (ann.type === "note") {
+    const p = toScreen(ann.x, ann.y, sc);
+    ctx.fillStyle = ann.color;
+    ctx.font = `${Math.max(6, ann.size * sc.scale)}px Helvetica, Arial, sans-serif`;
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(ann.text || "", p.px, p.py);
+  } else if (ann.type === "callout") {
+    const tl = toScreen(ann.x, ann.y + ann.h, sc);
+    const w = ann.w * sc.scale;
+    const h = ann.h * sc.scale;
+    if (ann.target) {
+      const t = toScreen(ann.target.x, ann.target.y, sc);
+      ctx.strokeStyle = ann.border;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(tl.px + w / 2, tl.py + h / 2);
+      ctx.lineTo(t.px, t.py);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = ann.fill;
+    ctx.fillRect(tl.px, tl.py, w, h);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = ann.border;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(tl.px, tl.py, w, h);
+    ctx.fillStyle = ann.color;
+    const fontPx = Math.max(6, ann.size * sc.scale);
+    ctx.font = `${fontPx}px Helvetica, Arial, sans-serif`;
+    ctx.textBaseline = "alphabetic";
+    const pad = 6;
+    const lines = wrapCanvasText(ctx, ann.text || "", w - pad * 2);
+    let ly = tl.py + pad + fontPx;
+    for (const line of lines) {
+      if (ly > tl.py + h - pad + fontPx) break;
+      ctx.fillText(line, tl.px + pad, ly);
+      ly += fontPx * 1.25;
+    }
+  }
+  ctx.restore();
+}
+
+function AnnotatePdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [doc, setDoc] = useState<any>(null);
+  const [fileName, setFileName] = useState("document.pdf");
+  const [pageCount, setPageCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageImage, setPageImage] = useState("");
+  const [pageDims, setPageDims] = useState<{ cw: number; ch: number } | null>(null);
+  const [annos, setAnnos] = useState<AnnStore>({});
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState("highlight");
+  const [color, setColor] = useState("#dc2626");
+  const [strokeWidth, setStrokeWidth] = useState("3");
+  const [highlightColor, setHighlightColor] = useState(HIGHLIGHT_PALETTE[0].hex);
+  const [fillEnabled, setFillEnabled] = useState(false);
+  const [fillColor, setFillColor] = useState("#2563eb");
+  const [fontSize, setFontSize] = useState("14");
+  const [noteText, setNoteText] = useState("Review note");
+  const [calloutLeader, setCalloutLeader] = useState(false);
+  const [status, setStatus] = useState(initialStatus);
+  const [histTick, setHistTick] = useState(0);
+
+  const bytesRef = useRef<Uint8Array | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const scRef = useRef<ScreenCtx>({ scale: 1, pointHeight: 792 });
+  const pageWHRef = useRef<{ w: number; h: number }>({ w: 612, h: 792 });
+  const dimsRef = useRef<{ cw: number; ch: number }>({ cw: 1, ch: 1 });
+  const annosRef = useRef<AnnStore>({});
+  const pageRef = useRef(1);
+  const toolRef = useRef(activeTool);
+  const styleRef = useRef({ color, strokeWidth: 3, highlightColor, fillEnabled, fillColor, fontSize: 14, noteText, calloutLeader });
+  const draftRef = useRef<Ann | null>(null);
+  const gestureRef = useRef<{ startPx: number; startPy: number; startPage: AnnPt } | null>(null);
+  const moveRef = useRef<{ id: string; last: AnnPt; snapshot: AnnStore; moved: boolean } | null>(null);
+  const calloutTargetRef = useRef<AnnPt | null>(null);
+  const pastRef = useRef<AnnStore[]>([]);
+  const futureRef = useRef<AnnStore[]>([]);
+  const selectedRef = useRef<string | null>(null);
+
+  useEffect(() => { annosRef.current = annos; }, [annos]);
+  useEffect(() => { pageRef.current = currentPage; }, [currentPage]);
+  useEffect(() => { toolRef.current = activeTool; }, [activeTool]);
+  useEffect(() => { selectedRef.current = selectedId; }, [selectedId]);
+  useEffect(() => {
+    styleRef.current = {
+      color,
+      strokeWidth: Math.max(0.5, Math.min(60, Number(strokeWidth) || 3)),
+      highlightColor,
+      fillEnabled,
+      fillColor,
+      fontSize: Math.max(4, Math.min(96, Number(fontSize) || 14)),
+      noteText,
+      calloutLeader,
+    };
+  }, [color, strokeWidth, highlightColor, fillEnabled, fillColor, fontSize, noteText, calloutLeader]);
+
+  const reset = () => {
+    setFiles([]);
+    setDoc(null);
+    setPageCount(0);
+    setCurrentPage(1);
+    setPageImage("");
+    setPageDims(null);
+    setAnnos({});
+    setSelectedId(null);
+    bytesRef.current = null;
+    annosRef.current = {};
+    pastRef.current = [];
+    futureRef.current = [];
+    draftRef.current = null;
+    calloutTargetRef.current = null;
+    setStatus(initialStatus);
+  };
+
+  useEffect(() => () => { try { doc?.destroy?.(); } catch { /* already gone */ } }, [doc]);
+
+  const paint = () => {
+    const ctx = ctxRef.current;
+    const dims = dimsRef.current;
+    if (!ctx) return;
+    const list = annosRef.current[pageRef.current] || [];
+    paintAnnotations(ctx, dims.cw, dims.ch, list, scRef.current, selectedRef.current, draftRef.current);
+  };
+
+  // Repaint whenever committed state or the page changes.
+  useEffect(() => { paint(); }, [annos, currentPage, selectedId, pageImage, pageDims]);
+
+  const pushStore = (prev: AnnStore, next: AnnStore) => {
+    pastRef.current = [...pastRef.current, prev];
+    futureRef.current = [];
+    annosRef.current = next;
+    setAnnos(next);
+    setHistTick((t) => t + 1);
+  };
+
+  const addAnnotation = (ann: Ann): boolean => {
+    const page = pageRef.current;
+    const prev = annosRef.current;
+    const existing = prev[page] || [];
+    if (existing.length >= MAX_ANNOTATIONS_PER_PAGE) {
+      setStatus({ tone: "error", message: `This page is at the ${MAX_ANNOTATIONS_PER_PAGE}-annotation limit. Delete some, or export and re-open to keep going.` });
+      return false;
+    }
+    const next = cloneStore(prev);
+    next[page] = [...existing, ann];
+    pushStore(prev, next);
+    return true;
+  };
+
+  const deleteSelected = () => {
+    const id = selectedRef.current;
+    if (!id) { setStatus({ tone: "error", message: "Select an annotation first, then delete it." }); return; }
+    const page = pageRef.current;
+    const prev = annosRef.current;
+    const next = cloneStore(prev);
+    next[page] = (next[page] || []).filter((a) => a.id !== id);
+    pushStore(prev, next);
+    setSelectedId(null);
+    selectedRef.current = null;
+    setStatus({ tone: "success", message: "Annotation deleted." });
+  };
+
+  const undo = () => {
+    if (!pastRef.current.length) { setStatus({ tone: "error", message: "Nothing to undo." }); return; }
+    const prev = pastRef.current[pastRef.current.length - 1];
+    pastRef.current = pastRef.current.slice(0, -1);
+    futureRef.current = [annosRef.current, ...futureRef.current];
+    annosRef.current = prev;
+    setAnnos(prev);
+    setSelectedId(null);
+    selectedRef.current = null;
+    setHistTick((t) => t + 1);
+  };
+
+  const redo = () => {
+    if (!futureRef.current.length) { setStatus({ tone: "error", message: "Nothing to redo." }); return; }
+    const next = futureRef.current[0];
+    futureRef.current = futureRef.current.slice(1);
+    pastRef.current = [...pastRef.current, annosRef.current];
+    annosRef.current = next;
+    setAnnos(next);
+    setSelectedId(null);
+    selectedRef.current = null;
+    setHistTick((t) => t + 1);
+  };
+
+  const clearPage = () => {
+    const page = pageRef.current;
+    const prev = annosRef.current;
+    if (!(prev[page] || []).length) { setStatus({ tone: "error", message: "This page has no annotations to clear." }); return; }
+    const next = cloneStore(prev);
+    next[page] = [];
+    pushStore(prev, next);
+    setSelectedId(null);
+    selectedRef.current = null;
+    setStatus({ tone: "success", message: `Cleared annotations on page ${page}.` });
+  };
+
+  // Load the chosen PDF once; keep a private byte copy for pdf-lib.
+  useEffect(() => {
+    let cancelled = false;
+    setDoc(null);
+    setAnnos({});
+    annosRef.current = {};
+    pastRef.current = [];
+    futureRef.current = [];
+    setSelectedId(null);
+    setPageImage("");
+    setPageDims(null);
+    if (!files.length) return undefined;
+    runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const buffer = new Uint8Array(await file.arrayBuffer());
+      bytesRef.current = buffer.slice();
+      const { loadPdfDocument } = await import("./lib/pdfjs");
+      const loaded = await loadPdfDocument(buffer.slice());
+      if (cancelled) { try { await loaded.destroy(); } catch { /* ignore */ } return "Ready."; }
+      setFileName(file.name);
+      setPageCount(loaded.numPages);
+      setCurrentPage(1);
+      setDoc(loaded);
+      return `Loaded ${file.name} — ${loaded.numPages} page${loaded.numPages === 1 ? "" : "s"}. Pick a tool and mark up the page.`;
+    });
+    return () => { cancelled = true; };
+  }, [files, tool.file]);
+
+  // Render the current page to a backdrop image.
+  useEffect(() => {
+    if (!doc) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { renderPdfPageToCanvas } = await import("./lib/pdfjs");
+        const page = await doc.getPage(currentPage);
+        const view = page.view;
+        const pointWidth = view[2] - view[0];
+        const pointHeight = view[3] - view[1];
+        const base = page.getViewport({ scale: 1 });
+        const scale = Math.min(2.5, Math.max(0.6, 900 / base.width));
+        const canvas = await renderPdfPageToCanvas(doc, currentPage, scale);
+        const cw = canvas.width;
+        const ch = canvas.height;
+        const url = canvas.toDataURL("image/png");
+        canvas.width = 0;
+        canvas.height = 0; // release the render canvas immediately
+        page.cleanup();
+        if (cancelled) return;
+        pageWHRef.current = { w: pointWidth, h: pointHeight };
+        // Exact px-per-point from the rendered backdrop, so overlay maps 1:1.
+        scRef.current = { scale: cw / pointWidth, pointHeight };
+        dimsRef.current = { cw, ch };
+        setPageImage(url);
+        setPageDims({ cw, ch });
+        setSelectedId(null);
+      } catch (error: any) {
+        if (!cancelled) setStatus({ tone: "error", message: error?.message || "Could not render this page." });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [doc, currentPage]);
+
+  // Prepare the overlay canvas backing store (DPI-correct) when it/size changes.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !pageDims) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(pageDims.cw * dpr));
+    canvas.height = Math.max(1, Math.round(pageDims.ch * dpr));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctxRef.current = ctx;
+    paint();
+    return () => { ctxRef.current = null; };
+  }, [pageDims]);
+
+  // Pointer handling: mouse / touch / stylus in one path. Bound once; live tool
+  // settings and page context are read through refs.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const localPoint = (event: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const sx = ((event.clientX - rect.left) / (rect.width || 1)) * dimsRef.current.cw;
+      const sy = ((event.clientY - rect.top) / (rect.height || 1)) * dimsRef.current.ch;
+      return { sx, sy };
+    };
+    const toPage = (sx: number, sy: number) =>
+      screenToPagePoint({ px: sx, py: sy }, { scale: scRef.current.scale, pageWidth: pageWHRef.current.w, pageHeight: pageWHRef.current.h });
+
+    const down = (event: PointerEvent) => {
+      const ctx = ctxRef.current;
+      if (!ctx) return;
+      event.preventDefault();
+      canvas.setPointerCapture?.(event.pointerId);
+      const { sx, sy } = localPoint(event);
+      const t = toolRef.current;
+      const st = styleRef.current;
+
+      if (t === "select") {
+        const list = annosRef.current[pageRef.current] || [];
+        const hit = hitTestAnnotations(list, sx, sy, scRef.current);
+        if (hit) {
+          setSelectedId(hit.id);
+          selectedRef.current = hit.id;
+          moveRef.current = { id: hit.id, last: toPage(sx, sy), snapshot: cloneStore(annosRef.current), moved: false };
+        } else {
+          setSelectedId(null);
+          selectedRef.current = null;
+        }
+        paint();
+        return;
+      }
+
+      if (t === "note") {
+        const label = st.noteText.trim();
+        if (!label) { setStatus({ tone: "error", message: "Type the note text in the field first, then click the page." }); return; }
+        const p = toPage(sx, sy);
+        addAnnotation({ id: nextAnnotateId(), type: "note", x: p.x, y: p.y, text: label, size: st.fontSize, color: st.color });
+        return;
+      }
+
+      if (t === "callout") {
+        const p = toPage(sx, sy);
+        if (st.calloutLeader && !calloutTargetRef.current) {
+          calloutTargetRef.current = p;
+          setStatus({ tone: "idle", message: "Leader target set. Now click where the note box should sit." });
+          return;
+        }
+        const boxW = Math.min(pageWHRef.current.w * 0.5, 180);
+        const boxH = Math.min(pageWHRef.current.h * 0.5, 70);
+        const target = calloutTargetRef.current;
+        calloutTargetRef.current = null;
+        addAnnotation({
+          id: nextAnnotateId(), type: "callout",
+          x: p.x, y: Math.max(0, p.y - boxH), w: boxW, h: boxH,
+          text: st.noteText, size: st.fontSize, color: "#111827", fill: "#fef9c3", border: st.color,
+          tx: target ? target.x : undefined, ty: target ? target.y : undefined,
+        });
+        setStatus({ tone: "success", message: "Sticky note added." });
+        return;
+      }
+
+      // Drag-based tools: highlight / rect / ellipse / line / arrow / ink.
+      gestureRef.current = { startPx: sx, startPy: sy, startPage: toPage(sx, sy) };
+      if (t === "ink") {
+        const p = toPage(sx, sy);
+        draftRef.current = { id: nextAnnotateId(), type: "ink", points: [p], color: st.color, width: st.strokeWidth };
+      } else {
+        draftRef.current = null;
+      }
+      paint();
+    };
+
+    const move = (event: PointerEvent) => {
+      const ctx = ctxRef.current;
+      if (!ctx) return;
+      const { sx, sy } = localPoint(event);
+      const t = toolRef.current;
+
+      if (moveRef.current) {
+        event.preventDefault();
+        const now = toPage(sx, sy);
+        const dx = now.x - moveRef.current.last.x;
+        const dy = now.y - moveRef.current.last.y;
+        moveRef.current.last = now;
+        moveRef.current.moved = true;
+        const page = pageRef.current;
+        const list = annosRef.current[page] || [];
+        annosRef.current[page] = list.map((a) => (a.id === moveRef.current!.id ? translateAnn(a, dx, dy) : a));
+        paint();
+        return;
+      }
+
+      if (!gestureRef.current) return;
+      event.preventDefault();
+      const st = styleRef.current;
+      const g = gestureRef.current;
+
+      if (t === "ink" && draftRef.current) {
+        const samples = event.getCoalescedEvents?.() || [];
+        for (const s of samples.length ? samples : [event]) {
+          const local = localPoint(s);
+          draftRef.current.points.push(toPage(local.sx, local.sy));
+        }
+        paint();
+        return;
+      }
+
+      const p0 = g.startPage;
+      const p1 = toPage(sx, sy);
+      if (t === "line" || t === "arrow") {
+        draftRef.current = { id: "draft", type: t, x1: p0.x, y1: p0.y, x2: p1.x, y2: p1.y, color: st.color, width: st.strokeWidth };
+      } else {
+        const box = { x: Math.min(p0.x, p1.x), y: Math.min(p0.y, p1.y), w: Math.abs(p1.x - p0.x), h: Math.abs(p1.y - p0.y) };
+        if (t === "highlight") draftRef.current = { id: "draft", type: "highlight", ...box, color: st.highlightColor, opacity: 0.4 };
+        else draftRef.current = { id: "draft", type: t, ...box, color: st.color, width: st.strokeWidth, fill: st.fillEnabled ? st.fillColor : null, fillOpacity: 0.2 };
+      }
+      paint();
+    };
+
+    const up = (event: PointerEvent) => {
+      if (moveRef.current) {
+        const mv = moveRef.current;
+        moveRef.current = null;
+        if (mv.moved) {
+          const committed = cloneStore(annosRef.current); // fresh ref so setAnnos re-renders
+          annosRef.current = mv.snapshot; // rewind so pushStore records the pre-move state as history
+          pushStore(mv.snapshot, committed);
+        }
+        return;
+      }
+      const g = gestureRef.current;
+      const draft = draftRef.current;
+      gestureRef.current = null;
+      draftRef.current = null;
+      if (!g || !draft) { paint(); return; }
+      const st = styleRef.current;
+      const t = draft.type;
+
+      if (t === "ink") {
+        if ((draft.points || []).length >= 1) addAnnotation({ ...draft, id: nextAnnotateId() });
+        else paint();
+        return;
+      }
+
+      const { sx, sy } = localPoint(event);
+      const p0 = g.startPage;
+      const p1 = toPage(sx, sy);
+      if (t === "line" || t === "arrow") {
+        if (Math.hypot(p1.x - p0.x, p1.y - p0.y) < 1) { paint(); return; }
+        addAnnotation({ id: nextAnnotateId(), type: t, x1: p0.x, y1: p0.y, x2: p1.x, y2: p1.y, color: st.color, width: st.strokeWidth });
+        return;
+      }
+      const w = Math.abs(p1.x - p0.x);
+      const h = Math.abs(p1.y - p0.y);
+      if (w < 2 || h < 2) { paint(); return; } // ignore an accidental click-sized box
+      const box = { x: Math.min(p0.x, p1.x), y: Math.min(p0.y, p1.y), w, h };
+      if (t === "highlight") addAnnotation({ id: nextAnnotateId(), type: "highlight", ...box, color: st.highlightColor, opacity: 0.4 });
+      else addAnnotation({ id: nextAnnotateId(), type: t, ...box, color: st.color, width: st.strokeWidth, fill: st.fillEnabled ? st.fillColor : null, fillOpacity: 0.2 });
+    };
+
+    canvas.addEventListener("pointerdown", down);
+    canvas.addEventListener("pointermove", move);
+    canvas.addEventListener("pointercancel", up);
+    window.addEventListener("pointerup", up);
+    return () => {
+      canvas.removeEventListener("pointerdown", down);
+      canvas.removeEventListener("pointermove", move);
+      canvas.removeEventListener("pointercancel", up);
+      window.removeEventListener("pointerup", up);
+    };
+  }, []);
+
+  // Delete/Backspace removes the selected annotation while the tool is focused.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedRef.current) {
+        event.preventDefault();
+        deleteSelected();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const totalAnnos = Object.values(annos).reduce((sum, list) => sum + list.length, 0);
+  const pagesWithAnnos = Object.entries(annos).filter(([, list]) => list.length > 0).length;
+  const showStroke = ["ink", "rect", "ellipse", "line", "arrow"].includes(activeTool);
+  const showFill = activeTool === "rect" || activeTool === "ellipse";
+  const showColor = showStroke || activeTool === "note" || activeTool === "callout";
+  const showText = activeTool === "note" || activeTool === "callout";
+
+  return (
+    <ToolForm status={status} onReset={reset}>
+      <div className="surface-muted wabi-card-edge grid gap-1 p-4 text-sm font-semibold leading-6 text-neutral-600">
+        <p className="text-xs font-black uppercase text-neutral-500">How this works — and its limits</p>
+        <p className="text-[var(--foreground)]">Pick a tool, mark up the page, navigate pages, then export. Your markup is <strong>flattened (burned) into the page</strong> on export.</p>
+        <ul className="ml-4 list-disc">
+          <li>Flattened markup renders <strong>identically in every reader</strong> and cannot be tampered with as data — but it is <strong>not reader-editable</strong> (no selectable /Annot objects). Edit here before exporting.</li>
+          <li>The original page content stays intact <strong>underneath</strong> the markup; a highlight is drawn as a translucent marker over it.</li>
+          <li>Text notes and sticky notes are <strong>Latin-1 only</strong> (no CJK or emoji).</li>
+          <li>To permanently remove content rather than mark it up, use <a className="underline" href="#redact-pdf-tool">Redact PDF</a>.</li>
+        </ul>
+      </div>
+
+      <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+
+      {doc && pageCount > 0 && (
+        <>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Annotation tools">
+            {ANNOTATE_TOOLS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                aria-pressed={activeTool === t.id}
+                onClick={() => { setActiveTool(t.id); calloutTargetRef.current = null; if (t.id !== "select") { setSelectedId(null); selectedRef.current = null; } }}
+                className={`rounded-full border px-3 py-1.5 text-xs font-black uppercase transition ${activeTool === t.id ? "border-[var(--moss)] bg-[var(--moss)] text-white" : "border-[var(--line)] bg-[var(--paper-soft)] text-neutral-600 hover:border-[var(--moss)]"}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="surface-card wabi-card-edge grid gap-3 p-4">
+            {activeTool === "highlight" && (
+              <div className="grid gap-2">
+                <span className="text-xs font-black uppercase text-neutral-500">Highlight colour</span>
+                <div className="flex flex-wrap gap-2">
+                  {HIGHLIGHT_PALETTE.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      aria-label={`Highlight ${c.id}`}
+                      aria-pressed={highlightColor === c.hex}
+                      onClick={() => setHighlightColor(c.hex)}
+                      className={`h-8 w-8 rounded-full border-2 transition ${highlightColor === c.hex ? "border-[var(--foreground)] scale-110" : "border-[var(--line)]"}`}
+                      style={{ backgroundColor: c.hex }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+            {(showColor || showText) && (
+              <div className="grid gap-3 sm:grid-cols-3">
+                {showColor && <Input label={activeTool === "note" ? "Text colour" : activeTool === "callout" ? "Accent colour" : "Stroke colour"} value={color} onChange={setColor} type="color" />}
+                {showStroke && <Input label="Stroke width" value={strokeWidth} onChange={setStrokeWidth} type="number" helper="0.5–60 pt" />}
+                {showText && <Input label="Font size" value={fontSize} onChange={setFontSize} type="number" helper="4–96 pt" />}
+              </div>
+            )}
+            {showFill && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Checkbox label="Fill shape" checked={fillEnabled} onChange={setFillEnabled} />
+                {fillEnabled && <Input label="Fill colour" value={fillColor} onChange={setFillColor} type="color" />}
+              </div>
+            )}
+            {showText && <Input label={activeTool === "note" ? "Note text" : "Sticky note text"} value={noteText} onChange={setNoteText} helper={activeTool === "note" ? "Click the page to place this label." : "Drag/click to place the note box."} />}
+            {activeTool === "callout" && <Checkbox label="Add a leader line (click the target first, then place the box)" checked={calloutLeader} onChange={setCalloutLeader} />}
+            {activeTool === "select" && <p className="text-sm font-semibold text-neutral-600">Click an annotation to select it, drag to move it, and press Delete (or the button below) to remove it.</p>}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <button className="secondary-button" type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}><ArrowLeft size={16} /> Prev</button>
+              <span className="text-sm font-black tabular-nums">Page {currentPage} / {pageCount}</span>
+              <button className="secondary-button" type="button" disabled={currentPage >= pageCount} onClick={() => setCurrentPage((p) => Math.min(pageCount, p + 1))}>Next <ArrowRight size={16} /></button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button className="secondary-button" type="button" disabled={pastRef.current.length === 0} onClick={undo} data-hist={histTick}>Undo</button>
+              <button className="secondary-button" type="button" disabled={futureRef.current.length === 0} onClick={redo}>Redo</button>
+              <button className="secondary-button" type="button" disabled={!selectedId} onClick={deleteSelected}>Delete</button>
+              <button className="secondary-button" type="button" onClick={clearPage}>Clear page</button>
+            </div>
+          </div>
+
+          <p className="text-xs font-bold text-neutral-500">{totalAnnos} annotation{totalAnnos === 1 ? "" : "s"} across {pagesWithAnnos} page{pagesWithAnnos === 1 ? "" : "s"} · this page: {(annos[currentPage] || []).length}</p>
+        </>
+      )}
+
+      {doc && pageImage && pageDims && (
+        <div className="surface-card wabi-card-edge overflow-auto p-2" style={{ maxHeight: "72vh" }}>
+          <div className="relative mx-auto" style={{ width: pageDims.cw, height: pageDims.ch }}>
+            <img src={pageImage} width={pageDims.cw} height={pageDims.ch} alt={`Page ${currentPage} of ${fileName}`} className="block select-none" draggable={false} />
+            <canvas
+              ref={canvasRef}
+              className="absolute left-0 top-0"
+              style={{ width: pageDims.cw, height: pageDims.ch, touchAction: "none", cursor: activeTool === "select" ? "default" : "crosshair" }}
+            />
+          </div>
+        </div>
+      )}
+
+      <PrimaryButton label="Export annotated PDF" disabled={totalAnnos === 0} onClick={() => runSafely(setStatus, async () => {
+        if (!bytesRef.current) throw new Error("Load a PDF first.");
+        if (totalAnnos === 0) throw new Error("Add at least one annotation before exporting.");
+        const map: AnnStore = {};
+        for (const [page, list] of Object.entries(annos)) if (list.length) map[Number(page)] = list;
+        const out = await applyAnnotations(bytesRef.current, map, undefined, {
+          onProgress: (done: number, total: number) => setStatus({ tone: "idle", message: `Burning annotations — page ${done} of ${total}…`, progress: { value: done, total, label: "Flattening…" } }),
+        });
+        downloadBytes(out, withExtension(`${safeFilename(fileName)}-annotated`, "pdf"), "application/pdf");
+        return `Exported ${totalAnnos} annotation${totalAnnos === 1 ? "" : "s"} across ${pagesWithAnnos} page${pagesWithAnnos === 1 ? "" : "s"}. The markup is now flattened into ${fileName}.`;
+      })} />
+
+      <ResultConsequenceNote>Annotations are flattened (burned) into the page on export — they render the same in every reader, but are not reader-editable annotation objects. Keep this working file open if you still need to move or delete marks. For permanent removal of underlying content, use Redact PDF.</ResultConsequenceNote>
+    </ToolForm>
+  );
 }
 
 function PdfPageNumbersTool({ tool }: { tool: Tool }) {
