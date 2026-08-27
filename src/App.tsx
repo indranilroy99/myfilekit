@@ -338,7 +338,7 @@ function MobileNav({ open, onClose, activeHash }: { open: boolean; onClose: () =
 
   if (!open) return null;
 
-  const linkClass = "flex min-h-11 items-center rounded-2xl px-4 py-3 text-sm font-medium text-[var(--ink)] no-underline transition hover:bg-[var(--paper-soft)]";
+  const linkClass = "flex min-h-11 items-center rounded-2xl px-4 py-3 text-sm font-semibold text-[var(--ink)] no-underline transition hover:bg-[var(--paper-soft)]";
 
   return (
     <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Site navigation" onClick={onClose}>
@@ -351,7 +351,7 @@ function MobileNav({ open, onClose, activeHash }: { open: boolean; onClose: () =
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-2 flex items-center justify-between">
-          <span className="font-display text-lg font-medium">Menu</span>
+          <span className="font-display text-lg font-semibold">Menu</span>
           <button className="grid h-11 w-11 place-items-center rounded-2xl border border-[var(--line)] text-[var(--ink)]" type="button" aria-label="Close navigation menu" onClick={onClose}>
             <X size={20} />
           </button>
@@ -699,7 +699,7 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
           <p className={`tool-description mt-1 text-sm font-semibold leading-6 text-neutral-600 ${compact ? "tool-description-compact" : ""}`}>{tool.description}</p>
         </div>
         <div className="mt-auto flex flex-wrap gap-2">
-          {tool.isNew && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">New</span>}
+          {tool.isNew && <span className="new-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">New</span>}
           <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{primaryBadge}</span>
           {!compact && visibleBadges.map((badge: string) => <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>)}
           {!compact && multiFile && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{multiFile}</span>}
@@ -960,17 +960,17 @@ function ProgressBar({ value, total, label }: { value: number; total: number; la
 
 function StatusBox({ status }: { status: Status }) {
   const tone = status.tone === "error"
-    ? "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]"
+    ? "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
     : status.tone === "success"
-      ? "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f] [.dark_&]:border-[#3f5136] [.dark_&]:bg-[#16241a] [.dark_&]:text-[#bfe3b0]"
+      ? "border-[var(--success)] bg-[var(--success-bg)] text-[var(--success-fg)]"
       : "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]";
-  return <p role="status" aria-live="polite" className={`min-h-12 whitespace-pre-line rounded-2xl border px-4 py-3 text-sm font-bold ${tone}`}>{status.message}</p>;
+  return <p role="status" aria-live="polite" className={`min-h-12 whitespace-pre-line rounded-lg border px-4 py-3 text-sm font-bold ${tone}`}>{status.message}</p>;
 }
 
 /** A persistent, result-attached consequence note — survives the transient status message. */
 function ResultConsequenceNote({ children }: { children: React.ReactNode }) {
   return (
-    <div role="note" className="grid gap-1 rounded-2xl border border-[var(--line)] bg-[var(--paper-soft)] p-4 text-sm font-semibold leading-6 text-neutral-600">
+    <div role="note" className="grid gap-1 rounded-lg border border-[var(--line)] bg-[var(--paper-soft)] p-4 text-sm font-semibold leading-6 text-neutral-600">
       <p className="text-xs font-black uppercase text-neutral-500">Keep in mind</p>
       <p className="text-[var(--foreground)]">{children}</p>
     </div>
@@ -1627,7 +1627,7 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
               const cls = isSelected
                 ? "border-[var(--moss)] bg-[color-mix(in_srgb,var(--moss)_22%,transparent)]"
                 : edited
-                  ? "border-amber-400 bg-[color-mix(in_srgb,var(--warning)_20%,transparent)]"
+                  ? "border-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_20%,transparent)]"
                   : "border-transparent hover:border-[var(--moss)] hover:bg-[color-mix(in_srgb,var(--moss)_12%,transparent)]";
               return (
                 <button
@@ -1636,7 +1636,7 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
                   title={run.str}
                   aria-label={`Edit text: ${run.str}`}
                   onClick={() => selectRun(run)}
-                  className={`absolute cursor-text rounded-[2px] border ${cls}`}
+                  className={`absolute cursor-text rounded-sm border ${cls}`}
                   style={{ left: run.display.left, top: run.display.top, width: Math.max(4, run.display.w), height: Math.max(6, run.display.h) }}
                 />
               );
@@ -1655,7 +1655,7 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
       {selectedRun && (
         <div className="surface-card wabi-card-edge grid gap-3 p-4">
           <p className="text-xs font-black uppercase text-neutral-500">Selected text · page {currentPage}</p>
-          <p className="break-words rounded-xl border border-[var(--border)] bg-[var(--paper-soft)] px-3 py-2 font-mono text-sm text-neutral-600">{selectedRun.str}</p>
+          <p className="break-words rounded-lg border border-[var(--border)] bg-[var(--paper-soft)] px-3 py-2 font-mono text-sm text-neutral-600">{selectedRun.str}</p>
           <label className="grid gap-2">
             <span className="text-xs font-black uppercase text-neutral-500">Replacement text (leave empty to delete)</span>
             <input className="field-input" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Type the corrected text…" />
@@ -1673,12 +1673,12 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
           <p className="font-black">Pending edits ({editList.length})</p>
           <div className="grid gap-1">
             {[...edits.entries()].map(([key, edit]) => (
-              <div key={key} className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-neutral-600">
+              <div key={key} className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold text-neutral-600">
                 <span className="text-xs font-black uppercase text-neutral-500">p{edit.page}</span>
                 <span className="min-w-0 break-words font-mono text-neutral-500 line-through">{edit.original}</span>
                 <ArrowRight size={14} />
                 <span className="min-w-0 break-words font-mono text-[var(--foreground)]">{edit.text || "(deleted)"}</span>
-                <button className="ml-auto text-xs font-black uppercase text-red-700 hover:underline" type="button" onClick={() => removeEdit(key)}>Remove</button>
+                <button className="ml-auto text-xs font-black uppercase text-[var(--danger-fg)] hover:underline" type="button" onClick={() => removeEdit(key)}>Remove</button>
               </div>
             ))}
           </div>
@@ -3175,13 +3175,13 @@ function piiDisplayValue(hit: PiiHit, reveal: boolean) {
 }
 
 function confidenceTone(confidence: number) {
-  if (confidence >= PII_CONFIDENCE.HIGH) return "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]";
-  if (confidence >= PII_CONFIDENCE.MEDIUM) return "border-amber-200 bg-amber-50 text-amber-900 [.dark_&]:border-[#7a5a1f] [.dark_&]:bg-[#2a2113] [.dark_&]:text-[#f3d79b]";
+  if (confidence >= PII_CONFIDENCE.HIGH) return "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger-fg)]";
+  if (confidence >= PII_CONFIDENCE.MEDIUM) return "border-[var(--warning)] bg-[var(--warning-bg)] text-[var(--warning-fg)]";
   return "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]";
 }
 
 function ConfidenceTag({ confidence }: { confidence: number }) {
-  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${confidenceTone(confidence)}`}>{confidenceLabel(confidence)}</span>;
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black uppercase ${confidenceTone(confidence)}`}>{confidenceLabel(confidence)}</span>;
 }
 
 function groupHitsByType(hits: PiiHit[]) {
@@ -3310,7 +3310,7 @@ function AutoRedactPiiTool({ tool }: { tool: Tool }) {
                           <span className="text-xs font-black uppercase text-neutral-500">p{hit.page}</span>
                           <span className="break-all font-mono text-[var(--foreground)]">{piiDisplayValue(hit, reveal)}</span>
                           <ConfidenceTag confidence={hit.confidence} />
-                          {hit.rects.length ? <span className="text-xs">{hit.rects.length} area{hit.rects.length === 1 ? "" : "s"}</span> : <span className="text-xs text-red-700">no rectangle found — redact this one manually</span>}
+                          {hit.rects.length ? <span className="text-xs">{hit.rects.length} area{hit.rects.length === 1 ? "" : "s"}</span> : <span className="text-xs text-[var(--danger-fg)]">no rectangle found — redact this one manually</span>}
                           {hit.note ? <span className="text-xs text-neutral-500">{hit.note}</span> : null}
                         </label>
                       ))}
@@ -3552,21 +3552,21 @@ type AnalyzerReport = {
 };
 
 function severityTone(severity: string) {
-  if (severity === "Critical") return "border-red-300 bg-red-100 text-red-900 [.dark_&]:border-[#8f2323] [.dark_&]:bg-[#33141a] [.dark_&]:text-[#ffb3b3]";
-  if (severity === "High") return "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]";
-  if (severity === "Medium") return "border-amber-200 bg-amber-50 text-amber-900 [.dark_&]:border-[#7a5a1f] [.dark_&]:bg-[#2a2113] [.dark_&]:text-[#f3d79b]";
+  if (severity === "Critical") return "border-[var(--danger-strong)] bg-[var(--danger-strong-bg)] text-[var(--danger-strong-fg)]";
+  if (severity === "High") return "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger-fg)]";
+  if (severity === "Medium") return "border-[var(--warning)] bg-[var(--warning-bg)] text-[var(--warning-fg)]";
   // Low + Info are neutral — chroma is reserved for danger (Critical/High=red, Medium=amber).
   return "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]";
 }
 
 function SeverityTag({ severity }: { severity: string }) {
-  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${severityTone(severity)}`}>{severity}</span>;
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black uppercase ${severityTone(severity)}`}>{severity}</span>;
 }
 
 function verdictTone(level: string) {
-  if (level === "suspicious") return "border-red-200 bg-red-50 text-red-900 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]";
-  if (level === "caution") return "border-amber-200 bg-amber-50 text-amber-900 [.dark_&]:border-[#7a5a1f] [.dark_&]:bg-[#2a2113] [.dark_&]:text-[#f3d79b]";
-  return "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f] [.dark_&]:border-[#3f5136] [.dark_&]:bg-[#16241a] [.dark_&]:text-[#bfe3b0]";
+  if (level === "suspicious") return "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger-fg)]";
+  if (level === "caution") return "border-[var(--warning)] bg-[var(--warning-bg)] text-[var(--warning-fg)]";
+  return "border-[var(--success)] bg-[var(--success-bg)] text-[var(--success-fg)]";
 }
 
 function PdfAnalyzerTool({ tool }: { tool: Tool }) {
@@ -4254,7 +4254,7 @@ function ComparePdfTool({ tool }: { tool: Tool }) {
                   {changedPages.map((entry) => (
                     <div key={entry.page} className="surface-muted wabi-card-edge grid gap-2 p-3">
                       <p className="text-sm font-black text-[var(--foreground)]">Page {entry.page} — +{entry.added} / -{entry.removed} line(s)</p>
-                      <pre className="max-h-64 overflow-auto rounded-xl border border-[var(--border)] bg-[var(--paper-soft)] px-3 py-2 text-xs leading-5 whitespace-pre-wrap break-words">
+                      <pre className="max-h-64 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--paper-soft)] px-3 py-2 text-xs leading-5 whitespace-pre-wrap break-words">
                         {entry.rows
                           .filter((row) => row.type !== "same")
                           .slice(0, 60)
@@ -4582,10 +4582,10 @@ function SignPdfTool({ tool }: { tool: Tool }) {
 }
 
 const SIGNATURE_VERDICTS: Record<string, { label: string; tone: string }> = {
-  valid: { label: "Valid — document unchanged since signing", tone: "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f] [.dark_&]:border-[#3f5136] [.dark_&]:bg-[#16241a] [.dark_&]:text-[#bfe3b0]" },
+  valid: { label: "Valid — document unchanged since signing", tone: "border-[var(--success)] bg-[var(--success-bg)] text-[var(--success-fg)]" },
   "valid-partial": { label: "Valid for the signed revision — bytes were added afterwards", tone: "border-[var(--warning)] bg-[var(--warning-bg)] text-[var(--warning-fg)]" },
-  modified: { label: "Document MODIFIED after signing", tone: "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]" },
-  invalid: { label: "Signature INVALID", tone: "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]" },
+  modified: { label: "Document MODIFIED after signing", tone: "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger-fg)]" },
+  invalid: { label: "Signature INVALID", tone: "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger-fg)]" },
   unsupported: { label: "Not verified (unsupported key type)", tone: "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]" },
 };
 
@@ -7250,8 +7250,8 @@ function PosBillingTool() {
         <div className="flex flex-wrap gap-2">
           {visible.map((item) => (
             <div key={item.id} className="surface-muted wabi-card-edge flex items-center gap-2 px-3 py-2 text-sm font-bold">
-              <button className="text-left" type="button" onClick={() => addToCart(item)}>{item.name} · {formatAmount(Number(item.price))}{Number(item.taxPercent) ? ` · ${item.taxPercent}%` : ""}</button>
-              <button className="text-xs font-black uppercase text-neutral-500" type="button" aria-label={`Remove ${item.name} from the catalogue`} onClick={() => updateCatalogue(catalogue.filter((entry) => entry.id !== item.id))}>Del</button>
+              <button className="text-left hover:underline" type="button" onClick={() => addToCart(item)}>{item.name} · {formatAmount(Number(item.price))}{Number(item.taxPercent) ? ` · ${item.taxPercent}%` : ""}</button>
+              <button className="text-xs font-black uppercase text-neutral-500 hover:underline" type="button" aria-label={`Remove ${item.name} from the catalogue`} onClick={() => updateCatalogue(catalogue.filter((entry) => entry.id !== item.id))}>Del</button>
             </div>
           ))}
         </div>

@@ -83,6 +83,12 @@
   --danger: oklch(88.5% 0.062 18.334);
   --danger-bg: oklch(97.1% 0.013 17.38);
   --danger-fg: oklch(44.4% 0.177 26.899);
+  /* Critical/strong-danger step — a deeper red than --danger so Critical stays
+     visually heavier than High. Reproduces the Critical severity colours
+     previously inlined in App.tsx (light: Tailwind red-300/red-100/red-900). */
+  --danger-strong: oklch(80.8% 0.114 19.571);
+  --danger-strong-bg: oklch(93.6% 0.032 17.717);
+  --danger-strong-fg: oklch(39.6% 0.141 25.723);
   --warning: oklch(92.4% 0.12 95.746);
   --warning-bg: oklch(98.7% 0.022 95.277);
   --warning-fg: oklch(41.4% 0.112 45.904);
@@ -161,6 +167,15 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+/* Tint native checkbox/radio/range controls with the app accent instead of the
+   OS-default blue (most visible in dark). Custom controls use appearance:none
+   and ignore accent-color, so this only affects OS-rendered inputs. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--primary);
 }
 
 button {
@@ -1398,6 +1413,11 @@ html.dark .site-footer {
   --danger: #7f2a2a;
   --danger-bg: #2a1416;
   --danger-fg: #f8b4b4;
+  /* Critical/strong-danger step (dark) — mirrors the [.dark_&] Critical quad
+     previously inlined in App.tsx's severityTone. */
+  --danger-strong: #8f2323;
+  --danger-strong-bg: #33141a;
+  --danger-strong-fg: #ffb3b3;
   --warning: #7a5a1f;
   --warning-bg: #2a2113;
   --warning-fg: #f3d79b;
@@ -1689,6 +1709,13 @@ html.dark .strength-4 { color: color-mix(in srgb, var(--primary) 90%, #ffffff); 
   color: #fafafa !important;
 }
 
+/* Match the tool-page heading to the hero h1 weight — .page-title carries a
+   font-black (900) utility, so !important is needed to bring the two biggest
+   headings to the same 700. */
+.page-title {
+  font-weight: 700 !important;
+}
+
 .hero-panel p {
   color: #a1a1aa !important;
 }
@@ -1910,6 +1937,24 @@ html.dark .tool-card .tool-arrow {
   flex: 0 0 auto;
   border-radius: 999px;
   background: var(--primary);
+}
+
+/* "New" status pill. A distinct class from .tag-badge so it is NOT caught by the
+   .tool-card .tag-badge display:none / category-dot rules above — a New tool
+   shows both its category dot and this pill. Subtle, on-accent, works in both
+   themes (both --primary and --primary-foreground are theme-defined). */
+.new-badge {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
 }
 
 .surface-panel,
