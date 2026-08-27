@@ -27,18 +27,31 @@ sends and expects, so the shipped MyFileKit client talks to this backend as-is.
 
 ## Run it locally
 
+This server **fails closed**: it refuses to start unless both `API_KEY` and
+`ALLOWED_ORIGIN` are set (and `ALLOWED_ORIGIN` is a specific origin, not `*`).
+There is no wildcard-CORS or no-auth default, so a copy-paste deploy cannot
+accidentally expose an open, unauthenticated backend.
+
 ```bash
 cd reference-backend
-node server.js          # or: npm start
+API_KEY=$(openssl rand -hex 32) ALLOWED_ORIGIN=http://localhost:5173 node server.js   # or: npm start
 ```
 
 It listens on `http://localhost:4444` by default. Configure with env vars:
 
-| Env var          | Default | Meaning                                                        |
-| ---------------- | ------- | -------------------------------------------------------------- |
-| `PORT`           | `4444`  | Port to listen on.                                             |
-| `ALLOWED_ORIGIN` | `*`     | CORS origin. **Set this to your MyFileKit origin in prod.**    |
-| `API_KEY`        | *(none)*| If set, requests must send `Authorization: Bearer <API_KEY>`. |
+| Env var          | Default    | Meaning                                                                                      |
+| ---------------- | ---------- | -------------------------------------------------------------------------------------------- |
+| `PORT`           | `4444`     | Port to listen on.                                                                           |
+| `ALLOWED_ORIGIN` | *(required)* | CORS origin — your exact MyFileKit origin, e.g. `https://tools.example.com`. `*` is rejected. |
+| `API_KEY`        | *(required)* | Shared secret; every request must send `Authorization: Bearer <API_KEY>`.                  |
+
+Starting without them prints exactly what is missing and exits non-zero:
+
+```text
+[esign] refusing to start — insecure configuration:
+  • API_KEY is not set. …
+  • ALLOWED_ORIGIN is not set. …
+```
 
 Quick smoke test with the client's payload shape:
 

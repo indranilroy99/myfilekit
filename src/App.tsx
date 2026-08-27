@@ -5144,7 +5144,7 @@ function SignPdfTool({ tool }: { tool: Tool }) {
       return `Signed as ${result.subjectCommonName || "the certificate holder"} · serial ${result.serialHex}.\nDetached PKCS#7/CMS, SHA-256. ${time}${where}\n${trust}`;
     })} />
     {status.tone === "success" && (timestamped
-      ? <ResultConsequenceNote>This signature carries a trusted RFC 3161 timestamp, so the signing time is attested by the TSA rather than self-asserted. Whether a reader shows the signature as "trusted" still depends on that reader trusting the certificate's CA (and the TSA's).</ResultConsequenceNote>
+      ? <ResultConsequenceNote>This signature carries an RFC 3161 timestamp token, so the signing time is attested by the TSA rather than self-asserted — if that TSA is trusted. We verify the token's own signature and that it covers this signature, but not the TSA's trust chain (that is done offline, with no CA store). Whether a reader shows the signature as "trusted" still depends on that reader trusting the certificate's CA and the TSA's.</ResultConsequenceNote>
       : <ResultConsequenceNote>The signature proves document integrity and signer identity, but it is <strong>not</strong> timestamped by a trusted authority — the signing time is asserted by whoever signed. Turn on the RFC 3161 timestamp to have a TSA attest it. Whether a reader shows the signature as "trusted" depends on that reader trusting the certificate's CA.</ResultConsequenceNote>)}
   </ToolForm>;
 }
@@ -5178,7 +5178,11 @@ function SignatureCard({ sig, index }: { sig: any; index: number }) {
         <InfoRow label="Certificate valid" value={`${fmtDate(sig.notBefore)} → ${fmtDate(sig.notAfter)}`} />
         <InfoRow label="Signing time" value={sig.signingTime ? fmtDate(sig.signingTime) : (sig.declaredSigningTime || "—")} />
         <InfoRow label="Timestamp" value={sig.timestamp?.present
-          ? `TSA-attested ${sig.timestamp.time ? fmtDate(sig.timestamp.time) : "(time unreadable)"}${sig.timestamp.tsaCommonName ? ` · ${sig.timestamp.tsaCommonName}` : ""}${sig.timestamp.imprintMatches === false ? " · WARNING: token does not cover this signature" : ""}`
+          ? (sig.timestamp.imprintMatches === false
+              ? "Timestamp present — imprint mismatch (the token does not cover this signature)"
+              : sig.timestamp.imprintMatches && sig.timestamp.tokenSignatureValid
+                ? `TSA-attested ${sig.timestamp.genTime ? fmtDate(sig.timestamp.genTime) : "(time unreadable)"}${sig.timestamp.tsaCommonName ? ` · ${sig.timestamp.tsaCommonName}` : ""}`
+                : "Timestamp present — issuer signature not verified (the token's own signature did not check out)")
           : "None — signing time is self-asserted"} />
         <InfoRow label="Digest" value={`${sig.hashName || "SHA-256"} · integrity ${sig.integrity ? "matches" : "MISMATCH"}`} />
         <InfoRow label="Coverage" value={sig.coversWholeDocument ? "entire document" : "part of the document (additions after signing)"} />

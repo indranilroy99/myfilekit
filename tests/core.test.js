@@ -5559,6 +5559,101 @@ test("timestamp: the SignatureCard reports timestamp presence and SignPdfTool wi
   assert.match(appSource, /self-asserted/, "the verify card labels an untimestamped signature");
 });
 
+// A parametrised fake TSA. `signingKey` signs the token's SignedData (pass a key
+// that does NOT match `tsaCert` to forge the token's own CMS signature). With
+// `badImprint`, the token's message imprint is over the wrong bytes, so it does
+// not cover the signature. Otherwise the request imprint is echoed back, exactly
+// as a real TSA does.
+function makeCraftedTsaResponder(tsaCert, signingKey, { badImprint = false } = {}) {
+  return async (_url, opts) => {
+    const req = new pkijs.TimeStampReq({ schema: asn1js.fromBER(bufOf(new Uint8Array(opts.body))).result });
+    const messageImprint = badImprint
+      ? new pkijs.MessageImprint({
+          hashAlgorithm: new pkijs.AlgorithmIdentifier({ algorithmId: "2.16.840.1.101.3.4.2.1" }),
+          hashedMessage: new asn1js.OctetString({ valueHex: bufOf(new Uint8Array(32)) }), // 32 zero bytes ≠ SHA-256(signature)
+        })
+      : req.messageImprint;
+    const tst = new pkijs.TSTInfo({
+      version: 1,
+      policy: "1.2.3.4.1",
+      messageImprint,
+      serialNumber: new asn1js.Integer({ value: 7 }),
+      genTime: new Date("2030-01-02T03:04:05Z"),
+    });
+    const tstDer = new Uint8Array(tst.toSchema().toBER());
+    const signed = new pkijs.SignedData({
+      version: 3,
+      encapContentInfo: new pkijs.EncapsulatedContentInfo({ eContentType: "1.2.840.113549.1.9.16.1.4", eContent: new asn1js.OctetString({ valueHex: bufOf(tstDer) }) }),
+      signerInfos: [new pkijs.SignerInfo({ version: 1, sid: new pkijs.IssuerAndSerialNumber({ issuer: tsaCert.issuer, serialNumber: tsaCert.serialNumber }) })],
+      certificates: [tsaCert],
+    });
+    await signed.sign(signingKey, 0, "SHA-256", undefined, signEngine);
+    const token = new pkijs.ContentInfo({ contentType: "1.2.840.113549.1.7.2", content: signed.toSchema(true) });
+    const resp = new pkijs.TimeStampResp({ status: new pkijs.PKIStatusInfo({ status: 0 }), timeStampToken: token });
+    return { ok: true, status: 200, statusText: "OK", arrayBuffer: async () => resp.toSchema().toBER() };
+  };
+}
+
+test("timestamp honesty (a): a properly-signed token verifies — tokenSignatureValid:true AND imprintMatches:true", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("TS Signer", "TS Signer", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const tsaKeyPair = await genRsaKeyPair();
+  const tsaCert = await makeSelfSignedCert("Honest TSA", "Honest TSA", tsaKeyPair, tsaKeyPair.privateKey);
+  const fetchImpl = makeCraftedTsaResponder(tsaCert, tsaKeyPair.privateKey); // signed with the matching key
+  const pdf = await buildSamplePdf(false);
+
+  const signed = await signPdf(pdf, { p12, password: "pw", timestamp: true, tsaUrl: "https://tsa.example/tsr", fetchImpl });
+  const sig = (await verifyPdfSignatures(signed.bytes)).signatures[0];
+  assert.equal(sig.timestamp.present, true);
+  assert.equal(sig.timestamp.imprintMatches, true, "the imprint covers THIS signature");
+  assert.equal(sig.timestamp.tokenSignatureValid, true, "the token's own CMS signature verifies");
+  assert.ok(sig.timestamp.genTime instanceof Date, "genTime is surfaced");
+  assert.equal(sig.timestamp.tsaCommonName, "Honest TSA");
+});
+
+test("timestamp honesty (b): a FORGED token (correct imprint, CMS signed with the wrong key) reports tokenSignatureValid:false", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("TS Signer", "TS Signer", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const tsaKeyPair = await genRsaKeyPair();
+  const tsaCert = await makeSelfSignedCert("Spoofed TSA", "Spoofed TSA", tsaKeyPair, tsaKeyPair.privateKey);
+  const attackerKeyPair = await genRsaKeyPair(); // a key that does NOT match tsaCert's public key
+  const fetchImpl = makeCraftedTsaResponder(tsaCert, attackerKeyPair.privateKey);
+  const pdf = await buildSamplePdf(false);
+
+  const signed = await signPdf(pdf, { p12, password: "pw", timestamp: true, tsaUrl: "https://tsa.example/tsr", fetchImpl });
+  const sig = (await verifyPdfSignatures(signed.bytes)).signatures[0];
+  assert.equal(sig.timestamp.present, true);
+  assert.equal(sig.timestamp.imprintMatches, true, "the imprint still binds to this signature");
+  assert.equal(sig.timestamp.tokenSignatureValid, false, "the token's CMS signature does NOT verify, so the UI must not show TSA-attested");
+});
+
+test("timestamp honesty (c): an imprint-mismatch token reports imprintMatches:false", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("TS Signer", "TS Signer", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const tsaKeyPair = await genRsaKeyPair();
+  const tsaCert = await makeSelfSignedCert("Honest TSA", "Honest TSA", tsaKeyPair, tsaKeyPair.privateKey);
+  const fetchImpl = makeCraftedTsaResponder(tsaCert, tsaKeyPair.privateKey, { badImprint: true });
+  const pdf = await buildSamplePdf(false);
+
+  const signed = await signPdf(pdf, { p12, password: "pw", timestamp: true, tsaUrl: "https://tsa.example/tsr", fetchImpl });
+  const sig = (await verifyPdfSignatures(signed.bytes)).signatures[0];
+  assert.equal(sig.timestamp.present, true);
+  assert.equal(sig.timestamp.imprintMatches, false, "the token does not cover this signature");
+});
+
+test("reference-backend fails closed: configProblems flags an unset API_KEY and rejects wildcard CORS", async () => {
+  const { configProblems } = await import("../reference-backend/server.js");
+  const missingKey = configProblems({ apiKey: "", allowedOrigin: "https://tools.example.com" });
+  assert.ok(missingKey.some((p) => /API_KEY/.test(p)), "an unset API_KEY is a fail-closed problem");
+  const wildcard = configProblems({ apiKey: "secret", allowedOrigin: "*" });
+  assert.ok(wildcard.some((p) => /ALLOWED_ORIGIN/.test(p) && /\*/.test(p)), "wildcard CORS is rejected");
+  const ok = configProblems({ apiKey: "secret", allowedOrigin: "https://tools.example.com" });
+  assert.deepEqual(ok, [], "a specific origin plus an API key is accepted");
+});
+
 // --- 3. Batch Workflow (many ops x many files) ------------------------------
 
 test("batch-workflow: runs a preset over 3 generated PDFs into 3 correctly-named outputs in a ZIP", async () => {
@@ -6138,4 +6233,172 @@ test("workflow bates op returns valid PDF bytes and the legal-bates preset runs 
   assert.equal(preset.completed.length, 2, "both preset steps completed");
   const finalDoc = await PDFDocument.load(preset.bytes);
   assert.equal(finalDoc.getPageCount(), 3, "the preset output is a valid 3-page PDF");
+});
+
+// --- Sanitize PDF: INLINE / nested active-content vectors ---------------------
+// Regression cover for the adversarial finding that the object sweep only visited
+// INDIRECT objects and never walked /Outlines: (a) a bookmark with an inline /A
+// /JavaScript, (b) a benign /URI action hiding a /Launch in its /Next chain, and
+// (c) an /A << /S /Movie >> action form. All three must be gone after sanitise —
+// the Analyser's residual scan on the OUTPUT must be empty.
+async function buildInlineActiveContentPdf() {
+  const { PDFDocument, PDFName, PDFString } = window.PDFLib;
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([300, 300]);
+  const ctx = pdf.context;
+
+  // (a) Outline item carrying an INLINE (direct-dict) /A /JavaScript action.
+  const outlineItem = ctx.obj({
+    Title: PDFString.of("Click me"),
+    A: ctx.obj({ S: "JavaScript", JS: PDFString.of("app.alert('evil');") }),
+  });
+  const outlineItemRef = ctx.register(outlineItem);
+  const outlines = ctx.obj({ Type: "Outlines", First: outlineItemRef, Last: outlineItemRef, Count: 1 });
+  const outlinesRef = ctx.register(outlines);
+  outlineItem.set(PDFName.of("Parent"), outlinesRef);
+  pdf.catalog.set(PDFName.of("Outlines"), outlinesRef);
+
+  // (b) A benign /URI action whose inline /Next chain hides a /Launch action.
+  const uriAnnot = ctx.obj({
+    Type: "Annot", Subtype: "Link", Rect: [0, 0, 20, 20],
+    A: ctx.obj({
+      S: "URI", URI: PDFString.of("https://example.com"),
+      Next: ctx.obj({ S: "Launch", F: PDFString.of("calc.exe") }),
+    }),
+  });
+
+  // (c) An /A << /S /Movie >> action form on a Link annotation (NOT a Movie annot).
+  const movieAnnot = ctx.obj({
+    Type: "Annot", Subtype: "Link", Rect: [0, 0, 20, 20],
+    A: ctx.obj({ S: "Movie" }),
+  });
+
+  page.node.set(PDFName.of("Annots"), ctx.obj([ctx.register(uriAnnot), ctx.register(movieAnnot)]));
+  return pdf.save({ useObjectStreams: false });
+}
+
+test("sanitize: strips inline outline JavaScript, a Launch hidden in a /Next chain, and a /Movie action — residual is empty", async () => {
+  const { sanitizePdf, residualActiveContent } = await import("../src/services/pdf-sanitize.service.js");
+  const { PDFDocument, PDFName, PDFDict } = window.PDFLib;
+  const src = await buildInlineActiveContentPdf();
+
+  // The Analyser sees the threats before sanitising.
+  const before = residualActiveContent(await analyzePdfBytes(src));
+  assert.ok(before.length > 0, "Analyser flags the inline active content in the source");
+  assert.ok(before.some((f) => f.indicator.includes("JavaScript")), "inline outline JavaScript is seen");
+  assert.ok(before.some((f) => f.indicator === "/Launch action"), "the /Next-hidden Launch is seen");
+  assert.ok(before.some((f) => f.indicator === "/Movie"), "the /Movie action is seen");
+
+  const { bytes, report } = await sanitizePdf(src);
+
+  // Each of the three inline dangerous actions was removed and counted.
+  assert.ok(report.counts.actionScripts >= 3, `all three inline actions counted, got ${report.counts.actionScripts}`);
+  assert.equal(report.clean, false);
+
+  // The outline item's /A is gone; the URI action is kept but its /Next is gone.
+  const out = await PDFDocument.load(bytes);
+  const outCtx = out.context;
+  const outlines = outCtx.lookup(out.catalog.get(PDFName.of("Outlines")));
+  const firstItem = outCtx.lookup(outlines.get(PDFName.of("First")));
+  assert.equal(firstItem.get(PDFName.of("A")), undefined, "inline outline /A JavaScript removed");
+  let sawUri = false;
+  for (const [, obj] of outCtx.enumerateIndirectObjects()) {
+    if (obj instanceof PDFDict && String(obj.get(PDFName.of("Subtype"))) === "/Link") {
+      const action = outCtx.lookup(obj.get(PDFName.of("A")));
+      if (action instanceof PDFDict && String(action.get(PDFName.of("S"))) === "/URI") {
+        sawUri = true;
+        assert.equal(action.get(PDFName.of("Next")), undefined, "the Launch hidden in /Next was stripped");
+      }
+    }
+  }
+  assert.ok(sawUri, "the benign URI action itself was preserved");
+
+  // The invariant: the Analyser's residual scan on the OUTPUT is empty.
+  const after = residualActiveContent(await analyzePdfBytes(bytes));
+  assert.equal(after.length, 0, `no residual active content, got: ${after.map((f) => f.indicator).join(", ")}`);
+});
+
+// --- Accessibility: /Lang injection via the public API -----------------------
+// The UI dropdown only offers LANGUAGE_OPTIONS, but the public API forwards an
+// arbitrary lang string. A payload that closes the /Lang string and opens an
+// /OpenAction /JavaScript must never reach the catalog as literal syntax.
+test("auto-tag: a malicious lang string cannot inject active content into the catalog", async () => {
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const bytes = await makeTextPdf(1, "Doc");
+  const malicious = "en) >> /OpenAction << /S /JavaScript /JS (app.alert('x')) >> <<";
+  const { bytes: out } = await a11y.remediatePdfAccessibility(bytes, {
+    lang: malicious,
+    title: "Doc",
+    textBlocks: [{ page: 1, text: "Body", x: 72, y: 700, fontSize: 12, heading: 0 }],
+    figures: [],
+  });
+
+  // /Lang parses back to the safe fallback, not the payload; the catalog is intact.
+  const doc = await PDFDocument.load(out, { throwOnInvalidObject: false });
+  const langObj = doc.catalog.get(PDFName.of("Lang"));
+  assert.equal(langObj.decodeText(), "en", "malicious lang fell back to the safe default");
+
+  // Re-analysing the output finds no injected auto-run JavaScript.
+  const report = await analyzePdfBytes(out);
+  const injected = report.findings.filter((f) => f.indicator === "/OpenAction" || f.indicator.includes("JavaScript"));
+  assert.equal(injected.length, 0, `lang injection introduced active content: ${injected.map((f) => f.indicator).join(", ")}`);
+
+  // A normal BCP-47 tag still works and round-trips (hex-encoded, decodes back).
+  const ok = await a11y.remediatePdfAccessibility(bytes, { lang: "en-US", title: "Doc", textBlocks: [], figures: [] });
+  const okDoc = await PDFDocument.load(ok.bytes, { throwOnInvalidObject: false });
+  assert.equal(okDoc.catalog.get(PDFName.of("Lang")).decodeText(), "en-US", "a valid tag is written unchanged");
+});
+
+// --- Extract: decompression-bomb guard on inflated streams -------------------
+async function buildBombImagePdf() {
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const { zlibSync } = await import("fflate");
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([200, 200]);
+  const ctx = pdf.context;
+
+  // A highly-compressible payload (1 MB of zeros → a few KB compressed) declared
+  // as a tiny 8×8 image: the classic decompression-bomb shape.
+  const compressed = zlibSync(new Uint8Array(1024 * 1024), { level: 9 });
+  const bomb = ctx.stream(compressed, {
+    Type: "XObject", Subtype: "Image", Width: 8, Height: 8,
+    ColorSpace: "DeviceRGB", BitsPerComponent: 8, Filter: "FlateDecode",
+  });
+  // A genuine small image alongside it, to prove clean images still extract.
+  const okSamples = new Uint8Array([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0]); // 2×2 RGB
+  const ok = ctx.flateStream(okSamples, { Type: "XObject", Subtype: "Image", Width: 2, Height: 2, ColorSpace: "DeviceRGB", BitsPerComponent: 8 });
+
+  page.node.set(PDFName.of("Resources"), ctx.obj({ XObject: ctx.obj({ ImBomb: ctx.register(bomb), ImOk: ctx.register(ok) }) }));
+  return pdf.save({ useObjectStreams: false });
+}
+
+test("extract: a FlateDecode image that inflates past the cap is skipped as a bomb, and clean images still extract", async () => {
+  const { extractPdfAssets } = await import("../src/services/pdf-extract.service.js");
+  const result = await extractPdfAssets(await buildBombImagePdf());
+
+  assert.equal(result.counts.imageXObjects, 2, "both image XObjects were seen");
+  const bomb = result.skipped.find((s) => /bomb|too large/i.test(s.reason));
+  assert.ok(bomb, `the bomb image was skipped with a clear reason, got: ${JSON.stringify(result.skipped)}`);
+
+  // The normal image alongside it still decodes to a PNG.
+  assert.equal(result.images.length, 1, "the clean image still extracted");
+  assert.equal(result.images[0].mime, "image/png");
+});
+
+test("extract: a FlateDecode attachment that inflates past the cap is skipped as a bomb", async () => {
+  const { extractPdfAssets } = await import("../src/services/pdf-extract.service.js");
+  const { PDFDocument, PDFName, PDFString } = window.PDFLib;
+  const { zlibSync } = await import("fflate");
+  const pdf = await PDFDocument.create();
+  pdf.addPage([200, 200]);
+  const ctx = pdf.context;
+
+  const compressed = zlibSync(new Uint8Array(80 * 1024 * 1024)); // inflates past the 64 MB cap
+  const bombStream = ctx.stream(compressed, { Type: "EmbeddedFile", Filter: "FlateDecode" });
+  const spec = ctx.obj({ Type: "Filespec", F: PDFString.of("payload.bin"), UF: PDFString.of("payload.bin"), EF: { F: ctx.register(bombStream) } });
+  pdf.catalog.set(PDFName.of("Names"), ctx.obj({ EmbeddedFiles: { Names: [PDFString.of("payload.bin"), ctx.register(spec)] } }));
+
+  const result = await extractPdfAssets(await pdf.save({ useObjectStreams: false }));
+  assert.equal(result.attachments.length, 0, "the bomb attachment was not decoded");
+  assert.ok(result.skipped.some((s) => /bomb|too large/i.test(s.reason)), `the attachment was skipped with a clear reason, got: ${JSON.stringify(result.skipped)}`);
 });

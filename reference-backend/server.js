@@ -20,13 +20,15 @@
  * reference is intentionally simple and is NOT production-ready as written:
  *   • Storage is IN MEMORY. Everything is lost on restart. A real deploy needs a
  *     store you control, with encryption at rest.
- *   • There is no authentication on the read/sign/download routes beyond an
- *     unguessable id. Add real auth (per-signer tokens) before real use.
+ *   • Beyond the required API_KEY, there is no per-request authentication on the
+ *     read/sign/download routes beyond an unguessable id. Add real auth (the
+ *     per-signer tokens) before real use.
  *   • Serve it over TLS (HTTPS) only. The MyFileKit client refuses to send a key
  *     in a URL, but the PDF itself is in the request body and must be encrypted
  *     in transit.
- *   • Set ALLOWED_ORIGIN to your MyFileKit origin. The wildcard default is for
- *     local development only.
+ *   • This server FAILS CLOSED: it refuses to start unless API_KEY is set (a
+ *     shared secret every request must present) and ALLOWED_ORIGIN is your exact
+ *     MyFileKit origin. There is no wildcard-CORS or no-auth default.
  *   • Define and enforce a retention policy — delete envelopes when done.
  *   • The "final signed PDF" here is the ORIGINAL bytes plus an audit record. A
  *     real deploy would apply a visible signature and/or a cryptographic seal
@@ -36,13 +38,35 @@
 
 import http from "node:http";
 import crypto from "node:crypto";
+import { pathToFileURL } from "node:url";
 
 const PORT = Number(process.env.PORT || 4444);
-// Lock this to your MyFileKit origin in production, e.g. https://tools.example.com.
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*";
-// Optional shared secret. If set, requests must send Authorization: Bearer <key>.
-// The MyFileKit client sends exactly this header when an API key is configured.
+// The exact MyFileKit origin allowed to call this backend, e.g.
+// https://tools.example.com. There is NO wildcard default: an unset (or "*")
+// value makes the server refuse to start (see configProblems / fail-closed gate).
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "";
+// Shared secret. REQUIRED: the server refuses to start without it, and every
+// request must send Authorization: Bearer <key>. The MyFileKit client sends
+// exactly this header when an API key is configured.
 const API_KEY = process.env.API_KEY || "";
+
+/**
+ * Fail-closed configuration gate. Returns a list of human-readable problems;
+ * an empty list means the configuration is safe to run. Pure and parameterised
+ * so it can be unit-tested without touching process.env or opening a socket.
+ */
+export function configProblems({ apiKey = API_KEY, allowedOrigin = ALLOWED_ORIGIN } = {}) {
+  const problems = [];
+  if (!apiKey) {
+    problems.push("API_KEY is not set. This server refuses to start without a shared secret so it can never be called unauthenticated — set API_KEY to a long random value (e.g. `openssl rand -hex 32`).");
+  }
+  if (!allowedOrigin) {
+    problems.push("ALLOWED_ORIGIN is not set. Set it to your exact MyFileKit origin (e.g. https://tools.example.com). Wildcard CORS is not allowed.");
+  } else if (allowedOrigin === "*") {
+    problems.push("ALLOWED_ORIGIN must be a specific origin, not \"*\" — wildcard CORS lets any site call this backend.");
+  }
+  return problems;
+}
 
 // In-memory store. Reference only — see the security note above.
 /** @type {Map<string, any>} */
@@ -88,7 +112,7 @@ function readJsonBody(req) {
 }
 
 function authorized(req) {
-  if (!API_KEY) return true; // no key required in this deploy
+  if (!API_KEY) return false; // fail-closed: never serve without a configured key
   const header = req.headers["authorization"] || "";
   return header === `Bearer ${API_KEY}`;
 }
@@ -255,7 +279,22 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`[esign] reference backend listening on http://localhost:${PORT}`);
-  console.log(`[esign] ALLOWED_ORIGIN=${ALLOWED_ORIGIN}${API_KEY ? " (API key required)" : " (no API key required)"}`);
-});
+// Only start listening when run directly (`node server.js`), not when imported
+// (e.g. by a test that just wants to check configProblems). Refuse to start on
+// any insecure configuration — fail closed rather than serve unauthenticated or
+// with wildcard CORS.
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
+  const problems = configProblems();
+  if (problems.length) {
+    console.error("[esign] refusing to start — insecure configuration:");
+    for (const problem of problems) console.error(`  • ${problem}`);
+    console.error("[esign] set the required environment variables and try again (see README.md).");
+    process.exit(1);
+  }
+  server.listen(PORT, () => {
+    console.log(`[esign] reference backend listening on http://localhost:${PORT}`);
+    console.log(`[esign] ALLOWED_ORIGIN=${ALLOWED_ORIGIN} (API key required)`);
+  });
+}
+
+export { server };

@@ -13,9 +13,31 @@
 // Repeated image XObjects are de-duplicated by content hash. Pure pdf-lib +
 // fflate, so this path is unit-testable in Node.
 
-import { zipSync, zlibSync } from "fflate";
+import { zipSync, zlibSync, decompressSync } from "fflate";
 import { getPdfLib } from "./pdf.service.js";
 import { safeFilename } from "../utils/safe-filename.js";
+
+// Upper bound on inflated bytes we are willing to materialise from a single
+// untrusted FlateDecode stream. A crafted, highly-compressible stream can inflate
+// to gigabytes and OOM the tab; mirror the Analyser's MAX_INFLATE bound and refuse
+// to decode anything past this. 64 MB is comfortably larger than a legitimate
+// large raster while staying bounded against a decompression bomb.
+const MAX_INFLATE_BYTES = 64 * 1024 * 1024;
+
+// Returns true when a FlateDecode stream inflates to more than `cap` bytes, using
+// a probe buffer one byte over the cap: fflate truncates its output to the buffer,
+// so a returned length past `cap` means the true size exceeds it. Never throws:
+// non-inflatable bytes (e.g. an uncompressed raster, which cannot amplify anyway)
+// return false so the caller falls back to pdf-lib's own decoder.
+function flateInflateExceeds(stored, cap) {
+  if (!stored || !stored.length) return false;
+  try {
+    const probe = decompressSync(new Uint8Array(stored), { out: new Uint8Array(cap + 1) });
+    return probe.length > cap;
+  } catch {
+    return false;
+  }
+}
 
 // --- filters / dict helpers ---------------------------------------------------
 
@@ -164,6 +186,7 @@ export async function extractPdfAssets(input, options = {}) {
   // First pass: collect candidate image XObjects and attachment Filespecs.
   const imageStreams = [];
   const attachments = [];
+  const skipped = []; // items refused (unsupported codec, or too large / bomb)
   const seenAttachmentNames = new Map();
   for (const [, obj] of objects) {
     if (obj instanceof PDFRawStream && obj.dict) {
@@ -175,6 +198,14 @@ export async function extractPdfAssets(input, options = {}) {
       const ef = obj.lookup(PDFName.of("EF"));
       const stream = ef instanceof PDFDict ? ef.lookup(PDFName.of("F")) || ef.lookup(PDFName.of("UF")) : null;
       if (!(stream instanceof PDFRawStream)) continue;
+      // Bomb guard: refuse to inflate an attachment whose FlateDecode stream blows
+      // past the cap, instead of decoding it into gigabytes of memory.
+      const efFilters = filterNames(stream.dict, PDFName, PDFArray);
+      const efFlate = efFilters.length > 0 && efFilters.every((f) => f === "FlateDecode" || f === "Fl");
+      if (efFlate && flateInflateExceeds(stream.contents, MAX_INFLATE_BYTES)) {
+        skipped.push({ reason: "attachment stream is too large / possible decompression bomb", filters: efFilters });
+        continue;
+      }
       let fileBytes;
       try { fileBytes = decodePDFRawStream(stream).decode(); } catch { fileBytes = stream.contents || new Uint8Array(0); }
       let name = safeAttachmentName(rawName, `attachment-${attachments.length + 1}`);
@@ -190,7 +221,6 @@ export async function extractPdfAssets(input, options = {}) {
 
   // Second pass: decode images, de-duplicating repeated XObjects by content hash.
   const images = [];
-  const skipped = [];
   const seenImageHashes = new Set();
   const total = imageStreams.length;
   for (let index = 0; index < imageStreams.length; index += 1) {
@@ -216,9 +246,19 @@ export async function extractPdfAssets(input, options = {}) {
       const bpc = numberOf(dict.get(PDFName.of("BitsPerComponent")) || dict.get(PDFName.of("BPC")));
       const { channels, reason } = colorChannels(dict, ctx, PDFName, PDFArray, PDFRawStream);
       if (width && height && bpc === 8 && (channels === 1 || channels === 3)) {
+        const expected = width * height * channels;
+        // Bomb guard: a legit 8-bit raster inflates to width×height×channels bytes
+        // (plus at most one predictor byte per row). Bound the inflate to that,
+        // capped by MAX_INFLATE_BYTES, so a crafted highly-compressible stream that
+        // inflates to gigabytes is skipped instead of OOMing the tab. Only decode
+        // once we know the true inflated size is within the cap.
+        const inflateCap = Math.min(MAX_INFLATE_BYTES, expected + height + 64);
+        if (flateInflateExceeds(stored, inflateCap)) {
+          skipped.push({ reason: "decompressed image is too large / possible decompression bomb", width, height, filters });
+          continue;
+        }
         let samples;
         try { samples = decodePDFRawStream(stream).decode(); } catch { samples = null; }
-        const expected = width * height * channels;
         if (samples && samples.length >= expected) {
           images.push({ bytes: encodePng(width, height, channels, samples.subarray(0, expected)), mime: "image/png", ext: "png", kind: `PNG (FlateDecode ${channels === 1 ? "gray" : "RGB"})` });
           continue;

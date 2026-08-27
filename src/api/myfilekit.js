@@ -6,8 +6,13 @@
 //
 // This module is a THIN wrapper: every method delegates to the real service
 // functions the app itself uses (pdf.service, pdf-render, pdf-crypto, ocr, …).
-// Nothing here re-implements the work, and nothing here opens a connection: it
-// makes no network calls of any kind — every method is a local computation.
+// Nothing here re-implements the work. Every method is a local computation and
+// makes no network calls of any kind — with ONE explicit, opt-in exception:
+// pdf.sign(file, { timestamp: true, tsaUrl }) contacts the user-supplied RFC 3161
+// timestamp authority. Even then it sends only a SHA-256 hash of the CMS
+// signature (never the document), the default off-by-default toggle keeps it
+// silent, and the request is Content-Security-Policy connect-src-gated, so it
+// only succeeds on a deploy whose CSP the operator has opened for that TSA.
 // Methods that need a browser (canvas / pdf.js / tesseract) throw the same clear
 // errors their services throw when run outside one; the pure pdf-lib methods
 // (merge, split, encrypt, …) also work in Node.

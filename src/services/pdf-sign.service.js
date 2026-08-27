@@ -883,6 +883,35 @@ function readTstInfo(tokenContentInfo) {
   }
 }
 
+// Verify the timestamp token's OWN CMS SignedData signature over its TSTInfo,
+// using the TSA certificate embedded in the token, and confirm the token's
+// imprint really is over `imprintedBytes` (this signature). pkijs verifies both
+// at once for a TSTInfo-carrying token when given the imprinted data. A `true`
+// result proves the token is cryptographically intact and bound to THIS
+// signature — it does NOT prove the TSA is trusted: we hold no CA store and make
+// no network calls, the same honest limit as the signer certificate. Any parse
+// or verification failure counts as not verified.
+async function verifyTimestampTokenSignature(tokenContentInfo, imprintedBytes) {
+  try {
+    const signed = new pkijs.SignedData({ schema: tokenContentInfo.content });
+    // The encapsulated TSTInfo may decode as a CONSTRUCTED OCTET STRING, whose
+    // valueHexView is empty; pkijs's own verify reads that view directly and
+    // then fails to parse the TSTInfo. Re-wrap it as a primitive OCTET STRING
+    // (the same fallback readTstInfo uses) so verification sees the real bytes.
+    const eContent = signed.encapContentInfo?.eContent;
+    if (eContent && !eContent.valueBlock.valueHexView?.byteLength && typeof eContent.getValue === "function") {
+      signed.encapContentInfo.eContent = new asn1js.OctetString({ valueHex: eContent.getValue() });
+    }
+    // For a TSTInfo token pkijs also re-checks the imprint against `data`, so a
+    // token that does not cover this signature verifies as false — which is what
+    // we want. `data` is the CMS signature the imprint is taken over.
+    const result = await signed.verify({ signer: 0, data: bufOf(imprintedBytes) }, engine());
+    return result === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Requests a timestamp token over `signatureBytes` (the CMS SignerInfo signature)
  * from `tsaUrl`. This is a real network POST of application/timestamp-query. A
@@ -1449,22 +1478,28 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes) {
   }
 
   // RFC-3161 trusted timestamp: an unsigned attribute carrying a TSA-issued token.
-  // When present the signing time is TSA-attested (not just self-asserted); we
-  // also confirm the token's imprint really is over THIS signature.
+  // Two independent checks: `imprintMatches` proves the token's imprint is over
+  // THIS signature, and `tokenSignatureValid` proves the token's own CMS
+  // signature (over its TSTInfo) is cryptographically intact. Only when BOTH hold
+  // is the time genuinely TSA-attested — and even then only as strongly as the
+  // reader trusts the TSA, which we cannot establish offline (no CA store).
   let timestamp = { present: false };
   const tsAttr = signerInfo.unsignedAttrs?.attributes?.find((a) => a.type === OID.timeStampToken);
   if (tsAttr && tsAttr.values[0]) {
     try {
       const tokenInfo = new pkijs.ContentInfo({ schema: tsAttr.values[0] });
       const info = readTstInfo(tokenInfo);
+      const sigBytes = new Uint8Array(signerInfo.signature.valueBlock.valueHexView);
       let imprintMatches = null;
       if (info?.imprintDigest && info.hashAlgorithm && HASH_BY_OID[info.hashAlgorithm]) {
-        const overSignature = await digestBytes(HASH_BY_OID[info.hashAlgorithm], new Uint8Array(signerInfo.signature.valueBlock.valueHexView));
+        const overSignature = await digestBytes(HASH_BY_OID[info.hashAlgorithm], sigBytes);
         imprintMatches = bytesEqual(info.imprintDigest, overSignature);
       }
-      timestamp = { present: true, time: info?.genTime || null, tsaCommonName: info?.tsaCommonName || "", imprintMatches };
+      const tokenSignatureValid = await verifyTimestampTokenSignature(tokenInfo, sigBytes);
+      const genTime = info?.genTime || null;
+      timestamp = { present: true, genTime, time: genTime, tsaCommonName: info?.tsaCommonName || "", imprintMatches, tokenSignatureValid };
     } catch {
-      timestamp = { present: true, time: null, tsaCommonName: "", imprintMatches: null, error: "The timestamp token could not be read." };
+      timestamp = { present: true, genTime: null, time: null, tsaCommonName: "", imprintMatches: null, tokenSignatureValid: false, error: "The timestamp token could not be read." };
     }
   }
 

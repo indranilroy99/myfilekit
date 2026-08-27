@@ -49,6 +49,26 @@ export const LANGUAGE_OPTIONS = [
 
 const HEADING_TAGS = ["H1", "H2", "H3", "H4", "H5", "H6"];
 
+// A BCP-47-ish language tag: a 2–8 letter primary subtag plus optional
+// alphanumeric subtags (script/region/variant). Deliberately strict — it rejects
+// anything carrying PDF dictionary syntax such as ')', '<<', '/', or whitespace.
+const LANG_TAG = /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/;
+const LANGUAGE_CODES = new Set(LANGUAGE_OPTIONS.map((option) => option.code));
+
+// Validates a caller-supplied language tag. The UI dropdown only offers
+// LANGUAGE_OPTIONS, but the public API (window.MyFileKit.pdf.accessibility.tag)
+// forwards an arbitrary string here; a value like
+//   'en) >> /OpenAction << /S /JavaScript /JS(…) >>'
+// must never reach the catalog as literal syntax. Accepts a known option or a
+// BCP-47-shaped tag; falls back to a safe default otherwise. (Belt-and-suspenders:
+// the value is additionally written as a hex string, so even a slipped value can
+// not break the dictionary.)
+function safeLangTag(raw, fallback = "en") {
+  const value = String(raw ?? "").trim();
+  if (LANGUAGE_CODES.has(value) || LANG_TAG.test(value)) return value;
+  return fallback;
+}
+
 // --- small object-model read helpers -----------------------------------------
 
 function nameKey(lib, key) {
@@ -711,11 +731,11 @@ function stripPriorAccessLayers(lib, ctx, page) {
 export async function remediatePdfAccessibility(bytes, params = {}) {
   const lib = getPdfLib();
   const {
-    PDFDocument, PDFName, PDFNumber, PDFString, PDFHexString, PDFBool, PDFArray, PDFRef, StandardFonts,
+    PDFDocument, PDFName, PDFNumber, PDFHexString, PDFBool, PDFArray, PDFRef, StandardFonts,
     PDFOperator, PDFOperatorNames, beginText, endText, showText, setFontAndSize, setTextRenderingMode, setTextMatrix, endMarkedContent,
   } = lib;
 
-  const lang = String(params.lang || "en-US").trim() || "en-US";
+  const lang = safeLangTag(params.lang || "en-US", "en");
   const title = String(params.title ?? "").trim();
   const textBlocks = Array.isArray(params.textBlocks) ? params.textBlocks : [];
   const figures = Array.isArray(params.figures) ? params.figures : [];
@@ -761,7 +781,9 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
   }
 
   // --- 1. Language ----------------------------------------------------------
-  catalog.set(N("Lang"), PDFString.of(lang));
+  // Written as a hex string so even a value that slipped past safeLangTag cannot
+  // inject dictionary syntax into the catalog. `lang` is already validated above.
+  catalog.set(N("Lang"), PDFHexString.fromText(lang));
   applied.push(`document language /Lang = ${lang}`);
 
   // --- 2. Title (Info /Title as UTF-16BE) -----------------------------------

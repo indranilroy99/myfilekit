@@ -14,7 +14,7 @@ export const SANITIZE_CATEGORIES = {
   openAction: "Document open action (/OpenAction)",
   additionalActions: "Additional actions (/AA)",
   documentJavaScript: "Document-level JavaScript (/Names /JavaScript)",
-  actionScripts: "JavaScript / Launch / SubmitForm / ImportData / Rendition actions",
+  actionScripts: "JavaScript / Launch / SubmitForm / ImportData / Rendition / Movie / Sound / GoToR / GoToE actions",
   embeddedFiles: "Embedded files / attachments",
   richMedia: "RichMedia / 3D / Movie / Screen / Sound annotations",
 };
@@ -43,8 +43,15 @@ export function residualActiveContent(analyzerReport) {
   return (analyzerReport?.findings || []).filter((finding) => set.has(finding.indicator));
 }
 
-// Action /S sub-types that execute code, launch programs, or exfiltrate data.
-const DANGEROUS_ACTIONS = new Set(["JavaScript", "Launch", "SubmitForm", "ImportData", "Rendition"]);
+// Action /S sub-types that execute code, launch programs, exfiltrate data, or
+// reach embedded/remote targets. These are ACTIONS (an /A or /Next dict with this
+// /S), distinct from the annotation /Subtype values in MULTIMEDIA_ANNOTS below —
+// e.g. an /A << /S /Movie >> action form is dangerous even when no Movie
+// annotation is present.
+const DANGEROUS_ACTIONS = new Set([
+  "JavaScript", "Launch", "SubmitForm", "ImportData", "Rendition",
+  "Movie", "Sound", "GoToR", "GoToE",
+]);
 // Annotation /Subtype values that embed or trigger multimedia / 3D execution.
 const MULTIMEDIA_ANNOTS = new Set(["RichMedia", "Screen", "Movie", "Sound", "3D"]);
 
@@ -96,14 +103,79 @@ export async function sanitizePdf(input, options = {}) {
     return true;
   };
 
-  const actionTypeOf = (value) => {
-    const dict = ctx.lookup(value);
-    if (!(dict instanceof PDFDict)) return null;
-    return nameString(dict.get(PDFName.of("S")));
+  const A_KEY = PDFName.of("A");
+  const S_KEY = PDFName.of("S");
+  const NEXT_KEY = PDFName.of("Next");
+  const FIRST_KEY = PDFName.of("First");
+  const AA_KEY = PDFName.of("AA");
+  const MAX_CHAIN = 64; // depth cap for an /A → /Next → … action chain
+  const refTag = (value) => (isRef(value) ? `${value.objectNumber} ${value.generationNumber}` : null);
+
+  // Recursively neutralises an action held at parent[kName]. If the action's /S is
+  // dangerous the whole action is unlinked; the object sweep (section 4) also
+  // deletes+counts INDIRECT dangerous actions, so only INLINE ones are counted
+  // here to avoid double counting. A benign action is kept and its /Next chain
+  // (a single action, or an array of them) is walked and neutralised the same way,
+  // so a dangerous action hidden behind a benign head is still removed. Guarded by
+  // an object-number visited set (cycles) and a depth cap.
+  const stripAction = (parent, kName, seen, depth) => {
+    const value = parent.get(kName);
+    if (value === undefined) return;
+    if (depth > MAX_CHAIN) { parent.delete(kName); return; }
+    const action = ctx.lookup(value);
+
+    if (action instanceof PDFArray) {
+      const keep = [];
+      for (let i = 0; i < action.size(); i += 1) {
+        const entry = action.get(i);
+        const el = ctx.lookup(entry);
+        if (!(el instanceof PDFDict)) { keep.push(entry); continue; }
+        const tag = refTag(entry);
+        if (tag) { if (seen.has(tag)) continue; seen.add(tag); }
+        if (DANGEROUS_ACTIONS.has(nameString(el.get(S_KEY)))) {
+          if (!isRef(entry)) counts.actionScripts += 1; // inline: the sweep won't see it
+          continue; // drop; an indirect orphan is deleted+counted by the sweep
+        }
+        stripAction(el, NEXT_KEY, seen, depth + 1);
+        keep.push(entry);
+      }
+      if (keep.length !== action.size()) {
+        const rebuilt = PDFArray.withContext(ctx);
+        for (const ref of keep) rebuilt.push(ref);
+        parent.set(kName, rebuilt);
+      }
+      return;
+    }
+
+    if (!(action instanceof PDFDict)) return;
+    const tag = refTag(value);
+    if (tag) { if (seen.has(tag)) { parent.delete(kName); return; } seen.add(tag); }
+    if (DANGEROUS_ACTIONS.has(nameString(action.get(S_KEY)))) {
+      parent.delete(kName);
+      if (!isRef(value)) counts.actionScripts += 1; // inline: the sweep won't see it
+      return;
+    }
+    stripAction(action, NEXT_KEY, seen, depth + 1); // benign head kept — walk its /Next chain
+  };
+
+  // Neutralises the action chains inside an /AA (additional-actions) dict before it
+  // is unlinked, so a dangerous action nested behind a benign one in an /AA entry
+  // cannot survive as an orphan. Removal + counting of /AA itself stays with the
+  // unlink() calls below.
+  const stripAAChains = (owner) => {
+    const aa = ctx.lookup(owner.get(AA_KEY));
+    if (!(aa instanceof PDFDict) || typeof aa.entries !== "function") return;
+    const seen = new Set();
+    for (const [key] of [...aa.entries()]) stripAction(aa, key, seen, 0);
   };
 
   // --- 1. Document catalog: OpenAction, additional actions, name trees --------
+  // OpenAction may be an action dict (walk its /Next chain to drop nested dangerous
+  // actions before the whole thing is removed) or a destination array (left alone).
+  const openAction = ctx.lookup(catalog.get(PDFName.of("OpenAction")));
+  if (openAction instanceof PDFDict) stripAction(openAction, NEXT_KEY, new Set(), 0);
   if (unlink(catalog, "OpenAction")) counts.openAction += 1;
+  stripAAChains(catalog);
   if (unlink(catalog, "AA")) counts.additionalActions += 1;
 
   const names = ctx.lookup(catalog.get(PDFName.of("Names")));
@@ -112,9 +184,38 @@ export async function sanitizePdf(input, options = {}) {
     if (removeAttachments) unlink(names, "EmbeddedFiles"); // Filespec objects are counted in the sweep.
   }
 
+  // --- 1b. Outlines (bookmarks): strip dangerous /A actions -------------------
+  // Bookmark /A actions are frequently INLINE (direct dicts) and live under
+  // /Outlines, which the indirect-object sweep never visits. Walk the outline tree
+  // via /First (child) and /Next (sibling), neutralising each item's /A chain.
+  // Bounded by a visited-ref set (cycles) and a node cap (malformed/huge trees).
+  const outlines = ctx.lookup(catalog.get(PDFName.of("Outlines")));
+  if (outlines instanceof PDFDict) {
+    const MAX_OUTLINE_NODES = 100000;
+    const seenNodes = new Set();
+    const stack = [];
+    const first = outlines.get(FIRST_KEY);
+    if (first !== undefined) stack.push(first);
+    let visited = 0;
+    while (stack.length && visited < MAX_OUTLINE_NODES) {
+      visited += 1;
+      const ref = stack.pop();
+      const tag = refTag(ref);
+      if (tag) { if (seenNodes.has(tag)) continue; seenNodes.add(tag); }
+      const item = ctx.lookup(ref);
+      if (!(item instanceof PDFDict)) continue;
+      stripAction(item, A_KEY, new Set(), 0);
+      const child = item.get(FIRST_KEY);
+      if (child !== undefined) stack.push(child);
+      const sibling = item.get(NEXT_KEY);
+      if (sibling !== undefined) stack.push(sibling);
+    }
+  }
+
   // --- 2. Pages: page additional actions and annotations ----------------------
   for (const page of pdf.getPages()) {
     const node = page.node;
+    stripAAChains(node);
     if (unlink(node, "AA")) counts.additionalActions += 1;
 
     const annots = ctx.lookup(node.get(PDFName.of("Annots")));
@@ -137,8 +238,9 @@ export async function sanitizePdf(input, options = {}) {
         if (isRef(entry)) ctx.delete(entry); // its Filespec is deleted + counted in the sweep
         continue;
       }
+      stripAAChains(annot);
       if (unlink(annot, "AA")) counts.additionalActions += 1;
-      if (DANGEROUS_ACTIONS.has(actionTypeOf(annot.get(PDFName.of("A"))))) unlink(annot, "A");
+      stripAction(annot, A_KEY, new Set(), 0);
       keep.push(entry);
     }
     if (keep.length !== annots.size()) {
@@ -159,8 +261,9 @@ export async function sanitizePdf(input, options = {}) {
       guard += 1;
       const field = ctx.lookup(stack.pop());
       if (!(field instanceof PDFDict)) continue;
+      stripAAChains(field);
       if (unlink(field, "AA")) counts.additionalActions += 1;
-      if (DANGEROUS_ACTIONS.has(actionTypeOf(field.get(PDFName.of("A"))))) unlink(field, "A");
+      stripAction(field, A_KEY, new Set(), 0);
       const kids = ctx.lookup(field.get(PDFName.of("Kids")));
       if (kids instanceof PDFArray) for (let i = 0; i < kids.size(); i += 1) stack.push(kids.get(i));
     }
