@@ -55,6 +55,7 @@ import { archivalPrepPdf, assertPdfDecryptable, comparePdfText, comparePdfReport
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
 import { BATES_POSITION_IDS, NUP_COUNTS, batesNumberPdf, createFormPdf, imposePdf, parseOutlineInput, parseSplitPages, readOutline, setOutline, smartSplitPdf } from "./services/pdf-advanced.service.js";
 import { ALL_PERMISSIONS_ALLOWED, PDF_ENCRYPTION_ALGORITHMS, PDF_PERMISSION_LABELS, decryptPdf, encryptPdf, unlockPdf } from "./services/pdf-crypto.service.js";
+import { signPdf, verifyPdfSignatures } from "./services/pdf-sign.service.js";
 import { CONFIDENCE as PII_CONFIDENCE, PII_TYPE_LABELS, buildPrivacyReportText, confidenceLabel, extractPdfPiiHits, isPersonalType, scanPdfStructure } from "./services/pii.service.js";
 import { analyzePdfBytes, buildAnalyzerReportText } from "./services/pdf-analyzer.service.js";
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
@@ -1143,6 +1144,8 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "encrypt-pdf-tool") return <EncryptPdfTool tool={tool} />;
   if (tool.id === "remove-password-tool") return <RemovePasswordTool tool={tool} />;
   if (tool.id === "unlock-pdf-tool") return <UnlockPdfTool tool={tool} />;
+  if (tool.id === "sign-pdf-tool") return <SignPdfTool tool={tool} />;
+  if (tool.id === "verify-signature-tool") return <VerifySignatureTool tool={tool} />;
   if (["compress-image-tool", "convert-image-tool"].includes(tool.id)) return <ImageOutputTool tool={tool} mode={tool.id === "compress-image-tool" ? "compress" : "convert"} />;
   if (tool.id === "batch-compress-images-tool") return <BatchImageTool tool={tool} mode="compress" />;
   if (tool.id === "batch-resize-images-tool") return <BatchImageTool tool={tool} mode="resize" />;
@@ -4487,6 +4490,126 @@ function UnlockPdfTool({ tool }: { tool: Tool }) {
       return `Removed ${result.algorithm} owner-password restrictions from ${file.name}.\n${restored.length ? `Restored: ${restored.join(", ")}.` : "That PDF was encrypted but had no restrictions set."}`;
     })} />
     {status.tone === "success" && <ResultConsequenceNote>The copy you downloaded has its owner-password restrictions removed — printing, copying, and editing are open to anyone who has it.</ResultConsequenceNote>}
+  </ToolForm>;
+}
+
+const CERT_FILE_OPTIONS = { maxFiles: 1, maxSize: 8 * 1024 * 1024, extensions: ["p12", "pfx"], types: ["application/x-pkcs12", "application/pkcs12"] };
+
+function SignPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [certFiles, setCertFiles] = useState<File[]>([]);
+  const [password, setPassword] = useState("");
+  const [signerName, setSignerName] = useState("");
+  const [reason, setReason] = useState("");
+  const [location, setLocation] = useState("");
+  const [visible, setVisible] = useState(false);
+  const [page, setPage] = useState("1");
+  const [status, setStatus] = useState(initialStatus);
+
+  // The certificate password lives only in this component's state — never
+  // logged, persisted, or sent anywhere. Drop it on reset and on unmount.
+  const forgetPassword = () => setPassword("");
+  useEffect(() => forgetPassword, []);
+
+  return <ToolForm status={status} onReset={() => {
+    setFiles([]); setCertFiles([]); forgetPassword();
+    setSignerName(""); setReason(""); setLocation(""); setVisible(false); setPage("1");
+    setStatus(initialStatus);
+  }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Applies a real cryptographic signature — a detached PKCS#7 / CMS SignedData over the document's bytes (SHA-256), added through an incremental update so any signatures already on the file stay valid. This is not a picture of a signature: it proves the document has not changed since signing and identifies the signer by their certificate. Everything runs in this browser; the certificate and its password never leave this page. There is no trusted timestamp (no RFC 3161 server), so the signing time is self-asserted.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} label="Choose the PDF to sign" />
+    <FileControl accept=".p12,.pfx,application/x-pkcs12" files={certFiles} setFiles={setCertFiles} label="Choose your certificate (.p12 / .pfx)" />
+    <PasswordField label="Certificate password" value={password} onChange={setPassword} helper="Held only in this page's memory — never logged, stored, or transmitted. Cleared when you reset or leave." />
+    <Input label="Signer name (optional)" value={signerName} onChange={setSignerName} helper="Shown in the signature. Defaults to the certificate's common name." />
+    <Input label="Reason (optional)" value={reason} onChange={setReason} placeholder="e.g. I approve this document" />
+    <Input label="Location (optional)" value={location} onChange={setLocation} placeholder="e.g. Bengaluru, IN" />
+    <Checkbox label="Add a visible signature block (lower-left of the chosen page)" checked={visible} onChange={setVisible} />
+    {visible && <Input label="Page for the visible block" value={page} onChange={setPage} type="number" helper="1 is the first page." />}
+    <PrimaryButton label="Sign PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const [cert] = validateFiles(certFiles, CERT_FILE_OPTIONS);
+      if (!password) throw new Error("Enter the certificate password.");
+      const pageIndex = Math.max(1, parseInt(page, 10) || 1) - 1;
+      const result = await signPdf(file, {
+        p12: cert, password,
+        name: signerName.trim(), reason: reason.trim(), location: location.trim(),
+        visible, pageIndex,
+      });
+      downloadBytes(result.bytes, withExtension(`${safeFilename(file.name)}-signed`, "pdf"), "application/pdf");
+      const trust = result.selfSigned
+        ? "This certificate is self-signed, so a reader will report \"signature valid, signer identity unknown\" until you add the certificate to its trust store."
+        : "A reader will mark the signer trusted only if it already trusts the certificate's issuing CA.";
+      const where = result.visible ? ` A visible block was drawn on page ${result.signedPage} of ${result.pageCount}.` : "";
+      return `Signed as ${result.subjectCommonName || "the certificate holder"} · serial ${result.serialHex}.\nDetached PKCS#7/CMS, SHA-256, signed ${result.signingTime.toLocaleString()}.${where}\n${trust}`;
+    })} />
+    {status.tone === "success" && <ResultConsequenceNote>The signature proves document integrity and signer identity, but it is <strong>not</strong> timestamped by a trusted authority — the signing time is asserted by whoever signed. Whether a reader shows the signature as "trusted" depends on that reader trusting the certificate's CA.</ResultConsequenceNote>}
+  </ToolForm>;
+}
+
+const SIGNATURE_VERDICTS: Record<string, { label: string; tone: string }> = {
+  valid: { label: "Valid — document unchanged since signing", tone: "border-[#b9c6a7] bg-[#edf4e3] text-[#31412f] [.dark_&]:border-[#3f5136] [.dark_&]:bg-[#16241a] [.dark_&]:text-[#bfe3b0]" },
+  "valid-partial": { label: "Valid for the signed revision — bytes were added afterwards", tone: "border-amber-200 bg-amber-50 text-amber-900 [.dark_&]:border-[#7a5a1e] [.dark_&]:bg-[#241c0f] [.dark_&]:text-[#f3d79a]" },
+  modified: { label: "Document MODIFIED after signing", tone: "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]" },
+  invalid: { label: "Signature INVALID", tone: "border-red-200 bg-red-50 text-red-800 [.dark_&]:border-[#7f2a2a] [.dark_&]:bg-[#2a1416] [.dark_&]:text-[#f8b4b4]" },
+  unsupported: { label: "Not verified (unsupported key type)", tone: "border-[var(--line)] bg-[var(--paper-soft)] text-[var(--stone)]" },
+};
+
+function SignatureCard({ sig, index }: { sig: any; index: number }) {
+  const verdict = SIGNATURE_VERDICTS[sig.verdict] || SIGNATURE_VERDICTS.invalid;
+  const fmtDate = (value: any) => {
+    if (!value) return "—";
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+  };
+  return (
+    <div className="surface-card grid gap-3 rounded-3xl p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-black uppercase text-neutral-500">Signature {index + 1} · field {sig.fieldName}</span>
+        <span className={`rounded-full border px-3 py-1 text-xs font-black ${verdict.tone}`}>{verdict.label}</span>
+      </div>
+      <p className="text-sm font-semibold leading-6 text-[var(--foreground)]">{sig.detail}</p>
+      <dl className="grid gap-2 text-sm">
+        <InfoRow label="Signer (CN)" value={sig.subjectCommonName || "—"} />
+        <InfoRow label="Issuer (CN)" value={`${sig.issuerCommonName || "—"}${sig.selfSigned ? " · self-signed" : ""}`} />
+        <InfoRow label="Serial" value={sig.serialHex || "—"} />
+        <InfoRow label="Certificate valid" value={`${fmtDate(sig.notBefore)} → ${fmtDate(sig.notAfter)}`} />
+        <InfoRow label="Signing time" value={sig.signingTime ? fmtDate(sig.signingTime) : (sig.declaredSigningTime || "—")} />
+        <InfoRow label="Digest" value={`${sig.hashName || "SHA-256"} · integrity ${sig.integrity ? "matches" : "MISMATCH"}`} />
+        <InfoRow label="Coverage" value={sig.coversWholeDocument ? "entire document" : "part of the document (additions after signing)"} />
+        <InfoRow label="Type" value={sig.subFilter || "adbe.pkcs7.detached"} />
+      </dl>
+    </div>
+  );
+}
+
+function VerifySignatureTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [report, setReport] = useState<any | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  return <ToolForm status={status} onReset={() => { setFiles([]); setReport(null); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Checks the digital signatures in a PDF. For each one it recomputes the SHA-256 digest over the signed byte ranges, verifies the PKCS#7 / CMS signature against the signer's certificate, and reports who signed, when, and whether the document changed after signing — all in this browser.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <PrimaryButton label="Verify signatures" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      setReport(null);
+      const result = await verifyPdfSignatures(file);
+      setReport(result);
+      if (!result.count) return "No digital signatures found in this PDF.";
+      const good = result.signatures.filter((s: any) => s.verdict === "valid").length;
+      const bad = result.signatures.filter((s: any) => s.verdict === "modified" || s.verdict === "invalid").length;
+      return `Found ${result.count} signature${result.count === 1 ? "" : "s"}: ${good} valid, ${bad} failing.`;
+    })} />
+    {report && report.count > 0 && (
+      <div className="grid gap-3">
+        {report.signatures.map((sig: any, index: number) => <SignatureCard key={index} sig={sig} index={index} />)}
+      </div>
+    )}
+    <ResultConsequenceNote>This is an offline check. It proves the signature maths and the signer certificate's self-consistency only. It does <strong>not</strong> validate a trust chain to a trusted root (no certificate-authority store is bundled) and does <strong>not</strong> check revocation (no OCSP/CRL lookup — that would require network access, which this tool never uses). "Valid" here means the cryptography holds and the document is unchanged, not that the signer's identity has been vouched for by a CA.</ResultConsequenceNote>
   </ToolForm>;
 }
 

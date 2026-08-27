@@ -15,6 +15,9 @@ import { routeForHash } from "../src/router.js";
 import * as webrtc from "../src/services/webrtc.service.js";
 import * as whiteboard from "../src/services/whiteboard.service.js";
 import * as pdfCrypto from "../src/services/pdf-crypto.service.js";
+import { signPdf, verifyPdfSignatures, loadPkcs12 } from "../src/services/pdf-sign.service.js";
+import * as asn1js from "asn1js";
+import * as pkijs from "pkijs";
 import { deflateSync, strToU8 } from "fflate";
 import nodeCrypto from "node:crypto";
 import { analyzePdfBytes, buildAnalyzerReportText, classifyMagic, decodePdfName, findObfuscatedNames, sha256Hex } from "../src/services/pdf-analyzer.service.js";
@@ -4421,4 +4424,220 @@ test("annotate-pdf tool is registered, routed, wired into ToolRenderer, and disc
 
   const searchable = [found.name, found.description, ...found.keywords].join(" ").toLowerCase();
   for (const term of ["annotate", "highlight", "markup"]) assert.match(searchable, new RegExp(term));
+});
+
+// ---------------------------------------------------------------------------
+// Cryptographic PDF signing + verification (pdf-sign.service.js).
+// The pdf-sign service sets the pkijs WebCrypto engine on import; reuse it here
+// to build a self-signed certificate + PKCS#12 with no network and no OpenSSL.
+// ---------------------------------------------------------------------------
+
+// This test file defines globalThis.window (to host pdf-lib), which makes pkijs
+// read its engine from the browser-style store, so set it here after that shim
+// is in place rather than relying on the service's import-time registration.
+pkijs.setEngine("myfilekit-tests", new pkijs.CryptoEngine({ name: "myfilekit-tests", crypto: globalThis.crypto }));
+const signEngine = pkijs.getCrypto(true);
+const bufOf = (u8) => u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+const strBuf = (s) => new TextEncoder().encode(s).buffer;
+
+async function genRsaKeyPair() {
+  const alg = pkijs.getAlgorithmParameters("RSASSA-PKCS1-v1_5", "generateKey");
+  if ("hash" in alg.algorithm) alg.algorithm.hash.name = "SHA-256";
+  alg.algorithm.modulusLength = 2048;
+  return signEngine.generateKey(alg.algorithm, true, alg.usages);
+}
+
+async function makeSelfSignedCert(commonName, issuerName, keyPair, signingKey) {
+  const cert = new pkijs.Certificate();
+  cert.version = 2;
+  cert.serialNumber = new asn1js.Integer({ value: Math.floor(Math.random() * 1e9) + 1 });
+  cert.subject.typesAndValues.push(new pkijs.AttributeTypeAndValue({ type: "2.5.4.3", value: new asn1js.Utf8String({ value: commonName }) }));
+  cert.issuer.typesAndValues.push(new pkijs.AttributeTypeAndValue({ type: "2.5.4.3", value: new asn1js.Utf8String({ value: issuerName }) }));
+  cert.notBefore.value = new Date(Date.now() - 3600_000);
+  cert.notAfter.value = new Date(Date.now() + 3600_000 * 24 * 365);
+  await cert.subjectPublicKeyInfo.importKey(keyPair.publicKey, signEngine);
+  await cert.sign(signingKey, "SHA-256", signEngine);
+  return cert;
+}
+
+async function makePkcs12(privateKey, certs, password) {
+  const pkcs8 = new Uint8Array(await signEngine.exportKey("pkcs8", privateKey));
+  const pw = strBuf(password);
+  const certBags = certs.map((cert, i) => new pkijs.SafeBag({
+    bagId: "1.2.840.113549.1.12.10.1.3",
+    bagValue: new pkijs.CertBag({ parsedValue: cert }),
+    bagAttributes: [new pkijs.Attribute({ type: "1.2.840.113549.1.9.20", values: [new asn1js.BmpString({ value: `c${i}` })] })],
+  }));
+  const keyBag = new pkijs.SafeBag({
+    bagId: "1.2.840.113549.1.12.10.1.2",
+    bagValue: new pkijs.PKCS8ShroudedKeyBag({ parsedValue: new pkijs.PrivateKeyInfo({ schema: asn1js.fromBER(bufOf(pkcs8)).result }) }),
+    bagAttributes: [new pkijs.Attribute({ type: "1.2.840.113549.1.9.20", values: [new asn1js.BmpString({ value: "k" })] })],
+  });
+  await keyBag.bagValue.makeInternalValues({ password: pw, contentEncryptionAlgorithm: { name: "AES-CBC", length: 256 }, hmacHashAlgorithm: "SHA-256", iterationCount: 2048 }, signEngine);
+  const pfx = new pkijs.PFX({
+    parsedValue: {
+      integrityMode: 0,
+      authenticatedSafe: new pkijs.AuthenticatedSafe({
+        parsedValue: {
+          safeContents: [
+            { privacyMode: 0, value: new pkijs.SafeContents({ safeBags: certBags }) },
+            { privacyMode: 0, value: new pkijs.SafeContents({ safeBags: [keyBag] }) },
+          ],
+        },
+      }),
+    },
+  });
+  await pfx.parsedValue.authenticatedSafe.makeInternalValues({ safeContents: [{}, {}] }, signEngine);
+  await pfx.makeInternalValues({ password: pw, iterations: 2048, pbkdf2HashAlgorithm: "SHA-256", hmacHashAlgorithm: "SHA-256" }, signEngine);
+  return new Uint8Array(pfx.toSchema().toBER());
+}
+
+async function buildSamplePdf(useObjectStreams = false) {
+  const doc = await globalThis.window.PDFLib.PDFDocument.create();
+  const page = doc.addPage([612, 792]);
+  page.drawText("MyFileKit signing test document", { x: 72, y: 700, size: 18 });
+  page.drawText("The quick brown fox jumps over the lazy dog.", { x: 72, y: 660, size: 12 });
+  return doc.save({ useObjectStreams });
+}
+
+test("sign-pdf + verify-signature: real detached CMS signature round-trips and reports the signer", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("Alice Signer", "Alice Signer", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "correct-horse");
+  const pdf = await buildSamplePdf(false);
+
+  const signed = await signPdf(pdf, { p12, password: "correct-horse", reason: "I approve", location: "Bengaluru", visible: true });
+  assert.ok(signed.bytes.byteLength > pdf.byteLength, "signing appends an incremental update");
+  assert.equal(signed.subjectCommonName, "Alice Signer");
+  assert.equal(signed.chainLength, 0);
+
+  const report = await verifyPdfSignatures(signed.bytes);
+  assert.equal(report.count, 1, "one signature present");
+  const sig = report.signatures[0];
+  assert.equal(sig.signatureValid, true, "CMS signature verifies");
+  assert.equal(sig.integrity, true, "document digest matches (integrity OK)");
+  assert.equal(sig.coversWholeDocument, true, "the whole document is covered");
+  assert.equal(sig.verdict, "valid");
+  assert.equal(sig.subjectCommonName, "Alice Signer", "signer CN extracted");
+  assert.equal(sig.issuerCommonName, "Alice Signer", "issuer CN extracted");
+  assert.ok(sig.serialHex && sig.serialHex.length > 0, "serial extracted");
+  assert.ok(sig.notBefore instanceof Date && sig.notAfter instanceof Date, "validity dates extracted");
+  assert.ok(sig.signingTime instanceof Date, "signing time present");
+  assert.match(sig.declaredSigningTime || "", /^D:\d{14}/, "signature dictionary /M date present");
+});
+
+test("sign-pdf: ByteRange covers the whole file except the /Contents hex string", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("Range Test", "Range Test", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const pdf = await buildSamplePdf(false);
+  const signed = await signPdf(pdf, { p12, password: "pw" });
+
+  const text = Buffer.from(signed.bytes).toString("latin1");
+  const match = text.match(/\/ByteRange \[0 (\d+)\s+(\d+)\s+(\d+)\s*\]/);
+  assert.ok(match, "ByteRange array present with four numbers starting at 0");
+  const length1 = Number(match[1]);
+  const start2 = Number(match[2]);
+  const length2 = Number(match[3]);
+
+  const open = text.indexOf("/Contents <") + "/Contents <".length - 1; // index of '<'
+  const close = text.indexOf(">", open);                                 // index of '>'
+  assert.equal(length1, open, "range 1 ends exactly at the opening '<'");
+  assert.equal(start2, close + 1, "range 2 begins exactly after the closing '>'");
+  assert.equal(start2 + length2, signed.bytes.byteLength, "range 2 runs to end of file");
+  // /Contents is a hex string of the declared reserved length.
+  assert.equal(close - open - 1, 16384 * 2, "Contents is a hex string of the reserved length");
+  assert.match(text.slice(open + 1, open + 41), /^[0-9a-f]+$/, "Contents holds hex digits");
+});
+
+test("verify-signature: flipping a byte in a covered region is detected as MODIFIED", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("Tamper Test", "Tamper Test", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const pdf = await buildSamplePdf(false);
+  const signed = await signPdf(pdf, { p12, password: "pw" });
+
+  // Offset 60 is deep inside the original PDF body, always within ByteRange 1.
+  const tampered = new Uint8Array(signed.bytes);
+  tampered[60] ^= 0x01;
+
+  const report = await verifyPdfSignatures(tampered);
+  assert.equal(report.count, 1, "signature still parsed after tamper");
+  assert.equal(report.signatures[0].integrity, false, "digest no longer matches");
+  assert.equal(report.signatures[0].verdict, "modified", "reported as MODIFIED, not valid");
+  assert.notEqual(report.signatures[0].verdict, "valid");
+});
+
+test("verify-signature: corrupting a byte inside /Contents fails the signature", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("Contents Tamper", "Contents Tamper", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const pdf = await buildSamplePdf(false);
+  const signed = await signPdf(pdf, { p12, password: "pw" });
+
+  const text = Buffer.from(signed.bytes).toString("latin1");
+  const open = text.indexOf("/Contents <") + "/Contents <".length; // first hex digit of the CMS
+  const tampered = new Uint8Array(signed.bytes);
+  tampered[open + 2] = tampered[open + 2] === 0x41 ? 0x42 : 0x41; // flip a DER hex nibble
+
+  const report = await verifyPdfSignatures(tampered);
+  assert.equal(report.count, 1);
+  const sig = report.signatures[0];
+  assert.equal(sig.verdict === "invalid" || sig.signatureValid === false, true, "corrupted CMS does not verify");
+});
+
+test("sign-pdf: a wrong .p12 password throws a clear error and produces no output", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("Pw Test", "Pw Test", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "the-real-password");
+  const pdf = await buildSamplePdf(false);
+
+  await assert.rejects(
+    () => signPdf(pdf, { p12, password: "wrong-password" }),
+    (error) => /password/i.test(error.message),
+    "wrong certificate password is rejected with a password-specific message",
+  );
+  await assert.rejects(() => loadPkcs12(p12, "also-wrong"), /password/i);
+});
+
+test("verify-signature: a PDF with no signatures reports none (not an error)", async () => {
+  const pdf = await buildSamplePdf(false);
+  const report = await verifyPdfSignatures(pdf);
+  assert.equal(report.count, 0);
+  assert.deepEqual(report.signatures, []);
+});
+
+test("sign-pdf: a certificate chain in the .p12 is carried into the CMS", async () => {
+  const caKey = await genRsaKeyPair();
+  const ca = await makeSelfSignedCert("Test Root CA", "Test Root CA", caKey, caKey.privateKey);
+  const leafKey = await genRsaKeyPair();
+  const leaf = await makeSelfSignedCert("Leaf Signer", "Test Root CA", leafKey, caKey.privateKey);
+  const p12 = await makePkcs12(leafKey.privateKey, [leaf, ca], "pw");
+  const pdf = await buildSamplePdf(true); // object-stream PDF exercises the ObjStm reader too
+
+  const signed = await signPdf(pdf, { p12, password: "pw" });
+  assert.equal(signed.chainLength, 1, "the intermediate/root is included alongside the leaf");
+  assert.equal(signed.subjectCommonName, "Leaf Signer");
+
+  const report = await verifyPdfSignatures(signed.bytes);
+  assert.equal(report.signatures[0].signatureValid, true);
+  assert.equal(report.signatures[0].integrity, true);
+  assert.equal(report.signatures[0].issuerCommonName, "Test Root CA", "issuer read from the leaf certificate");
+  assert.equal(report.signatures[0].verdict, "valid");
+});
+
+test("sign-pdf-tool and verify-signature-tool are registered, routed, and wired into ToolRenderer", () => {
+  for (const id of ["sign-pdf-tool", "verify-signature-tool"]) {
+    const found = tools.find((tool) => tool.id === id);
+    assert.ok(found, `${id} registered`);
+    assert.equal(found.category, "Security & Privacy");
+    assert.equal(found.status, "available");
+    assert.equal(found.localProcessing, true);
+    assert.equal(routeForHash(found.route).tool.id, id);
+  }
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.equal(appSource.includes(`"sign-pdf-tool"`), true, "sign tool wired into ToolRenderer");
+  assert.equal(appSource.includes(`"verify-signature-tool"`), true, "verify tool wired into ToolRenderer");
+  assert.equal(appSource.includes("SignPdfTool"), true);
+  assert.equal(appSource.includes("VerifySignatureTool"), true);
 });
