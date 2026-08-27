@@ -1033,7 +1033,7 @@ export const WORKFLOW_OPS = {
       { key: "start", label: "Start at", type: "text", placeholder: "1", default: "1" },
       { key: "padding", label: "Digits", type: "text", placeholder: "6", default: "6" },
     ],
-    run: (file, options) => batesNumberPdf(file, { prefix: options.prefix || "", start: Number(options.start || 1), padding: Number(options.padding || 6), position: "bottom-right" }),
+    run: async (file, options) => (await batesNumberPdf(file, { prefix: options.prefix || "", start: Number(options.start || 1), padding: Number(options.padding || 6), position: "bottom-right" })).bytes,
   },
   pdfa: {
     label: "PDF/A archival prep",

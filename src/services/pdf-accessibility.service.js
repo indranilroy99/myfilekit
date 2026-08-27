@@ -579,6 +579,111 @@ function buildAccessibilityXmp({ title = "", lang = "", date = new Date() }) {
 <?xpacket end="w"?>`;
 }
 
+// --- re-run cleanup: removing a prior remediation's structure + text layer ----
+//
+// Re-running Auto-Tag on an already-tagged PDF must not leave the previous
+// /StructTreeRoot + StructElems as orphaned/disconnected objects (veraPDF flags
+// these) nor stack a second invisible hidden-text layer on each page. The two
+// helpers below strip the previous graph and our previously-injected content so
+// each run starts from a clean slate before the new tree/layer are written.
+
+// Collects the indirect StructElem references reachable from a /K value, for
+// deleting an old structure graph. /K may be a single ref, an indirect or direct
+// array of refs (mixed with MCID integers / inline MCR dicts, which carry no ref
+// to delete), or a plain MCID number.
+function collectKidRefs(lib, ctx, kids) {
+  const out = [];
+  if (kids === undefined || kids === null) return out;
+  let value = kids;
+  if (value instanceof lib.PDFRef) {
+    const resolved = ctx.lookup(value);
+    if (resolved instanceof lib.PDFArray) {
+      value = resolved;
+    } else {
+      out.push(value);
+      return out;
+    }
+  }
+  if (value instanceof lib.PDFArray) {
+    for (let i = 0; i < value.size(); i += 1) {
+      const item = value.get(i);
+      if (item instanceof lib.PDFRef) out.push(item);
+    }
+  }
+  return out;
+}
+
+// Removes a previously-written structure graph (from an earlier remediation, or
+// any tagged input): deletes every StructElem descendant reachable from the root
+// via /K, the /ParentTree number-tree arrays, and the /StructTreeRoot itself, so
+// re-tagging leaves no orphaned/disconnected structure objects. Bounded by a
+// visited-ref set and a node cap against cyclic/malformed trees.
+function removeOldStructGraph(lib, ctx, structRootRef) {
+  const N = (k) => lib.PDFName.of(k);
+  const structRoot = structRootRef ? ctx.lookup(structRootRef) : undefined;
+  if (!structRoot || typeof structRoot.get !== "function") return 0;
+  const MAX_NODES = 200000;
+  const visited = new Set();
+  const stack = collectKidRefs(lib, ctx, structRoot.get(N("K")));
+  let removed = 0;
+  while (stack.length && removed < MAX_NODES) {
+    const ref = stack.pop();
+    const key = ref instanceof lib.PDFRef ? ref.toString() : String(ref);
+    if (visited.has(key)) continue;
+    visited.add(key);
+    const node = ctx.lookup(ref);
+    if (node && typeof node.get === "function") {
+      for (const child of collectKidRefs(lib, ctx, node.get(N("K")))) stack.push(child);
+    }
+    try { ctx.delete(ref); removed += 1; } catch { /* already gone */ }
+  }
+  // ParentTree: delete the per-page parent arrays and the number-tree dict.
+  const ptRef = structRoot.get(N("ParentTree"));
+  if (ptRef) {
+    const pt = ctx.lookup(ptRef);
+    const nums = pt && typeof pt.get === "function" ? ctx.lookup(pt.get(N("Nums"))) : undefined;
+    if (nums instanceof lib.PDFArray) {
+      for (let i = 0; i < nums.size(); i += 1) {
+        const item = nums.get(i);
+        if (item instanceof lib.PDFRef) { try { ctx.delete(item); } catch { /* gone */ } }
+      }
+    }
+    if (ptRef instanceof lib.PDFRef) { try { ctx.delete(ptRef); } catch { /* gone */ } }
+  }
+  if (structRootRef instanceof lib.PDFRef) { try { ctx.delete(structRootRef); } catch { /* gone */ } }
+  return removed;
+}
+
+// Removes the invisible tagged-text / artifact marked-content stream this tool
+// appended on a prior remediation. That stream is tagged with /MFKAccessLayer
+// true on its dict; the page's original content streams have no such marker and
+// are left untouched, so a re-run replaces (not stacks) the hidden-text layer.
+function stripPriorAccessLayers(lib, ctx, page) {
+  const N = (k) => lib.PDFName.of(k);
+  const contents = page.node.get(N("Contents"));
+  const resolved = contents ? ctx.lookup(contents) : undefined;
+  if (!(resolved instanceof lib.PDFArray)) return 0;
+  const keep = [];
+  let removed = 0;
+  for (let i = 0; i < resolved.size(); i += 1) {
+    const ref = resolved.get(i);
+    const stream = ref instanceof lib.PDFRef ? ctx.lookup(ref) : undefined;
+    const marker = stream && stream.dict && typeof stream.dict.get === "function" ? stream.dict.get(N("MFKAccessLayer")) : undefined;
+    if (marker && isTrue(marker)) {
+      try { ctx.delete(ref); } catch { /* gone */ }
+      removed += 1;
+    } else {
+      keep.push(ref);
+    }
+  }
+  if (removed) {
+    const arr = lib.PDFArray.withContext(ctx);
+    for (const ref of keep) arr.push(ref);
+    page.node.set(N("Contents"), arr);
+  }
+  return removed;
+}
+
 /**
  * Remediates raw PDF bytes toward PDF/UA as far as is reliably automatable.
  *
@@ -606,7 +711,7 @@ function buildAccessibilityXmp({ title = "", lang = "", date = new Date() }) {
 export async function remediatePdfAccessibility(bytes, params = {}) {
   const lib = getPdfLib();
   const {
-    PDFDocument, PDFName, PDFNumber, PDFString, PDFHexString, PDFBool, PDFArray, StandardFonts,
+    PDFDocument, PDFName, PDFNumber, PDFString, PDFHexString, PDFBool, PDFArray, PDFRef, StandardFonts,
     PDFOperator, PDFOperatorNames, beginText, endText, showText, setFontAndSize, setTextRenderingMode, setTextMatrix, endMarkedContent,
   } = lib;
 
@@ -636,6 +741,24 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
   const applied = [];
   const review = [];
   const N = (k) => PDFName.of(k);
+
+  // --- 0. Clean slate for re-runs -------------------------------------------
+  // If the input already carries a /StructTreeRoot (a prior remediation, or any
+  // tagged PDF), remove that whole structure graph and our previously-injected
+  // hidden-text layer BEFORE writing the new ones. Without this, re-tagging
+  // orphans the old /StructTreeRoot + StructElems (veraPDF flags them as
+  // disconnected) and stacks a second invisible marked-content text layer on
+  // each page. A first-pass (untagged) input has no /StructTreeRoot, so this is
+  // skipped and the untagged path is unchanged.
+  const priorStructRef = catalog.get(N("StructTreeRoot"));
+  if (priorStructRef) {
+    removeOldStructGraph(lib, ctx, priorStructRef);
+    catalog.delete(N("StructTreeRoot"));
+    const priorMarkInfo = catalog.get(N("MarkInfo"));
+    if (priorMarkInfo instanceof PDFRef) { try { ctx.delete(priorMarkInfo); } catch { /* gone */ } }
+    catalog.delete(N("MarkInfo"));
+    for (const page of pages) stripPriorAccessLayers(lib, ctx, page);
+  }
 
   // --- 1. Language ----------------------------------------------------------
   catalog.set(N("Lang"), PDFString.of(lang));
@@ -799,6 +922,13 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
         PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [N("Figure"), ctx.obj({ MCID: mcid })]),
         endMarkedContent(),
       );
+    }
+
+    // Tag the marked-content stream we injected above so a later re-run can find
+    // and remove exactly this layer (see stripPriorAccessLayers) instead of
+    // stacking a second hidden-text layer on top of it.
+    if (page.contentStream && page.contentStream.dict && typeof page.contentStream.dict.set === "function") {
+      page.contentStream.dict.set(N("MFKAccessLayer"), PDFBool.True);
     }
 
     // Wire the page into the structure parent tree.

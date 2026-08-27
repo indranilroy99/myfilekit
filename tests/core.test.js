@@ -6033,3 +6033,109 @@ test("tier3 guard: no backend origin is hardcoded and the default settings are d
     assert.ok(/(^|\.)example(\.|$)/.test(host), `esign.service hardcodes a non-example host: ${host}`);
   }
 });
+
+// --- Regression: accessibility Auto-Tag is idempotent (no orphaned structure /
+// stacked hidden-text layer on a re-run) -------------------------------------
+// Running Auto-Tag on an already-tagged PDF once left the previous
+// /StructTreeRoot + StructElems as orphaned indirect objects (veraPDF flags
+// these as disconnected) and appended a SECOND invisible marked-content text
+// layer to each page. Re-running must instead rebuild from a clean slate.
+test("accessibility Auto-Tag is idempotent: re-running does not orphan structure or stack hidden text", async () => {
+  const { PDFDocument, PDFName, PDFArray, decodePDFRawStream } = window.PDFLib;
+  const blocks = [
+    { page: 1, text: "Heading", x: 72, y: 740, fontSize: 24, heading: 1 },
+    { page: 1, text: "Body paragraph.", x: 72, y: 700, fontSize: 12, heading: 0 },
+    { page: 2, text: "Second page.", x: 72, y: 700, fontSize: 12, heading: 0 },
+  ];
+
+  // Counts StructTreeRoot / StructElem indirect objects (orphans included), plus
+  // the invisible-text ("3 Tr") and marked-content ("BDC") operator counts in the
+  // page content — a stacked hidden layer would double both.
+  async function measure(bytes) {
+    const doc = await PDFDocument.load(bytes, { throwOnInvalidObject: false });
+    const ctx = doc.context;
+    let structElems = 0;
+    let structRoots = 0;
+    for (const [, obj] of ctx.enumerateIndirectObjects()) {
+      if (!obj || typeof obj.get !== "function") continue;
+      const type = obj.get(PDFName.of("Type"));
+      const t = type ? type.toString() : "";
+      if (t === "/StructElem") structElems += 1;
+      if (t === "/StructTreeRoot") structRoots += 1;
+    }
+    let tr3 = 0;
+    let bdc = 0;
+    for (const page of doc.getPages()) {
+      const contents = page.node.get(PDFName.of("Contents"));
+      const resolved = contents ? ctx.lookup(contents) : undefined;
+      const refs = resolved instanceof PDFArray ? resolved.asArray() : contents ? [contents] : [];
+      let decoded = "";
+      for (const ref of refs) {
+        const stream = ctx.lookup(ref);
+        try { decoded += new TextDecoder().decode(decodePDFRawStream(stream).decode()); } catch { /* skip */ }
+      }
+      tr3 += (decoded.match(/\b3 Tr\b/g) || []).length;
+      bdc += (decoded.match(/BDC/g) || []).length;
+    }
+    return { structElems, structRoots, tr3, bdc };
+  }
+
+  const src = await makeTextPdf(2, "Quarterly");
+  const { bytes: pass1 } = await a11y.remediatePdfAccessibility(src, {
+    lang: "en-US", title: "Quarterly Report", textBlocks: blocks, figures: [],
+  });
+  const m1 = await measure(pass1);
+
+  // Remediate the OUTPUT of the first pass a second time.
+  const { bytes: pass2 } = await a11y.remediatePdfAccessibility(pass1, {
+    lang: "en-US", title: "Quarterly Report", textBlocks: blocks, figures: [],
+  });
+  const m2 = await measure(pass2);
+
+  // Exactly one StructTreeRoot survives each pass — the old root is not orphaned.
+  assert.equal(m1.structRoots, 1, "one StructTreeRoot after the first pass");
+  assert.equal(m2.structRoots, 1, "still exactly one StructTreeRoot after re-running (old root removed, not orphaned)");
+  // StructElem count is bounded, not doubled: 1 /Document + 3 block elements.
+  assert.equal(m1.structElems, 4, "Document + three block StructElems after the first pass");
+  assert.equal(m2.structElems, m1.structElems, "StructElem count does not grow on a re-run (no orphaned first-pass elements)");
+  // The invisible hidden-text / marked-content layer is replaced, not stacked.
+  assert.ok(m1.tr3 > 0 && m1.bdc > 0, "the first pass injected an invisible marked-content text layer");
+  assert.equal(m2.tr3, m1.tr3, "invisible-text operators did not grow between pass 1 and pass 2");
+  assert.equal(m2.bdc, m1.bdc, "marked-content sequences did not grow between pass 1 and pass 2");
+
+  // After two passes the file still audits as tagged, with language and title.
+  const after = await a11y.auditPdfAccessibility(pass2, { textLayer: { characters: 40, pageCount: 2 } });
+  const checks = a11yById(after);
+  assert.equal(checks.tagged.status, "pass", "still tagged after two passes");
+  assert.equal(checks.language.status, "pass", "language still set after two passes");
+  assert.equal(checks["document-title"].status, "pass", "title still set after two passes");
+});
+
+// --- Regression: Workflow "bates" op returns .bytes (not the whole result) ---
+// WORKFLOW_OPS.bates.run once returned the whole {bytes,first,last,count} object
+// instead of `.bytes`, so runWorkflow piped a non-Uint8Array into the next step
+// / the download. It now returns `.bytes`; this pins that so it cannot regress.
+test("workflow bates op returns valid PDF bytes and the legal-bates preset runs end-to-end", async () => {
+  const business = await import("../src/services/business.service.js");
+  const { PDFDocument } = window.PDFLib;
+
+  // A three-page source PDF.
+  const doc = await PDFDocument.create();
+  for (let i = 0; i < 3; i += 1) doc.addPage([612, 792]);
+  const src = new File([await doc.save()], "matter.pdf", { type: "application/pdf" });
+
+  // The bates op alone must yield loadable PDF bytes with the page count intact.
+  const single = await business.runWorkflow(src, [{ op: "bates", options: { prefix: "ABC", start: "1", padding: "6" } }]);
+  assert.equal(single.ok, true, single.failed ? single.failed.message : "bates step failed");
+  assert.ok(single.bytes instanceof Uint8Array && single.bytes.byteLength > 0, "bates produced non-empty Uint8Array bytes");
+  const stamped = await PDFDocument.load(single.bytes);
+  assert.equal(stamped.getPageCount(), 3, "bates preserves the page count");
+
+  // The legal-bates preset (bates → page-numbers) runs end-to-end through the
+  // same runWorkflow, proving each step's bytes feed cleanly into the next.
+  const preset = await business.runWorkflow(new File([await doc.save()], "matter.pdf", { type: "application/pdf" }), business.presetSteps("legal-bates"));
+  assert.equal(preset.ok, true, preset.failed ? preset.failed.message : "legal-bates preset failed");
+  assert.equal(preset.completed.length, 2, "both preset steps completed");
+  const finalDoc = await PDFDocument.load(preset.bytes);
+  assert.equal(finalDoc.getPageCount(), 3, "the preset output is a valid 3-page PDF");
+});
