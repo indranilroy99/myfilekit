@@ -49,6 +49,7 @@ import { addSignatureToImage, addTextToImage, cleanImageMetadata, compressImage,
 import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.service.js";
 import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, getPdfLib, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
 import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip, rasterRebuild } from "./services/pdf-render.service.js";
+import { applyTextEdits, mapPdfFontToStandard, standardFontKey, textItemToPageRect } from "./services/pdf-textedit.service.js";
 import { archivalPrepPdf, assertPdfDecryptable, comparePdfText, comparePdfReportText, estimateSkewAngle } from "./services/pdf-review.service.js";
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
 import { BATES_POSITION_IDS, NUP_COUNTS, batesNumberPdf, createFormPdf, imposePdf, parseOutlineInput, parseSplitPages, readOutline, setOutline, smartSplitPdf } from "./services/pdf-advanced.service.js";
@@ -1112,6 +1113,7 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "delete-pdf-pages-tool") return <PageRangeTool tool={tool} action="Delete pages" suffix="pages-deleted" run={deletePdfPages} />;
   if (tool.id === "rotate-pdf-tool") return <RotatePdfTool tool={tool} />;
   if (tool.id === "add-text-to-pdf-tool") return <AddTextToPdfTool tool={tool} />;
+  if (tool.id === "edit-pdf-text-tool") return <EditPdfTextTool tool={tool} />;
   if (tool.id === "add-signature-to-pdf-tool") return <AddSignatureToPdfTool tool={tool} />;
   if (tool.id === "pdf-page-numbers-tool") return <PdfPageNumbersTool tool={tool} />;
   if (tool.id === "watermark-pdf-tool") return <WatermarkPdfTool tool={tool} />;
@@ -1325,6 +1327,345 @@ function AddTextToPdfTool({ tool }: { tool: Tool }) {
       return `Text added to page ${page}.`;
     })} />
   </ToolForm>;
+}
+
+// --- Edit PDF Text (in-place overlay editing) --------------------------------
+// This edits EXISTING PDF text by OVERLAY, not reflow: each edited run has its
+// original glyphs covered by a background-colour rectangle and the new text
+// redrawn at the same baseline/size with a base-14 substitute font. It does not
+// re-wrap paragraphs, does not reuse the embedded font, and needs a real text
+// layer (scanned PDFs must be OCR'd first). The pure geometry/apply logic lives
+// in services/pdf-textedit.service.js; only the pdf.js render + click selection
+// is here because it needs a browser canvas.
+
+type EditRect = ReturnType<typeof textItemToPageRect>;
+type TextRun = {
+  key: string;
+  index: number;
+  str: string;
+  display: { left: number; top: number; w: number; h: number };
+  rect: EditRect;
+  fontKey: string;
+  color: { r: number; g: number; b: number } | null;
+  background: { r: number; g: number; b: number } | null;
+};
+type TextEdit = { page: number; rect: EditRect; text: string; fontKey: string; original: string; color: TextRun["color"]; background: TextRun["background"] };
+type SamplingImage = { data: Uint8ClampedArray; width: number; height: number };
+
+// Resolves the human font name behind pdf.js's internal id (e.g. "g_d0_f1"),
+// preferring the loaded font object, then the style family, then the id itself.
+function resolveRunFontName(page: any, content: any, fontName: string) {
+  try {
+    const font = page.commonObjs.get(fontName);
+    if (font && font.name) return String(font.name);
+  } catch {
+    /* font object not resolved — fall through */
+  }
+  const style = content.styles && content.styles[fontName];
+  if (style && style.fontFamily) return String(style.fontFamily);
+  return fontName || "";
+}
+
+// Samples a run's glyph colour (darkest pixel) and page-background colour
+// (lightest pixel) from the rendered canvas. Bounded to a constant grid so a
+// dense page never turns this into a super-linear scan. Returns nulls when
+// unavailable so applyTextEdits falls back to near-black on white.
+function sampleRunColors(img: SamplingImage | null, box: { left: number; top: number; w: number; h: number }) {
+  if (!img) return { color: null, background: null };
+  const x0 = Math.max(0, Math.floor(box.left));
+  const y0 = Math.max(0, Math.floor(box.top));
+  const x1 = Math.min(img.width, Math.ceil(box.left + box.w));
+  const y1 = Math.min(img.height, Math.ceil(box.top + box.h));
+  if (x1 <= x0 || y1 <= y0) return { color: null, background: null };
+  const stepX = Math.max(1, Math.floor((x1 - x0) / 40));
+  const stepY = Math.max(1, Math.floor((y1 - y0) / 16));
+  let dark: number[] | null = null;
+  let darkLuma = Infinity;
+  let light: number[] | null = null;
+  let lightLuma = -Infinity;
+  for (let y = y0; y < y1; y += stepY) {
+    for (let x = x0; x < x1; x += stepX) {
+      const i = (y * img.width + x) * 4;
+      const a = img.data[i + 3];
+      if (a < 8) continue;
+      const r = img.data[i];
+      const g = img.data[i + 1];
+      const b = img.data[i + 2];
+      const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (luma < darkLuma) { darkLuma = luma; dark = [r, g, b]; }
+      if (luma > lightLuma) { lightLuma = luma; light = [r, g, b]; }
+    }
+  }
+  const toUnit = (c: number[] | null) => (c ? { r: c[0] / 255, g: c[1] / 255, b: c[2] / 255 } : null);
+  // Trust the glyph colour only when it is clearly darker than the background.
+  const color = dark && lightLuma - darkLuma > 25 ? toUnit(dark) : null;
+  return { color, background: toUnit(light) };
+}
+
+function EditPdfTextTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [doc, setDoc] = useState<any>(null);
+  const [fileName, setFileName] = useState("document.pdf");
+  const [pageCount, setPageCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageImage, setPageImage] = useState("");
+  const [pageDims, setPageDims] = useState<{ cw: number; ch: number } | null>(null);
+  const [runs, setRuns] = useState<TextRun[]>([]);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [edits, setEdits] = useState<Map<string, TextEdit>>(new Map());
+  const [status, setStatus] = useState(initialStatus);
+  const bytesRef = useRef<Uint8Array | null>(null);
+  const samplingRef = useRef<SamplingImage | null>(null);
+
+  const reset = () => {
+    setFiles([]);
+    setDoc(null);
+    setPageCount(0);
+    setCurrentPage(1);
+    setPageImage("");
+    setPageDims(null);
+    setRuns([]);
+    setSelectedKey(null);
+    setDraft("");
+    setEdits(new Map());
+    bytesRef.current = null;
+    samplingRef.current = null;
+    setStatus(initialStatus);
+  };
+
+  // Destroy the pdf.js document when it is replaced or the tool unmounts.
+  useEffect(() => () => { try { doc?.destroy?.(); } catch { /* already gone */ } }, [doc]);
+
+  // Load the chosen PDF once. Keep a private byte copy for pdf-lib because
+  // pdf.js detaches the buffer it is handed.
+  useEffect(() => {
+    let cancelled = false;
+    setDoc(null);
+    setRuns([]);
+    setSelectedKey(null);
+    setEdits(new Map());
+    setPageImage("");
+    setPageDims(null);
+    if (!files.length) return undefined;
+    runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const buffer = new Uint8Array(await file.arrayBuffer());
+      bytesRef.current = buffer.slice();
+      const { loadPdfDocument } = await import("./lib/pdfjs");
+      const loaded = await loadPdfDocument(buffer.slice());
+      if (cancelled) { try { await loaded.destroy(); } catch { /* ignore */ } return "Ready."; }
+      setFileName(file.name);
+      setPageCount(loaded.numPages);
+      setCurrentPage(1);
+      setDoc(loaded);
+      return `Loaded ${file.name} — ${loaded.numPages} page${loaded.numPages === 1 ? "" : "s"}. Click any text on the page to edit it.`;
+    });
+    return () => { cancelled = true; };
+  }, [files, tool.file]);
+
+  // Render the current page to a backdrop image and extract its clickable runs.
+  useEffect(() => {
+    if (!doc) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { renderPdfPageToCanvas, pdfjs } = await import("./lib/pdfjs");
+        const page = await doc.getPage(currentPage);
+        const rotation = page.rotate || 0;
+        const view = page.view;
+        const pointHeight = view[3] - view[1];
+        const base = page.getViewport({ scale: 1 });
+        // Fit the page to a legible-but-bounded width.
+        const scale = Math.min(2.5, Math.max(0.6, 900 / base.width));
+        const canvas = await renderPdfPageToCanvas(doc, currentPage, scale);
+        const ctx = canvas.getContext("2d");
+        samplingRef.current = ctx
+          ? { data: ctx.getImageData(0, 0, canvas.width, canvas.height).data, width: canvas.width, height: canvas.height }
+          : null;
+        const url = canvas.toDataURL("image/png");
+        const cw = canvas.width;
+        const ch = canvas.height;
+        canvas.width = 0;
+        canvas.height = 0; // release the render canvas immediately
+
+        const viewport = page.getViewport({ scale });
+        const content = await page.getTextContent();
+        const built: TextRun[] = [];
+        for (let i = 0; i < content.items.length; i += 1) {
+          const item: any = content.items[i];
+          if (typeof item.str !== "string" || !item.str.trim()) continue;
+          const m = pdfjs.Util.transform(viewport.transform, item.transform);
+          const fontHeightPx = Math.hypot(m[2], m[3]) || 1;
+          const display = { left: m[4], top: m[5] - fontHeightPx, w: Math.abs(item.width * scale) || fontHeightPx, h: fontHeightPx };
+          const rect = textItemToPageRect(item.transform, item.width, item.height, pointHeight, rotation);
+          const fontKey = standardFontKey(mapPdfFontToStandard(resolveRunFontName(page, content, item.fontName)));
+          const { color, background } = sampleRunColors(samplingRef.current, display);
+          built.push({ key: `${currentPage}:${i}`, index: i, str: item.str, display, rect, fontKey, color, background });
+        }
+        page.cleanup();
+        if (cancelled) return;
+        setPageImage(url);
+        setPageDims({ cw, ch });
+        setRuns(built);
+        setSelectedKey(null);
+        setDraft("");
+      } catch (error: any) {
+        if (!cancelled) setStatus({ tone: "error", message: error?.message || "Could not render this page." });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [doc, currentPage]);
+
+  const selectedRun = runs.find((run) => run.key === selectedKey) || null;
+
+  const selectRun = (run: TextRun) => {
+    setSelectedKey(run.key);
+    const existing = edits.get(run.key);
+    setDraft(existing ? existing.text : run.str);
+  };
+
+  const applyRunEdit = (nextText: string) => {
+    if (!selectedRun) return;
+    setEdits((current) => {
+      const next = new Map(current);
+      next.set(selectedRun.key, {
+        page: currentPage,
+        rect: selectedRun.rect,
+        text: nextText,
+        fontKey: selectedRun.fontKey,
+        original: selectedRun.str,
+        color: selectedRun.color,
+        background: selectedRun.background,
+      });
+      return next;
+    });
+  };
+
+  const removeEdit = (key: string) => {
+    setEdits((current) => {
+      const next = new Map(current);
+      next.delete(key);
+      return next;
+    });
+    if (key === selectedKey && selectedRun) setDraft(selectedRun.str);
+  };
+
+  const editList = [...edits.values()];
+
+  return (
+    <ToolForm status={status} onReset={reset}>
+      <div className="surface-muted wabi-card-edge grid gap-1 p-4 text-sm font-semibold leading-6 text-neutral-600">
+        <p className="text-xs font-black uppercase text-neutral-500">How this works — and its limits</p>
+        <p className="text-[var(--foreground)]">Click a line of existing text, edit the string, and Apply. On export the original glyphs are covered with a rectangle in the sampled background colour and your new text is drawn on top at the same spot.</p>
+        <ul className="ml-4 list-disc">
+          <li>This is an <strong>overlay edit, not a reflow</strong>: text does not re-wrap. A longer replacement can overflow its box; a shorter one leaves a gap. Only the clicked run changes — nothing around it moves.</li>
+          <li>Font matching is <strong>approximate</strong> (Helvetica / Times / Courier substitute). The original embedded font is not reused, so glyph shapes and spacing may differ slightly.</li>
+          <li>The original text is <strong>visually covered, not stripped</strong> from the file — for permanent removal use <a className="underline" href="#redact-pdf-tool">Redact PDF</a>.</li>
+          <li>Needs a real text layer. Scanned / image-only PDFs have no text runs — run <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a> first.</li>
+          <li>Replacement text is <strong>Latin-1 only</strong> (no CJK or emoji).</li>
+        </ul>
+      </div>
+
+      <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+
+      {doc && pageCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <button className="secondary-button" type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}><ArrowLeft size={16} /> Prev</button>
+            <span className="text-sm font-black tabular-nums">Page {currentPage} / {pageCount}</span>
+            <button className="secondary-button" type="button" disabled={currentPage >= pageCount} onClick={() => setCurrentPage((p) => Math.min(pageCount, p + 1))}>Next <ArrowRight size={16} /></button>
+          </div>
+          <span className="text-xs font-bold text-neutral-500">{edits.size} edit{edits.size === 1 ? "" : "s"} pending across {new Set(editList.map((e) => e.page)).size || 0} page{new Set(editList.map((e) => e.page)).size === 1 ? "" : "s"}</span>
+        </div>
+      )}
+
+      {doc && pageImage && pageDims && (
+        <div className="surface-card wabi-card-edge overflow-auto p-2" style={{ maxHeight: "70vh" }}>
+          <div className="relative mx-auto" style={{ width: pageDims.cw, height: pageDims.ch }}>
+            <img src={pageImage} width={pageDims.cw} height={pageDims.ch} alt={`Page ${currentPage} of ${fileName}`} className="block select-none" draggable={false} />
+            {runs.map((run) => {
+              const edited = edits.has(run.key);
+              const isSelected = run.key === selectedKey;
+              const cls = isSelected
+                ? "border-[var(--moss)] bg-[color-mix(in_srgb,var(--moss)_22%,transparent)]"
+                : edited
+                  ? "border-amber-400 bg-[color-mix(in_srgb,#f59e0b_20%,transparent)]"
+                  : "border-transparent hover:border-[var(--moss)] hover:bg-[color-mix(in_srgb,var(--moss)_12%,transparent)]";
+              return (
+                <button
+                  key={run.key}
+                  type="button"
+                  title={run.str}
+                  aria-label={`Edit text: ${run.str}`}
+                  onClick={() => selectRun(run)}
+                  className={`absolute cursor-text rounded-[2px] border ${cls}`}
+                  style={{ left: run.display.left, top: run.display.top, width: Math.max(4, run.display.w), height: Math.max(6, run.display.h) }}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {doc && pageImage && runs.length === 0 && (
+        <div className="surface-card wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+          <p className="font-black text-[var(--foreground)]">No editable text on this page</p>
+          <p className="mt-1">This page has no extractable text runs — it is likely a scan or image. Run <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a> to add a text layer, then edit the OCR'd copy here.</p>
+        </div>
+      )}
+
+      {selectedRun && (
+        <div className="surface-card wabi-card-edge grid gap-3 p-4">
+          <p className="text-xs font-black uppercase text-neutral-500">Selected text · page {currentPage}</p>
+          <p className="break-words rounded-xl border border-[var(--border)] bg-[var(--paper-soft)] px-3 py-2 font-mono text-sm text-neutral-600">{selectedRun.str}</p>
+          <label className="grid gap-2">
+            <span className="text-xs font-black uppercase text-neutral-500">Replacement text (leave empty to delete)</span>
+            <input className="field-input" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Type the corrected text…" />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <SecondaryButton label={edits.has(selectedRun.key) ? "Update this edit" : "Apply to this text"} onClick={() => applyRunEdit(draft)} />
+            <SecondaryButton label="Delete this text" onClick={() => { setDraft(""); applyRunEdit(""); }} />
+            {edits.has(selectedRun.key) && <SecondaryButton label="Discard edit" onClick={() => removeEdit(selectedRun.key)} />}
+          </div>
+        </div>
+      )}
+
+      {editList.length > 0 && (
+        <div className="surface-card wabi-card-edge grid gap-2 p-4">
+          <p className="font-black">Pending edits ({editList.length})</p>
+          <div className="grid gap-1">
+            {[...edits.entries()].map(([key, edit]) => (
+              <div key={key} className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-neutral-600">
+                <span className="text-xs font-black uppercase text-neutral-500">p{edit.page}</span>
+                <span className="min-w-0 break-words font-mono text-neutral-500 line-through">{edit.original}</span>
+                <ArrowRight size={14} />
+                <span className="min-w-0 break-words font-mono text-[var(--foreground)]">{edit.text || "(deleted)"}</span>
+                <button className="ml-auto text-xs font-black uppercase text-red-700 hover:underline" type="button" onClick={() => removeEdit(key)}>Remove</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <PrimaryButton label="Apply edits & download" disabled={editList.length === 0} onClick={() => runSafely(setStatus, async () => {
+        if (!bytesRef.current) throw new Error("Load a PDF first.");
+        if (!editList.length) throw new Error("Make at least one edit first — click a text run, change it, and Apply.");
+        const out = await applyTextEdits(bytesRef.current, editList.map((edit) => ({
+          page: edit.page,
+          rect: edit.rect,
+          text: edit.text,
+          fontKey: edit.fontKey,
+          color: edit.color || undefined,
+          background: edit.background || undefined,
+        })));
+        downloadBytes(out, withExtension(`${safeFilename(fileName)}-edited`, "pdf"), "application/pdf");
+        return `Applied ${editList.length} edit${editList.length === 1 ? "" : "s"} to ${fileName}. Remember: text was overlaid, not reflowed.`;
+      })} />
+
+      <ResultConsequenceNote>Edits are applied by covering and redrawing — the surrounding text is never re-flowed, and the original text remains in the file underneath the cover. For permanent removal of sensitive text, use Redact PDF instead.</ResultConsequenceNote>
+    </ToolForm>
+  );
 }
 
 function AddSignatureToPdfTool({ tool }: { tool: Tool }) {

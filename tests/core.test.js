@@ -4105,3 +4105,150 @@ test("batch op registry is well-formed with both pdf-lib and browser-only ops", 
   assert.ok(ops.some((op) => !op.browserOnly));
   assert.ok(ops.some((op) => op.browserOnly));
 });
+
+// --- Edit PDF Text (in-place overlay editing) ---------------------------------
+
+test("mapPdfFontToStandard maps base-14 / subset font names to family + style", async () => {
+  const { mapPdfFontToStandard, standardFontKey } = await import("../src/services/pdf-textedit.service.js");
+  assert.deepEqual(mapPdfFontToStandard("Helvetica-Bold"), { family: "Helvetica", bold: true, italic: false });
+  // Subset prefix stripped; ",Bold" -> bold; Arial -> sans (Helvetica).
+  assert.deepEqual(mapPdfFontToStandard("ABCDEF+Arial,Bold"), { family: "Helvetica", bold: true, italic: false });
+  assert.deepEqual(mapPdfFontToStandard("TimesNewRomanPS-ItalicMT"), { family: "Times", bold: false, italic: true });
+  assert.deepEqual(mapPdfFontToStandard("CourierNew"), { family: "Courier", bold: false, italic: false });
+  assert.deepEqual(mapPdfFontToStandard("Wingdings"), { family: "Helvetica", bold: false, italic: false });
+  // Descriptor -> pdf-lib StandardFonts key.
+  assert.equal(standardFontKey({ family: "Helvetica", bold: true, italic: false }), "HelveticaBold");
+  assert.equal(standardFontKey({ family: "Times", bold: false, italic: true }), "TimesRomanItalic");
+  assert.equal(standardFontKey({ family: "Courier", bold: true, italic: true }), "CourierBoldOblique");
+  assert.equal(standardFontKey({ family: "Times", bold: false, italic: false }), "TimesRoman");
+});
+
+test("textItemToPageRect converts a pdf.js transform to a pdf-lib rect (0deg and 90deg pages)", async () => {
+  const { textItemToPageRect } = await import("../src/services/pdf-textedit.service.js");
+  // 0deg page (height 792). "Invoice 12345" drawn at pdf-lib (72, 700) size 24
+  // is reported by pdf.js as transform [24,0,0,24,72,700] (verified empirically).
+  const a = textItemToPageRect([24, 0, 0, 24, 72, 700], 149.42, 24, 792, 0);
+  assert.equal(a.x, 72);
+  assert.equal(a.baseline, 700);
+  assert.equal(a.fontSize, 24);
+  assert.equal(a.angle, 0);
+  // Cover box: bottom = baseline - descent (24 * 0.22 = 5.28); height = font + descent.
+  assert.ok(Math.abs(a.y - 694.72) < 1e-9, `y ${a.y}`);
+  assert.ok(Math.abs(a.w - 149.42) < 1e-9, `w ${a.w}`);
+  assert.ok(Math.abs(a.h - 29.28) < 1e-9, `h ${a.h}`);
+
+  // 90deg (/Rotate) page: pdf-lib draws in UNROTATED space and the viewer rotates
+  // at display time, so the baseline maps identically — NO y-flip. Verified on a
+  // real /Rotate 90 PDF: drawing at (100, 500) yields transform [18,0,0,18,100,500].
+  const b = textItemToPageRect([18, 0, 0, 18, 100, 500], 88.06, 18, 792, 90);
+  assert.equal(b.x, 100);
+  assert.equal(b.baseline, 500);
+  assert.equal(b.fontSize, 18);
+  assert.ok(Math.abs(b.y - 496.04) < 1e-9, `y ${b.y}`); // 500 - 18*0.22
+  assert.ok(Math.abs(b.w - 88.06) < 1e-9, `w ${b.w}`);
+
+  // A run rotated 90deg in its OWN matrix reports angle 90 and swaps w/h so the
+  // cover box still encloses it.
+  const c = textItemToPageRect([0, 20, -20, 0, 300, 400], 60, 20, 792, 0);
+  assert.equal(c.fontSize, 20);
+  assert.equal(c.angle, 90);
+  assert.ok(Math.abs(c.w - (20 + 20 * 0.22)) < 1e-9, `w ${c.w}`); // height + descent
+  assert.ok(Math.abs(c.h - 60) < 1e-9, `h ${c.h}`); // original width
+
+  assert.throws(() => textItemToPageRect([1, 2, 3], 10, 10, 792, 0), /position data/);
+});
+
+// Decodes every content stream of a saved single-page PDF to raw operator text.
+async function decodePageOps(bytes) {
+  const { unzlibSync, inflateSync } = await import("fflate");
+  const { PDFDocument } = window.PDFLib;
+  const doc = await PDFDocument.load(bytes);
+  const refs = doc.getPages()[0].node.Contents().asArray();
+  const decode = (raw) => {
+    for (const fn of [unzlibSync, inflateSync]) {
+      try { return new TextDecoder("latin1").decode(fn(raw)); } catch { /* try next */ }
+    }
+    return new TextDecoder("latin1").decode(raw);
+  };
+  return refs.map((ref) => decode(doc.context.lookup(ref).contents)).join("\n");
+}
+
+const hexOf = (s) => Buffer.from(s, "latin1").toString("hex").toUpperCase();
+
+async function buildInvoicePdf() {
+  const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([612, 792]);
+  page.drawText("Invoice 12345", { x: 72, y: 700, size: 24, font, color: rgb(0.1, 0.1, 0.1) });
+  return doc.save();
+}
+
+test("applyTextEdits covers the original region and redraws the new string", async () => {
+  const { applyTextEdits, textItemToPageRect } = await import("../src/services/pdf-textedit.service.js");
+  const src = await buildInvoicePdf();
+  const rect = textItemToPageRect([24, 0, 0, 24, 72, 700], 149.42, 24, 792, 0);
+  const out = await applyTextEdits(src, [{
+    page: 1, rect, text: "Invoice 99999", fontKey: "Helvetica",
+    color: { r: 0.1, g: 0.1, b: 0.1 }, background: { r: 1, g: 1, b: 1 },
+  }]);
+  assert.ok(out instanceof Uint8Array && out.byteLength > 0);
+  const ops = await decodePageOps(out);
+  // New string is drawn (pdf-lib writes text as a hex-encoded show string).
+  assert.ok(ops.includes(hexOf("Invoice 99999")), "new string drawn");
+  // A white cover rectangle is filled over the original region.
+  assert.match(ops, /1 1 1 rg/, "white cover fill");
+  assert.match(ops, /72 694\.72 cm/, "cover translated to the run's region");
+  assert.match(ops, /\nh\nf\n/, "rectangle path closed and filled");
+});
+
+test("applyTextEdits: delete leaves only the cover, multi-edit applies all, bad rect + non-Latin rejected", async () => {
+  const { applyTextEdits, textItemToPageRect } = await import("../src/services/pdf-textedit.service.js");
+  const rect = textItemToPageRect([24, 0, 0, 24, 72, 700], 149.42, 24, 792, 0);
+
+  // Delete (empty text) => cover fill present, no drawn text run added by the edit.
+  const del = await applyTextEdits(await buildInvoicePdf(), [{ page: 1, rect, text: "", background: { r: 1, g: 1, b: 1 } }]);
+  const delOps = await decodePageOps(del);
+  assert.match(delOps, /1 1 1 rg/, "cover drawn for delete");
+  assert.ok(!delOps.includes(hexOf("REPLACED")), "no stray text for delete");
+
+  // Two edits on one page both land.
+  const rect2 = textItemToPageRect([24, 0, 0, 24, 72, 640], 149.42, 24, 792, 0);
+  const multi = await applyTextEdits(await buildInvoicePdf(), [
+    { page: 1, rect, text: "First edit", fontKey: "Helvetica" },
+    { page: 1, rect: rect2, text: "Second edit", fontKey: "Helvetica" },
+  ]);
+  const multiOps = await decodePageOps(multi);
+  assert.ok(multiOps.includes(hexOf("First edit")), "first edit drawn");
+  assert.ok(multiOps.includes(hexOf("Second edit")), "second edit drawn");
+
+  // A rect outside the page is rejected.
+  const off = { x: 5000, y: 5000, w: 100, h: 20, baseline: 5000, fontSize: 12 };
+  const forOff = await buildInvoicePdf();
+  await assert.rejects(() => applyTextEdits(forOff, [{ page: 1, rect: off, text: "x" }]), /outside the page bounds/);
+
+  // A non-Latin replacement raises the friendly Latin-1 error.
+  const forCjk = await buildInvoicePdf();
+  await assert.rejects(() => applyTextEdits(forCjk, [{ page: 1, rect, text: "日本語", fontKey: "Helvetica" }]), /Latin-1/);
+
+  // No edits at all is rejected.
+  const forEmpty = await buildInvoicePdf();
+  await assert.rejects(() => applyTextEdits(forEmpty, []), /No text edits/);
+});
+
+test("edit-pdf-text tool is registered, routed, wired into ToolRenderer, and discoverable", () => {
+  const found = tools.find((tool) => tool.id === "edit-pdf-text-tool");
+  assert.ok(found, "edit-pdf-text-tool registered");
+  assert.equal(found.category, "PDF Tools");
+  assert.equal(found.status, "available");
+  assert.equal(found.localProcessing, true);
+  assert.equal(found.file.maxFiles, 1);
+  assert.equal(routeForHash(found.route).tool.id, "edit-pdf-text-tool");
+
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.equal(appSource.includes(`"edit-pdf-text-tool"`), true, "wired into ToolRenderer");
+  assert.equal(appSource.includes("EditPdfTextTool"), true, "component defined");
+
+  const searchable = [found.name, found.description, ...found.keywords].join(" ").toLowerCase();
+  for (const term of ["edit", "replace", "text"]) assert.match(searchable, new RegExp(term));
+});

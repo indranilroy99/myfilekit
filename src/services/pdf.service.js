@@ -269,7 +269,9 @@ function fittingPrefixLength(token, maxWidth, measure) {
   return low;
 }
 
-function drawPdfText(page, text, options) {
+// Exported so the in-place text editor (pdf-textedit.service) can redraw
+// replacement text through the same Latin-1 safe-draw guard.
+export function drawPdfText(page, text, options) {
   try {
     page.drawText(text, options);
   } catch (error) {
