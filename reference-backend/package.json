@@ -1,0 +1,14 @@
+{
+  "name": "myfilekit-esign-reference-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reference signing backend for the MyFileKit 'Request e-Signature' tool. NOT part of the MyFileKit app build. Deploy it yourself; it holds user PDFs, so read the security notes.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}

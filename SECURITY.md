@@ -41,6 +41,41 @@ Both tools also expose an optional adapter for an OpenAI-compatible endpoint the
 - The AI buttons are labelled with the destination origin, and the results are labelled as produced off the device. PDF Summarizer sends the extracted document text; Ask Your PDF sends only the retrieved passages plus the question.
 - The shipped policy pins `connect-src 'self'` in both `index.html` and `public/_headers`, so a browser blocks every custom endpoint on the default build. **This policy is intentional and is not relaxed for these tools.** An operator who wants the adapter on their own deploy must add `connect-src 'self' https://their-endpoint.example` to both files and rebuild. Until then the tools catch the block and say exactly which files to change rather than reporting a generic network failure.
 
+## Optional Server-Backed Features (off by default)
+
+The **Request e-Signature** tool is a Tier 3 feature: it inherently needs a
+server, so it is optional, off by default, and is the only tool that uploads the
+selected PDF off the device — and only to a signing backend the operator has
+deployed and configured. It mirrors the bring-your-own-LLM opt-in above:
+
+- The backend base URL and any API key are stored only in that browser's
+  `localStorage`. The key is never logged, never written into a URL or query
+  string, and is masked in the UI. It is sent only as an `Authorization: Bearer`
+  header on a request the user explicitly triggered. The PDF travels only in the
+  request body, never in a URL.
+- Nothing is uploaded until the operator configures a backend, enables it, and a
+  user presses **Send for signature**. `requestEnvelope` and `getEnvelopeStatus`
+  in `src/services/esign.service.js` refuse before reaching `fetch` when the
+  settings are absent or disabled, so a default install cannot make the request
+  at all. A test asserts zero network calls in that state.
+- The tool is labelled in-UI as uploading the PDF off the device, names the
+  destination origin on the button, and carries a persistent note that the
+  operator's backend — not MyFileKit — then holds the PDF and signer emails.
+- The shipped policy pins `connect-src 'self'` in both `index.html` and
+  `public/_headers`, so a browser blocks the backend on the default build.
+  **This policy is intentional and is not relaxed for this tool.** An operator who
+  wants it on their own deploy must add `connect-src 'self' https://their-backend.example`
+  to both files and rebuild. Until then the tool catches the block and says
+  exactly which files to change.
+- A deployable, dependency-free reference backend is in `reference-backend/`
+  (not part of the app build, adds no dependency to the app), and the full
+  operator guide — deploy steps, cloud-import (Google Drive / Dropbox) OAuth
+  stub, and the operator's own retention/encryption/TLS responsibilities once
+  they hold user PDFs — is in `docs/TIER3-OPTIONAL-BACKEND.md`.
+
+**The default build ships with these features OFF and `connect-src 'self'`, so a
+default install never uploads.**
+
 ## Direct Peer Connections (P2P File Share, Whiteboard)
 
 These two tools are the only ones whose data can leave the device, and only to the one peer the user hands a code to. They still involve no MyFileKit server.

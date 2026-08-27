@@ -4768,6 +4768,7 @@ test("isNew is boolean everywhere and flags the newest tools", () => {
     "batch-process-tool", "smart-split-pdf-tool", "impose-pdf-tool", "bookmarks-editor-tool",
     "create-form-tool", "deskew-pdf-tool", "pdfa-prep-tool", "sanitize-pdf-tool", "extract-images-tool",
     "accessibility-check-tool", "tag-pdf-tool", "translate-pdf-tool", "batch-workflow-tool",
+    "request-signature-tool",
   ];
   for (const id of expectedNew) {
     assert.equal(tools.find((tool) => tool.id === id).isNew, true, `${id} should be isNew`);
@@ -5863,4 +5864,172 @@ test("applyTextEdits wraps a longer replacement to multiple lines within the blo
   const outShort = await applyTextEdits(await blank(), [{ page: 1, rect, text: "Fixed", fontKey: "Helvetica" }]);
   const opsShort = await decodePageOps(outShort);
   assert.equal((opsShort.match(/\bBT\b/g) || []).length, 1, "short replacement is a single line");
+});
+
+// ---------------------------------------------------------------------------
+// Tier 3 (optional, server-backed): Request e-Signature.
+// The default build must remain 100% local — these tests prove the tool uploads
+// nothing until an operator configures a backend, that the shipped CSP is
+// untouched, and that the tool is wired in.
+// ---------------------------------------------------------------------------
+
+const esign = await import("../src/services/esign.service.js");
+
+test("esign: an UNCONFIGURED backend uploads NOTHING — requestEnvelope refuses before any fetch", async () => {
+  let calls = 0;
+  const spyFetch = async () => { calls += 1; throw new Error("fetch must not be reached"); };
+
+  const memory = new Map();
+  const storage = {
+    getItem: (key) => (memory.has(key) ? memory.get(key) : null),
+    setItem: (key, value) => memory.set(key, String(value)),
+    removeItem: (key) => memory.delete(key),
+  };
+
+  // Nothing stored: empty settings, off, not configured.
+  const empty = esign.readEsignSettings({ storage });
+  assert.deepEqual(empty, { enabled: false, baseUrl: "", apiKey: "" });
+  assert.equal(esign.isEsignConfigured(empty), false);
+
+  const file = { fileName: "secret.pdf", contentType: "application/pdf", bytes: new TextEncoder().encode("%PDF-1.4 secret") };
+  const signers = ["a@example.com"];
+
+  await assert.rejects(() => esign.requestEnvelope({ settings: empty, file, signers, fetchImpl: spyFetch }), /switched off/i);
+  await assert.rejects(() => esign.requestEnvelope({ file, signers, fetchImpl: spyFetch }), /switched off/i);
+  // getEnvelopeStatus is gated the same way.
+  await assert.rejects(() => esign.getEnvelopeStatus({ settings: empty, id: "abc", fetchImpl: spyFetch }), /switched off/i);
+  // Enabled but incomplete (no base URL) still must not reach the network.
+  await assert.rejects(
+    () => esign.requestEnvelope({ settings: { enabled: true, baseUrl: "", apiKey: "k" }, file, signers, fetchImpl: spyFetch }),
+    /incomplete/i,
+  );
+  assert.equal(calls, 0, "no fetch may happen while the backend is unconfigured");
+});
+
+test("esign: a configured+enabled backend builds the correct envelope payload and POSTs to the configured origin only", async () => {
+  const memory = new Map();
+  const storage = {
+    getItem: (key) => (memory.has(key) ? memory.get(key) : null),
+    setItem: (key, value) => memory.set(key, String(value)),
+    removeItem: (key) => memory.delete(key),
+  };
+
+  // Saving validates and keeps any key out of the URL, and round-trips.
+  const saved = esign.saveEsignSettings({ enabled: true, baseUrl: "https://esign.example.com/", apiKey: "sk-esign-9999" }, { storage });
+  assert.equal(saved.baseUrl, "https://esign.example.com");
+  assert.equal(esign.isEsignConfigured(saved), true);
+  assert.deepEqual(esign.readEsignSettings({ storage }), saved);
+  assert.equal(memory.get("myfilekit:esign-backend").includes("sk-esign-9999"), true);
+  assert.equal(esign.maskApiKey("sk-esign-9999").endsWith("9999"), true);
+  assert.equal(esign.maskApiKey("sk-esign-9999").includes("esign"), false);
+  assert.equal(esign.backendOrigin(saved.baseUrl), "https://esign.example.com");
+
+  // Base URL validation mirrors the LLM adapter.
+  assert.throws(() => esign.saveEsignSettings({ enabled: true, baseUrl: "not a url" }, { storage }), /full URL/i);
+  assert.throws(() => esign.saveEsignSettings({ enabled: true, baseUrl: "https://user:pw@esign.example.com" }, { storage }), /credentials/i);
+  assert.throws(() => esign.saveEsignSettings({ enabled: true, baseUrl: "https://esign.example.com?token=abc" }, { storage }), /query string/i);
+  assert.throws(() => esign.saveEsignSettings({ enabled: true, baseUrl: "" }, { storage }), /base URL/i);
+
+  // A configured backend uploads the PDF + signers in the BODY, to the configured
+  // origin only, with the key in a header and never in the URL.
+  const pdfBytes = new TextEncoder().encode("%PDF-1.4 real document bytes");
+  const file = { fileName: "contract.pdf", contentType: "application/pdf", bytes: pdfBytes };
+  const signers = esign.parseSigners("alice@example.com, bob@example.com\nalice@example.com");
+  assert.deepEqual(signers, ["alice@example.com", "bob@example.com"], "signers are validated and de-duplicated");
+
+  let seen = null;
+  let calls = 0;
+  const okFetch = async (url, init) => {
+    calls += 1;
+    seen = { url, init };
+    return { ok: true, status: 201, statusText: "Created", json: async () => ({ id: "env_abc123", status: "sent" }) };
+  };
+  const result = await esign.requestEnvelope({ settings: saved, file, signers, message: "Please sign this.", fetchImpl: okFetch });
+  assert.equal(calls, 1);
+  assert.equal(result.id, "env_abc123");
+  assert.equal(result.status, "sent");
+  assert.equal(result.signers, 2);
+
+  assert.equal(seen.url, "https://esign.example.com/envelopes", "posts only to the configured origin's /envelopes");
+  assert.equal(seen.url.includes("sk-esign"), false, "the key is never in the URL");
+  assert.equal(seen.init.method, "POST");
+  assert.equal(seen.init.headers.Authorization, "Bearer sk-esign-9999");
+  const body = JSON.parse(seen.init.body);
+  assert.deepEqual(body.signers, [{ email: "alice@example.com" }, { email: "bob@example.com" }]);
+  assert.equal(body.fileName, "contract.pdf");
+  assert.equal(body.size, pdfBytes.length);
+  assert.equal(body.message, "Please sign this.");
+  // The PDF travels as base64 in the body and decodes back to the original bytes.
+  assert.equal(Buffer.from(body.pdfBase64, "base64").toString("latin1"), Buffer.from(pdfBytes).toString("latin1"));
+
+  // getEnvelopeStatus reaches the same origin, id in the path, no query string.
+  let statusUrl = null;
+  const statusFetch = async (url) => {
+    statusUrl = url;
+    return { ok: true, status: 200, json: async () => ({ id: "env_abc123", status: "pending", signers: [{ email: "alice@example.com", status: "pending" }] }) };
+  };
+  const status = await esign.getEnvelopeStatus({ settings: saved, id: "env_abc123", fetchImpl: statusFetch });
+  assert.equal(statusUrl, "https://esign.example.com/envelopes/env_abc123");
+  assert.equal(status.status, "pending");
+  // A tracking id with URL-unsafe characters is refused before any fetch.
+  await assert.rejects(() => esign.getEnvelopeStatus({ settings: saved, id: "../secret", fetchImpl: statusFetch }), /characters/i);
+});
+
+test("esign: a blocked/unreachable backend surfaces the exact connect-src guidance naming both files", async () => {
+  const saved = { enabled: true, baseUrl: "https://esign.example.com", apiKey: "" };
+  const file = { fileName: "x.pdf", contentType: "application/pdf", bytes: new TextEncoder().encode("%PDF-1.4 x") };
+  const blockedFetch = async () => { throw new TypeError("Failed to fetch"); };
+  await assert.rejects(
+    () => esign.requestEnvelope({ settings: saved, file, signers: ["a@example.com"], fetchImpl: blockedFetch }),
+    (error) => /connect-src 'self' https:\/\/esign\.example\.com/.test(error.message)
+      && /index\.html/.test(error.message) && /_headers/.test(error.message),
+  );
+});
+
+test("esign: parseSigners rejects malformed emails and requires at least one", () => {
+  assert.throws(() => esign.parseSigners(""), /at least one/i);
+  assert.throws(() => esign.parseSigners("not-an-email"), /valid email/i);
+  assert.deepEqual(esign.parseSigners("a@b.co"), ["a@b.co"]);
+});
+
+test("tier3: the shipped connect-src stays 'self' in index.html and public/_headers (default build uploads nothing)", () => {
+  const indexHtml = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const headers = fs.readFileSync(new URL("../public/_headers", import.meta.url), "utf8");
+  for (const [name, source] of [["index.html", indexHtml], ["public/_headers", headers]]) {
+    // The actual directive ends in a semicolon; the explanatory comment in
+    // index.html ("connect-src is pinned to 'self'…") does not, so match the
+    // directive form precisely.
+    assert.match(source, /connect-src 'self';/, `${name} still pins connect-src to 'self'`);
+    assert.equal(/connect-src 'self' https?:/.test(source), false, `${name} must not add a Tier-3 origin to the shipped connect-src`);
+  }
+});
+
+test("tier3: request-signature-tool is registered, routes, and is wired into the renderer", () => {
+  const t = tools.find((tool) => tool.id === "request-signature-tool");
+  assert.ok(t, "request-signature-tool is in the registry");
+  assert.equal(t.status, "available");
+  assert.equal(t.category, "Security & Privacy");
+  assert.equal(t.group, "Secure");
+  assert.ok(categories.includes(t.category));
+  const route = routeForHash(t.route);
+  assert.equal(route.type, "tool");
+  assert.equal(route.tool.id, "request-signature-tool");
+  // The renderer wires the tool id to its component.
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(appSource, /request-signature-tool"\)\s*return\s*<RequestSignatureTool/);
+});
+
+test("tier3 guard: no backend origin is hardcoded and the default settings are disabled", () => {
+  const service = fs.readFileSync(new URL("../src/services/esign.service.js", import.meta.url), "utf8");
+  // The empty/default settings must be OFF.
+  assert.deepEqual(esign.EMPTY_ESIGN_SETTINGS, { enabled: false, baseUrl: "", apiKey: "" });
+  assert.equal(esign.readEsignSettings({ storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } }).enabled, false);
+  // No real Tier-3 backend origin may be hardcoded in the service. Only the
+  // placeholder guidance host ("your-backend.example") is allowed to appear.
+  const httpHosts = [...service.matchAll(/https?:\/\/([a-z0-9.-]+)/gi)].map((m) => m[1].toLowerCase());
+  for (const host of httpHosts) {
+    // Only placeholder "example" hosts may appear (in error text and guidance);
+    // a real Tier-3 backend origin must never be baked into the client.
+    assert.ok(/(^|\.)example(\.|$)/.test(host), `esign.service hardcodes a non-example host: ${host}`);
+  }
 });

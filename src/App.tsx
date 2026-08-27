@@ -73,6 +73,7 @@ import { DEFAULT_OCR_LANG, OCR_ENGINE_SIZE_LABEL, OCR_LANGUAGES, mergeSearchable
 import { createSpeechRecognizer, getSpeechSynthesis, loadSpeechVoices, speechRecognitionSupport, speechSynthesisSupported, splitTextForSpeech } from "./services/audio.service.js";
 import { buildPassageIndex, chunkPages, highlightSegments, searchPassages, summarizeText } from "./services/nlp.service.js";
 import { buildAnswerPrompt, buildSummaryPrompt, clearLlmSettings, endpointOrigin, isLlmConfigured, maskApiKey, readLlmSettings, requestChatCompletion, saveLlmSettings, translateDocument } from "./services/llm.service.js";
+import { backendOrigin, clearEsignSettings, getEnvelopeStatus, isEsignConfigured, maskApiKey as maskEsignApiKey, parseSigners, readEsignSettings, requestEnvelope, saveEsignSettings } from "./services/esign.service.js";
 import { FRAME_KIND, MAX_TRANSFER_BYTES, createAssembler, createPeerLink, decodeJsonFrame, encodeJsonFrame, normalizeIncomingMeta, progressPercent, sendFileOverLink, transferRate, verifyBytes, webrtcSupported } from "./services/webrtc.service.js";
 import { MAX_STROKES, addStrokePoint, createStroke, deserializeStrokeChunk, drawStrokeSegment, exportBoardCanvas, mergeStrokeChunk, pointFromEvent, prepareCanvas, renderBoard, serializeStrokeChunk } from "./services/whiteboard.service.js";
 
@@ -1188,6 +1189,7 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "unlock-pdf-tool") return <UnlockPdfTool tool={tool} />;
   if (tool.id === "sign-pdf-tool") return <SignPdfTool tool={tool} />;
   if (tool.id === "verify-signature-tool") return <VerifySignatureTool tool={tool} />;
+  if (tool.id === "request-signature-tool") return <RequestSignatureTool tool={tool} />;
   if (["compress-image-tool", "convert-image-tool"].includes(tool.id)) return <ImageOutputTool tool={tool} mode={tool.id === "compress-image-tool" ? "compress" : "convert"} />;
   if (tool.id === "batch-compress-images-tool") return <BatchImageTool tool={tool} mode="compress" />;
   if (tool.id === "batch-resize-images-tool") return <BatchImageTool tool={tool} mode="resize" />;
@@ -5236,6 +5238,155 @@ function ImageOutputTool({ tool, mode }: { tool: Tool; mode: "compress" | "conve
       const grew = mode === "compress" && blob.size >= file.size;
       return `Original: ${formatBytes(file.size)}\nOutput: ${formatBytes(blob.size)}${grew ? "\nNote: the output is not smaller than the original. The source may already be optimized — try JPEG or WebP output." : ""}`;
     })} />
+  </ToolForm>;
+}
+
+type EsignSettings = ReturnType<typeof readEsignSettings>;
+
+/**
+ * Optional "send for signature" backend, stored in localStorage on this device.
+ * Off by default. While it is off, the Request e-Signature tool uploads nothing.
+ * This is the one place in MyFileKit where a selected PDF leaves the device, and
+ * only to a backend the operator has deployed and added to connect-src.
+ */
+function EsignBackendPanel({ settings, onChange }: { settings: EsignSettings; onChange: (next: EsignSettings) => void }) {
+  const [open, setOpen] = useState(false);
+  const [baseUrl, setBaseUrl] = useState(settings.baseUrl);
+  const [apiKey, setApiKey] = useState("");
+  const [panelStatus, setPanelStatus] = useState(initialStatus);
+  const configured = isEsignConfigured(settings);
+  const origin = backendOrigin(settings.baseUrl);
+
+  return (
+    <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold leading-6 text-neutral-600">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-black uppercase text-neutral-500">Signing backend — {configured ? "on" : "off"}</p>
+        <button className="secondary-button" type="button" onClick={() => setOpen(!open)}>{open ? "Hide settings" : "Settings"}</button>
+      </div>
+      <p>
+        {configured
+          ? `Your own signing backend is switched on. When you press Send for signature, the PDF is uploaded to ${origin} and is no longer local. Nothing is sent until you press it.`
+          : "This tool is inactive until you point it at your own signing backend. Until you do, no PDF is uploaded and nothing leaves this device."}
+      </p>
+      {open && (
+        <div className="grid gap-3">
+          <p className="text-xs font-semibold text-neutral-500">
+            The backend base URL and any API key are stored only in this browser's localStorage. The key is never placed in a URL and is only ever sent as an Authorization header to the backend you enter.
+            MyFileKit ships a strict Content-Security-Policy that blocks every outbound connection, so a signing backend only works on a deploy where you have added
+            <span className="whitespace-pre"> connect-src 'self' &lt;your origin&gt; </span>
+            to index.html and public/_headers. See docs/TIER3-OPTIONAL-BACKEND.md and reference-backend/ for a deployable reference implementation.
+          </p>
+          <Input label="Backend base URL" value={baseUrl} onChange={setBaseUrl} placeholder="https://esign.example.com" helper="Envelopes are POSTed to <base URL>/envelopes." />
+          <Input label="API key (optional)" value={apiKey} onChange={setApiKey} type="password" helper={settings.apiKey ? `Saved key: ${maskEsignApiKey(settings.apiKey)}. Leave blank to keep it.` : "Only if your backend requires one. Stored on this device only."} />
+          <StatusBox status={panelStatus} />
+          <div className="flex flex-wrap gap-2">
+            <SecondaryButton label="Save and enable" onClick={() => runSafely(setPanelStatus, async () => {
+              const next = saveEsignSettings({ enabled: true, baseUrl, apiKey: apiKey || settings.apiKey });
+              onChange(next);
+              setApiKey("");
+              return `Enabled. Sending for signature will upload the PDF to ${backendOrigin(next.baseUrl)}.`;
+            })} />
+            <SecondaryButton label="Turn off and forget" onClick={() => runSafely(setPanelStatus, async () => {
+              onChange(clearEsignSettings());
+              setBaseUrl("");
+              setApiKey("");
+              return "Backend cleared. The tool uploads nothing again.";
+            })} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type EnvelopeResult = { id: string; status: string; signers: number };
+
+/**
+ * Request e-Signature: the client for an operator-hosted send-for-signature
+ * workflow. This is the ONE tool that uploads the selected PDF off the device,
+ * and only to the operator's own configured backend. Off by default; the
+ * esign.service gate refuses before any fetch until a backend is configured.
+ */
+function RequestSignatureTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [signersText, setSignersText] = useState("");
+  const [message, setMessage] = useState("");
+  const [settings, setSettings] = useState<EsignSettings>(() => readEsignSettings());
+  const [result, setResult] = useState<EnvelopeResult | null>(null);
+  const [trackingId, setTrackingId] = useState("");
+  const [statusReport, setStatusReport] = useState<{ id: string; status: string; signers: any[] } | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  const configured = isEsignConfigured(settings);
+  const origin = backendOrigin(settings.baseUrl);
+
+  const reset = () => {
+    setFiles([]);
+    setSignersText("");
+    setMessage("");
+    setResult(null);
+    setTrackingId("");
+    setStatusReport(null);
+    setStatus(initialStatus);
+  };
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Send a PDF to other people to sign, through a signing backend <strong>you</strong> deploy. Unlike every other tool in MyFileKit, this one <strong>uploads your PDF off this device</strong> — to the backend you configure below and nowhere else. It is <strong>off by default</strong>: until you configure a backend, nothing is uploaded and no envelope is created. This is a scaffold client, not a hosted service; see reference-backend/ and docs/TIER3-OPTIONAL-BACKEND.md to stand one up.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setResult(null); }} label="Choose the PDF to send for signature" />
+    <Textarea label="Signer emails (one per line, or comma-separated)" value={signersText} onChange={setSignersText} rows={4} />
+    <Textarea label="Message to signers (optional)" value={message} onChange={setMessage} rows={3} />
+    <EsignBackendPanel settings={settings} onChange={setSettings} />
+    {configured ? (
+      <PrimaryButton label={`Send for signature (uploads the PDF to ${origin})`} onClick={() => runSafely(setStatus, async () => {
+        const [file] = validateFiles(files, tool.file);
+        const signers = parseSigners(signersText);
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        setStatus({ tone: "idle", message: `Uploading ${file.name} to ${origin}…` });
+        const envelope = await requestEnvelope({
+          settings,
+          file: { fileName: safeFilename(file.name) + ".pdf", contentType: "application/pdf", bytes },
+          signers,
+          message,
+        });
+        setResult(envelope);
+        setTrackingId(envelope.id);
+        setStatusReport(null);
+        return `Envelope sent to ${envelope.signers} signer${envelope.signers === 1 ? "" : "s"}. Tracking id: ${envelope.id} (status: ${envelope.status}).`;
+      })} />
+    ) : (
+      <StatusBox status={{ tone: "idle", message: "Configure your signing backend above to enable sending. Until then, this tool uploads nothing." }} />
+    )}
+    {result && (
+      <div className="surface-card grid gap-2 rounded-3xl p-5">
+        <p className="text-xs font-black uppercase text-neutral-500">Envelope — uploaded to your backend</p>
+        <InfoRow label="Tracking id" value={result.id} />
+        <InfoRow label="Status" value={result.status} />
+        <InfoRow label="Signers" value={String(result.signers)} />
+      </div>
+    )}
+    {configured && (
+      <div className="grid gap-3">
+        <Input label="Check envelope status by tracking id" value={trackingId} onChange={setTrackingId} placeholder="envelope id from a previous send" />
+        <SecondaryButton label={`Check status (asks ${origin})`} onClick={() => runSafely(setStatus, async () => {
+          const report = await getEnvelopeStatus({ settings, id: trackingId });
+          setStatusReport(report);
+          return `Envelope ${report.id} is "${report.status}".`;
+        })} />
+        {statusReport && (
+          <div className="surface-muted wabi-card-edge grid gap-2 p-4">
+            <p className="text-xs font-black uppercase text-neutral-500">Status — from your backend</p>
+            <InfoRow label="Envelope" value={statusReport.id} />
+            <InfoRow label="Status" value={statusReport.status} />
+            {statusReport.signers.map((signer: any, index: number) => (
+              <InfoRow key={index} label={`Signer ${index + 1}`} value={`${signer?.email || "?"} — ${signer?.status || "pending"}`} />
+            ))}
+          </div>
+        )}
+      </div>
+    )}
+    <ResultConsequenceNote>This is the only MyFileKit tool that uploads your file. The PDF and the signer email addresses are sent to the backend at <strong>{origin || "the backend you configure"}</strong>, which then holds that data — MyFileKit does not. Only send documents you are entitled to upload there, and make sure that backend encrypts at rest, serves over TLS, and has a retention policy you trust.</ResultConsequenceNote>
   </ToolForm>;
 }
 
