@@ -44,6 +44,9 @@ function pagePointSize(srcPage) {
  * Renders every page to a canvas, applies an optional pixel transform, and
  * rebuilds a flat (non-interactive) PDF sized to the original page points.
  * Shared by compress / flatten / invert.
+ *
+ * @param {File} file
+ * @param {{ dpi?: number, format?: string, quality?: number, transform?: Function, onProgress?: (page: number, total: number) => void }} [options]
  */
 export async function rasterRebuild(file, { dpi = 150, format = "png", quality = 0.92, transform, onProgress } = {}) {
   const { PDFDocument } = getPdfLib();

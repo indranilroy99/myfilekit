@@ -3790,3 +3790,190 @@ test("advanced PDF tools are registered, routed, and rendered", () => {
     assert.equal(appSource.includes(`"${id}"`), true, `${id} wired into ToolRenderer`);
   }
 });
+
+// =============================================================================
+// PHASE 2 — Compare PDFs, Deskew, PDF/A prep (src/services/pdf-review.service.js)
+// Pure logic is unit-tested here. Browser-only paths noted below are NOT tested
+// in Node: the compare VISUAL pixel-diff and the deskew page RASTER/rotate both
+// need canvas + pdf.js, and the PDF/A "guaranteed self-contained" RASTER mode
+// uses rasterRebuild (canvas). The archival hygiene itself is pure pdf-lib and
+// IS tested. The skew ESTIMATOR is pure and IS tested on synthetic bitmaps.
+// =============================================================================
+
+test("comparePdfText: reports per-page added/removed/changed lines and flags differing pages", async () => {
+  const { comparePdfText } = await import("../src/services/pdf-review.service.js");
+  // lineDiff aligns by line index, so each scenario is kept end-anchored to stay
+  // clean: page 1 = a changed line (1 removed + 1 added), page 2 = an added
+  // trailing line, page 3 = a removed trailing line.
+  const a = ["keep\nold\nfoot", "one\ntwo", "x\ny\nz"];
+  const b = ["keep\nnew\nfoot", "one\ntwo\nthree", "x\ny"];
+  const result = comparePdfText(a, b);
+
+  assert.equal(result.identical, false);
+  assert.deepEqual(result.differingPages, [1, 2, 3]);
+  const page1 = result.pages.find((p) => p.page === 1);
+  assert.equal(page1.status, "changed");
+  assert.equal(page1.removed, 1); // old
+  assert.equal(page1.added, 1); // new
+  const page2 = result.pages.find((p) => p.page === 2);
+  assert.equal(page2.status, "changed");
+  assert.equal(page2.added, 1); // three
+  assert.equal(page2.removed, 0);
+  const page3 = result.pages.find((p) => p.page === 3);
+  assert.equal(page3.status, "changed");
+  assert.equal(page3.removed, 1); // z
+  assert.equal(page3.added, 0);
+  assert.equal(result.totals.changedPages, 3);
+  assert.equal(result.totals.added, 2);
+  assert.equal(result.totals.removed, 2);
+});
+
+test("comparePdfText: identical inputs report no differences", async () => {
+  const { comparePdfText, comparePdfReportText } = await import("../src/services/pdf-review.service.js");
+  const pages = ["alpha\nbeta", "gamma"];
+  const result = comparePdfText(pages, pages.slice());
+  assert.equal(result.identical, true);
+  assert.equal(result.totals.changedPages, 0);
+  assert.match(comparePdfReportText(result), /No differences found/);
+});
+
+test("comparePdfText: different page counts report extra and missing pages", async () => {
+  const { comparePdfText } = await import("../src/services/pdf-review.service.js");
+  // A has 3 pages, B has 1 → pages 2,3 are missing from B.
+  const shrunk = comparePdfText(["one", "two", "three"], ["one"]);
+  assert.deepEqual(shrunk.removedPages, [2, 3]);
+  assert.deepEqual(shrunk.addedPages, []);
+  assert.equal(shrunk.pages.find((p) => p.page === 2).status, "removed");
+  assert.equal(shrunk.identical, false);
+
+  // A has 1 page, B has 3 → pages 2,3 are extra in B.
+  const grown = comparePdfText(["one"], ["one", "two", "three"]);
+  assert.deepEqual(grown.addedPages, [2, 3]);
+  assert.deepEqual(grown.removedPages, []);
+  assert.equal(grown.pages.find((p) => p.page === 3).status, "added");
+});
+
+test("comparePdfText: text-less pages (scanned) are flagged for visual-only diff", async () => {
+  const { comparePdfText } = await import("../src/services/pdf-review.service.js");
+  const result = comparePdfText(["", "text"], ["", "text"]);
+  assert.deepEqual(result.textlessPages, [1]);
+  // A textless page is not itself a text difference; identical text otherwise.
+  assert.equal(result.pages.find((p) => p.page === 1).status, "textless");
+  assert.equal(result.identical, true);
+});
+
+test("estimateSkewAngle recovers a known synthetic skew (+4°, -3°), ~0° straight, and 0 for blank", async () => {
+  const { estimateSkewAngle } = await import("../src/services/pdf-review.service.js");
+  // Build a darkness matrix of horizontal 3px-thick "text" lines rotated by deg
+  // about the centre. Higher value = more ink, matching the estimator contract.
+  const makeSkewedTextMatrix = (w, h, deg, gap = 12) => {
+    const g = new Uint8Array(w * h);
+    const cx = (w - 1) / 2;
+    const cy = (h - 1) / 2;
+    const t = (deg * Math.PI) / 180;
+    const cos = Math.cos(t);
+    const sin = Math.sin(t);
+    for (let sy = 8; sy < h - 8; sy += gap) {
+      for (let band = 0; band < 3; band += 1) {
+        const yy = sy + band;
+        for (let sx = 10; sx < w - 10; sx += 1) {
+          const dx = sx - cx;
+          const dy = yy - cy;
+          const ox = Math.round(cx + dx * cos - dy * sin);
+          const oy = Math.round(cy + dx * sin + dy * cos);
+          if (ox >= 0 && ox < w && oy >= 0 && oy < h) g[oy * w + ox] = 255;
+        }
+      }
+    }
+    return g;
+  };
+  const W = 300;
+  const H = 360;
+  assert.ok(Math.abs(estimateSkewAngle(makeSkewedTextMatrix(W, H, 0), W, H)) <= 0.75, "straight ~0");
+  assert.ok(Math.abs(estimateSkewAngle(makeSkewedTextMatrix(W, H, 4), W, H) - 4) <= 0.75, "recovers +4");
+  assert.ok(Math.abs(estimateSkewAngle(makeSkewedTextMatrix(W, H, -3), W, H) + 3) <= 0.75, "recovers -3");
+  // A blank (no ink) image returns 0 without throwing.
+  assert.equal(estimateSkewAngle(new Uint8Array(W * H), W, H), 0);
+});
+
+test("buildSrgbIccProfile produces a structurally valid sRGB ICC profile", async () => {
+  const { buildSrgbIccProfile } = await import("../src/services/pdf-review.service.js");
+  const icc = buildSrgbIccProfile();
+  const sizeField = (icc[0] << 24) | (icc[1] << 16) | (icc[2] << 8) | icc[3];
+  assert.equal(sizeField, icc.length, "header size field matches byte length");
+  assert.equal(String.fromCharCode(icc[36], icc[37], icc[38], icc[39]), "acsp", "acsp signature present");
+});
+
+test("archivalPrepPdf (non-raster) adds OutputIntent + PDF/A XMP, strips JS/OpenAction, and sets ID/MarkInfo", async () => {
+  const { archivalPrepPdf } = await import("../src/services/pdf-review.service.js");
+  const { PDFDocument, PDFName, PDFString } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  doc.addPage([300, 300]);
+  const ctx = doc.context;
+  // A document-level JavaScript OpenAction and a /Names /JavaScript name tree.
+  const openAction = ctx.obj({});
+  openAction.set(PDFName.of("S"), PDFName.of("JavaScript"));
+  openAction.set(PDFName.of("JS"), PDFString.of("app.alert('hi')"));
+  doc.catalog.set(PDFName.of("OpenAction"), ctx.register(openAction));
+  const namesDict = ctx.obj({});
+  namesDict.set(PDFName.of("JavaScript"), ctx.register(ctx.obj({})));
+  doc.catalog.set(PDFName.of("Names"), ctx.register(namesDict));
+  const srcBytes = await doc.save();
+
+  const { bytes, report } = await archivalPrepPdf(srcBytes, { title: "My & <Report>", author: "Tester", part: "1", conformance: "B" });
+
+  const out = await PDFDocument.load(bytes);
+  // OutputIntent present with an ICC profile stream (N = 3).
+  const intents = out.context.lookup(out.catalog.get(PDFName.of("OutputIntents")));
+  assert.ok(intents && intents.size() === 1, "one OutputIntent");
+  const intent = out.context.lookup(intents.get(0));
+  assert.equal(intent.get(PDFName.of("S")).toString(), "/GTS_PDFA1");
+  const iccStream = out.context.lookup(intent.get(PDFName.of("DestOutputProfile")));
+  assert.equal(iccStream.dict.get(PDFName.of("N")).toString(), "3", "ICC is 3-channel");
+
+  // XMP metadata carries the PDF/A conformance identifier (and escapes the title).
+  const metaStream = out.context.lookup(out.catalog.get(PDFName.of("Metadata")));
+  const xmp = Buffer.from(metaStream.contents).toString("utf8");
+  assert.match(xmp, /pdfaid:part>1</);
+  assert.match(xmp, /pdfaid:conformance>B</);
+  assert.match(xmp, /My &amp; &lt;Report&gt;/, "user title is XML-escaped");
+
+  // Forbidden auto-run / JavaScript entries are gone.
+  assert.equal(out.catalog.get(PDFName.of("OpenAction")), undefined);
+  const outNames = out.context.lookup(out.catalog.get(PDFName.of("Names")));
+  assert.equal(outNames.get(PDFName.of("JavaScript")), undefined);
+
+  // Document /ID and /MarkInfo are set.
+  assert.ok(out.context.trailerInfo.ID, "document /ID present");
+  assert.ok(out.catalog.get(PDFName.of("MarkInfo")), "/MarkInfo present");
+
+  assert.ok(report.applied.some((item) => /OutputIntent/i.test(item)));
+  assert.ok(report.removed.some((item) => /OpenAction/i.test(item)));
+  assert.ok(report.removed.some((item) => /JavaScript/i.test(item)));
+});
+
+test("archivalPrepPdf refuses an encrypted PDF with a friendly message", async () => {
+  const { archivalPrepPdf, assertPdfDecryptable } = await import("../src/services/pdf-review.service.js");
+  const { PDFDocument } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  doc.addPage([200, 200]);
+  const { bytes } = await pdfCrypto.encryptPdf(new File([await doc.save()], "s.pdf", { type: "application/pdf" }), { userPassword: "pw" });
+  await assert.rejects(() => archivalPrepPdf(bytes, {}), /encrypted/i);
+  await assert.rejects(() => assertPdfDecryptable(bytes), /encrypted/i);
+});
+
+test("Phase 2 review tools are registered, routed, and rendered", () => {
+  const ids = ["compare-pdf-tool", "deskew-pdf-tool", "pdfa-prep-tool"];
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  for (const id of ids) {
+    const found = tools.find((tool) => tool.id === id);
+    assert.ok(found, `${id} registered`);
+    assert.equal(found.category, "PDF Tools");
+    assert.equal(found.status, "available");
+    assert.equal(found.localProcessing, true);
+    assert.equal(routeForHash(found.route).tool.id, id);
+    assert.equal(appSource.includes(`"${id}"`), true, `${id} wired into ToolRenderer`);
+  }
+  // Compare accepts two files.
+  assert.equal(tools.find((t) => t.id === "compare-pdf-tool").file.maxFiles, 2);
+});

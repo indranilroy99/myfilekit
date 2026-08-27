@@ -47,8 +47,9 @@ import { downloadBlob, downloadBytes, downloadText, revokeDownloadUrl } from "./
 import { csvToJson, jsonToCsv } from "./services/csv.service.js";
 import { addSignatureToImage, addTextToImage, cleanImageMetadata, compressImage, cropImage, exportCanvas, imageDimensions, imageToCanvas, resizeImage, rotateFlipImage } from "./services/image.service.js";
 import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.service.js";
-import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
-import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip } from "./services/pdf-render.service.js";
+import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, getPdfLib, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
+import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip, rasterRebuild } from "./services/pdf-render.service.js";
+import { archivalPrepPdf, assertPdfDecryptable, comparePdfText, comparePdfReportText, estimateSkewAngle } from "./services/pdf-review.service.js";
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
 import { BATES_POSITION_IDS, NUP_COUNTS, batesNumberPdf, createFormPdf, imposePdf, parseOutlineInput, parseSplitPages, readOutline, setOutline, smartSplitPdf } from "./services/pdf-advanced.service.js";
 import { ALL_PERMISSIONS_ALLOWED, PDF_ENCRYPTION_ALGORITHMS, PDF_PERMISSION_LABELS, decryptPdf, encryptPdf, unlockPdf } from "./services/pdf-crypto.service.js";
@@ -1101,6 +1102,9 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "impose-pdf-tool") return <ImposePdfTool tool={tool} />;
   if (tool.id === "bookmarks-editor-tool") return <BookmarksEditorTool tool={tool} />;
   if (tool.id === "create-form-tool") return <CreateFormTool tool={tool} />;
+  if (tool.id === "compare-pdf-tool") return <ComparePdfTool tool={tool} />;
+  if (tool.id === "deskew-pdf-tool") return <DeskewPdfTool tool={tool} />;
+  if (tool.id === "pdfa-prep-tool") return <PdfaPrepTool tool={tool} />;
   if (tool.id === "merge-pdf-tool") return <PdfFileTool tool={tool} action="Merge PDFs" multiple run={(files) => mergePdfs(files).then((bytes) => downloadBytes(bytes, "myfilekit-merged.pdf", "application/pdf"))} />;
   if (tool.id === "split-pdf-tool") return <PageRangeTool tool={tool} action="Extract pages" suffix="extracted" run={extractPdfPages} />;
   if (tool.id === "delete-pdf-pages-tool") return <PageRangeTool tool={tool} action="Delete pages" suffix="pages-deleted" run={deletePdfPages} />;
@@ -2803,6 +2807,418 @@ function CreateFormTool({ tool }: { tool: Tool }) {
       downloadBytes(bytes, withExtension(base, "pdf"), "application/pdf");
       return `Created a fillable form with ${fieldCount} field${fieldCount === 1 ? "" : "s"}.`;
     })} />
+  </ToolForm>;
+}
+
+// =============================================================================
+// Phase 2: Compare / Deskew / PDF-A prep — browser (canvas + pdf.js) helpers.
+// The pure logic (text diff, skew estimator, archival hygiene) lives in
+// pdf-review.service.js and is unit-tested; only the rendering is here.
+// =============================================================================
+
+const VISUAL_DIFF_THRESHOLD = 40; // luma delta that counts a pixel as "changed"
+
+/** Rasterises `src` onto a fresh w×h white canvas and returns its pixel data. */
+function rasterOnWhite(src: HTMLCanvasElement, w: number, h: number) {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("This browser could not create a 2D canvas.");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(src, 0, 0);
+  return ctx.getImageData(0, 0, w, h).data;
+}
+
+/**
+ * Renders the given pages of both PDFs at a common scale, computes a per-pixel
+ * luma difference, and paints a composite per page: a faded grey rendering of
+ * the revised page with every changed pixel tinted in a strong highlight so the
+ * reader sees WHERE it changed. Browser-only (canvas + pdf.js).
+ */
+async function buildVisualDiffs(
+  fileA: File,
+  fileB: File,
+  pages: number[],
+  onProgress?: (done: number, total: number) => void
+) {
+  const { loadPdfDocument, renderPdfPageToCanvas } = await import("./lib/pdfjs");
+  const pdfA = await loadPdfDocument(fileA);
+  const pdfB = await loadPdfDocument(fileB);
+  const scale = 100 / 72; // ~100 dpi keeps the composite legible but bounded.
+  const results: Array<{ page: number; blob: Blob; changedPixels: number }> = [];
+  try {
+    for (let i = 0; i < pages.length; i += 1) {
+      const page = pages[i];
+      const canvasA = await renderPdfPageToCanvas(pdfA, page, scale);
+      const canvasB = await renderPdfPageToCanvas(pdfB, page, scale);
+      const w = Math.max(canvasA.width, canvasB.width);
+      const h = Math.max(canvasA.height, canvasB.height);
+      const dataA = rasterOnWhite(canvasA, w, h);
+      const dataB = rasterOnWhite(canvasB, w, h);
+
+      const out = document.createElement("canvas");
+      out.width = w;
+      out.height = h;
+      const octx = out.getContext("2d");
+      if (!octx) throw new Error("This browser could not create a 2D canvas.");
+      const composite = octx.createImageData(w, h);
+      const pixels = composite.data;
+      let changedPixels = 0;
+      for (let p = 0; p < w * h; p += 1) {
+        const idx = p * 4;
+        const lumaA = dataA[idx] * 0.299 + dataA[idx + 1] * 0.587 + dataA[idx + 2] * 0.114;
+        const lumaB = dataB[idx] * 0.299 + dataB[idx + 1] * 0.587 + dataB[idx + 2] * 0.114;
+        if (Math.abs(lumaA - lumaB) > VISUAL_DIFF_THRESHOLD) {
+          pixels[idx] = 224; pixels[idx + 1] = 32; pixels[idx + 2] = 32; pixels[idx + 3] = 255;
+          changedPixels += 1;
+        } else {
+          // Faded grey base from the revised page so the tint stands out.
+          const grey = Math.round(255 - (255 - lumaB) * 0.35);
+          pixels[idx] = grey; pixels[idx + 1] = grey; pixels[idx + 2] = grey; pixels[idx + 3] = 255;
+        }
+      }
+      octx.putImageData(composite, 0, 0);
+      results.push({ page, blob: await canvasToBlob(out, "image/png"), changedPixels });
+      canvasA.width = 0; canvasA.height = 0;
+      canvasB.width = 0; canvasB.height = 0;
+      out.width = 0; out.height = 0;
+      onProgress?.(i + 1, pages.length);
+    }
+    return results;
+  } finally {
+    await pdfA.destroy();
+    await pdfB.destroy();
+  }
+}
+
+/** Downscales a rendered page canvas to a darkness matrix for skew estimation. */
+function canvasToDarkness(canvas: HTMLCanvasElement, maxDim: number) {
+  const factor = Math.min(1, maxDim / Math.max(canvas.width, canvas.height));
+  const w = Math.max(1, Math.round(canvas.width * factor));
+  const h = Math.max(1, Math.round(canvas.height * factor));
+  const small = document.createElement("canvas");
+  small.width = w;
+  small.height = h;
+  const ctx = small.getContext("2d");
+  if (!ctx) throw new Error("This browser could not create a 2D canvas.");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(canvas, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h).data;
+  const gray = new Uint8Array(w * h);
+  for (let p = 0; p < w * h; p += 1) {
+    const idx = p * 4;
+    const luma = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
+    gray[p] = 255 - Math.round(luma);
+  }
+  small.width = 0;
+  small.height = 0;
+  return { gray, w, h };
+}
+
+/**
+ * Rasterises each page, estimates (or applies an override) skew angle, rotates
+ * the page image to straighten it, and rebuilds an image-based PDF. Output pages
+ * are images, so text is no longer selectable. Browser-only.
+ */
+async function deskewPdf(
+  file: File,
+  { dpi = 150, overrideAngle, onProgress }: { dpi?: number; overrideAngle?: number | null; onProgress?: (page: number, total: number) => void }
+) {
+  const { PDFDocument } = getPdfLib();
+  const { loadPdfDocument, renderPdfPageToCanvas } = await import("./lib/pdfjs");
+  const scale = Math.max(0.1, dpi / 72);
+  const pdf = await loadPdfDocument(file);
+  const out = await PDFDocument.create();
+  const angles: number[] = [];
+  try {
+    for (let n = 1; n <= pdf.numPages; n += 1) {
+      const canvas = await renderPdfPageToCanvas(pdf, n, scale);
+      let angle = overrideAngle ?? null;
+      if (angle === null) {
+        const { gray, w, h } = canvasToDarkness(canvas, 700);
+        angle = estimateSkewAngle(gray, w, h);
+      }
+      angles.push(angle);
+
+      const rad = (-angle * Math.PI) / 180; // rotate by -skew to straighten
+      const cos = Math.abs(Math.cos(rad));
+      const sin = Math.abs(Math.sin(rad));
+      const nw = Math.ceil(canvas.width * cos + canvas.height * sin);
+      const nh = Math.ceil(canvas.width * sin + canvas.height * cos);
+      const rc = document.createElement("canvas");
+      rc.width = nw;
+      rc.height = nh;
+      const rctx = rc.getContext("2d");
+      if (!rctx) throw new Error("This browser could not create a 2D canvas.");
+      rctx.fillStyle = "#ffffff";
+      rctx.fillRect(0, 0, nw, nh);
+      rctx.translate(nw / 2, nh / 2);
+      rctx.rotate(rad);
+      rctx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+
+      const blob = await canvasToBlob(rc, "image/png");
+      const embedded = await out.embedPng(new Uint8Array(await blob.arrayBuffer()));
+      const pw = nw / scale;
+      const ph = nh / scale;
+      const page = out.addPage([pw, ph]);
+      page.drawImage(embedded, { x: 0, y: 0, width: pw, height: ph });
+
+      canvas.width = 0; canvas.height = 0;
+      rc.width = 0; rc.height = 0;
+      onProgress?.(n, pdf.numPages);
+    }
+    return { bytes: await out.save({ useObjectStreams: true }), angles };
+  } finally {
+    await pdf.destroy();
+  }
+}
+
+function ComparePdfTool({ tool }: { tool: Tool }) {
+  const [filesA, setFilesA] = useState<File[]>([]);
+  const [filesB, setFilesB] = useState<File[]>([]);
+  const [result, setResult] = useState<ReturnType<typeof comparePdfText> | null>(null);
+  const [reportText, setReportText] = useState("");
+  const [diffs, setDiffs] = useState<Array<{ page: number; url: string; blob: Blob; changedPixels: number }>>([]);
+  const [status, setStatus] = useState(initialStatus);
+
+  useEffect(() => () => { diffs.forEach((diff) => revokeDownloadUrl(diff.url)); }, [diffs]);
+
+  const reset = () => {
+    diffs.forEach((diff) => revokeDownloadUrl(diff.url));
+    setDiffs([]);
+    setFilesA([]);
+    setFilesB([]);
+    setResult(null);
+    setReportText("");
+    setStatus(initialStatus);
+  };
+
+  const singleFile = { ...tool.file, maxFiles: 1 };
+
+  const changedPages = result ? result.pages.filter((entry) => entry.status === "changed") : [];
+
+  return (
+    <div className="tool-form-grid">
+      <div className="tool-form-actions">
+        <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+          Compares two PDFs. The text diff shows added, removed, and changed lines per page from the selectable text; the visual diff renders each differing page and tints the pixels that changed. Pages with no extractable text (scanned) fall back to the visual diff only. Everything runs in this browser.
+        </div>
+        <FileControl accept="application/pdf" files={filesA} setFiles={setFilesA} label="File A — original" />
+        <FileControl accept="application/pdf" files={filesB} setFiles={setFilesB} label="File B — revised" />
+        <PrimaryButton label="Compare PDFs" onClick={() => runSafely(setStatus, async () => {
+          diffs.forEach((diff) => revokeDownloadUrl(diff.url));
+          setDiffs([]);
+          setResult(null);
+          setReportText("");
+          const fileA = validateFiles(filesA, singleFile)[0];
+          const fileB = validateFiles(filesB, singleFile)[0];
+
+          const pagesA: string[] = [];
+          const pagesB: string[] = [];
+          await extractPdfText(fileA, {
+            onPage: (n: number, text: string) => { pagesA[n - 1] = text; },
+            onProgress: (page: number, total: number) => setStatus({ tone: "idle", message: `Reading A — page ${page} of ${total}…`, progress: { value: page, total, label: "Reading A…" } }),
+          });
+          await extractPdfText(fileB, {
+            onPage: (n: number, text: string) => { pagesB[n - 1] = text; },
+            onProgress: (page: number, total: number) => setStatus({ tone: "idle", message: `Reading B — page ${page} of ${total}…`, progress: { value: page, total, label: "Reading B…" } }),
+          });
+
+          const compareResult = comparePdfText(pagesA, pagesB);
+          setResult(compareResult);
+          setReportText(comparePdfReportText(compareResult, { nameA: fileA.name, nameB: fileB.name }));
+
+          if (compareResult.identical) {
+            return "No differences found. The extracted text of both documents is identical page for page.";
+          }
+
+          // Visual diff for pages present in both that differ or are text-less.
+          const visualPages = compareResult.pages
+            .filter((entry) => entry.status === "changed" || entry.status === "textless")
+            .map((entry) => entry.page)
+            .filter((page) => page <= compareResult.pageCountA && page <= compareResult.pageCountB);
+
+          if (visualPages.length) {
+            const built = await buildVisualDiffs(fileA, fileB, visualPages, (done, total) =>
+              setStatus({ tone: "idle", message: `Rendering visual diff — page ${done} of ${total}…`, progress: { value: done, total, label: "Visual diff…" } })
+            );
+            setDiffs(built.map((diff) => ({ page: diff.page, blob: diff.blob, changedPixels: diff.changedPixels, url: URL.createObjectURL(diff.blob) })));
+          }
+
+          const parts = [`${compareResult.totals.changedPages} page(s) differ`, `+${compareResult.totals.added} / -${compareResult.totals.removed} line(s)`];
+          if (compareResult.addedPages.length) parts.push(`extra pages in B: ${compareResult.addedPages.join(", ")}`);
+          if (compareResult.removedPages.length) parts.push(`missing from B: ${compareResult.removedPages.join(", ")}`);
+          if (compareResult.textlessPages.length) parts.push(`text-less (visual only): ${compareResult.textlessPages.join(", ")}`);
+          return parts.join(" · ") + ".";
+        })} />
+
+        {result && !result.identical && (
+          <>
+            <div className="surface-card wabi-card-edge grid gap-3 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-black">Text diff</p>
+                <p className="text-xs font-black uppercase text-neutral-500">A: {result.pageCountA}p · B: {result.pageCountB}p</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <SecondaryButton label="Download .txt report" onClick={() => {
+                  if (!reportText) throw new Error("Compare two PDFs first.");
+                  downloadText(reportText, "myfilekit-pdf-comparison", "txt");
+                }} />
+              </div>
+              {result.addedPages.length > 0 && <p className="text-sm font-semibold text-neutral-600">Pages only in B (extra): {result.addedPages.join(", ")}.</p>}
+              {result.removedPages.length > 0 && <p className="text-sm font-semibold text-neutral-600">Pages only in A (missing from B): {result.removedPages.join(", ")}.</p>}
+              {result.textlessPages.length > 0 && <p className="text-sm font-semibold text-neutral-600">Pages with no extractable text — compare visually: {result.textlessPages.join(", ")}.</p>}
+              {changedPages.length > 0 ? (
+                <div className="grid gap-3">
+                  {changedPages.map((entry) => (
+                    <div key={entry.page} className="surface-muted wabi-card-edge grid gap-2 p-3">
+                      <p className="text-sm font-black text-[var(--foreground)]">Page {entry.page} — +{entry.added} / -{entry.removed} line(s)</p>
+                      <pre className="max-h-64 overflow-auto rounded-xl border border-[var(--border)] bg-[var(--paper-soft)] px-3 py-2 text-xs leading-5 whitespace-pre-wrap break-words">
+                        {entry.rows
+                          .filter((row) => row.type !== "same")
+                          .slice(0, 60)
+                          .map((row, index) => (
+                            <div key={index} className={row.type === "added" ? "text-[#31631f] [.dark_&]:text-[#bfe3b0]" : "text-red-700 [.dark_&]:text-[#f8b4b4]"}>
+                              {row.type === "added" ? `+ ${row.right}` : `- ${row.left}`}
+                            </div>
+                          ))}
+                        {entry.rows.filter((row) => row.type !== "same").length > 60 ? <div className="text-neutral-500">… more in the .txt report</div> : null}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm font-semibold text-neutral-500">No line-level text differences — the pages that differ are text-less or exist on only one side. See the visual diff below.</p>
+              )}
+            </div>
+
+            {diffs.length > 0 && (
+              <div className="surface-card wabi-card-edge grid gap-3 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-black">Visual diff</p>
+                  <SecondaryButton label={diffs.length === 1 ? "Download image" : "Download all (zip)"} onClick={async () => {
+                    if (diffs.length === 1) {
+                      downloadBlob(diffs[0].blob, `myfilekit-visual-diff-page-${diffs[0].page}.png`);
+                      return;
+                    }
+                    const entries: Record<string, Uint8Array> = {};
+                    const width = String(Math.max(...diffs.map((diff) => diff.page))).length;
+                    for (const diff of diffs) {
+                      entries[`visual-diff-page-${String(diff.page).padStart(width, "0")}.png`] = new Uint8Array(await diff.blob.arrayBuffer());
+                    }
+                    const zipped = zipSync(entries, { level: 0 });
+                    const buffer = new ArrayBuffer(zipped.byteLength);
+                    new Uint8Array(buffer).set(zipped);
+                    downloadBlob(new Blob([buffer], { type: "application/zip" }), "myfilekit-visual-diff.zip");
+                  }} />
+                </div>
+                <p className="text-sm font-semibold text-neutral-500">Changed regions are tinted red over a faded grey copy of the revised page.</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {diffs.map((diff) => (
+                    <figure key={diff.page} className="grid gap-2">
+                      <img src={diff.url} alt={`Visual diff of page ${diff.page}`} className="w-full rounded-xl border border-[var(--border)]" loading="lazy" />
+                      <figcaption className="text-xs font-bold text-neutral-500">Page {diff.page} · {diff.changedPixels.toLocaleString()} changed pixel(s)</figcaption>
+                    </figure>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      <ToolMetaPanel status={status} onReset={reset} />
+    </div>
+  );
+}
+
+function DeskewPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [overrideAngle, setOverrideAngle] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+
+  return <ToolForm status={status} onReset={() => { setFiles([]); setOverrideAngle(""); setStatus(initialStatus); }}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Auto-straightens skewed scans. Each page is rasterised, its skew angle is estimated with a projection-profile method (the angle that lines the text rows up into the sharpest horizontal profile), and the page is rotated to correct it. Because it works on rendered pages, the output pages become images — text is no longer selectable. Leave the override blank to auto-detect per page.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Input label="Override angle (degrees)" value={overrideAngle} onChange={setOverrideAngle} placeholder="Auto-detect" helper="Optional. Positive rotates one way, negative the other. Blank = detect each page (-10° to +10°)." />
+    <PrimaryButton label="Deskew PDF" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      let override: number | null = null;
+      if (overrideAngle.trim()) {
+        override = Number(overrideAngle);
+        if (!Number.isFinite(override)) throw new Error("Override angle must be a number, or blank to auto-detect.");
+        if (override < -45 || override > 45) throw new Error("Override angle must be between -45 and 45 degrees.");
+      }
+      const { bytes, angles } = await deskewPdf(file, { overrideAngle: override, onProgress: pageProgress(setStatus, "Straightening") });
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-deskewed`, "pdf"), "application/pdf");
+      const shown = angles.slice(0, 12).map((angle) => `${angle > 0 ? "+" : ""}${angle}°`).join(", ");
+      const suffix = angles.length > 12 ? ", …" : "";
+      return override === null
+        ? `Straightened ${angles.length} page(s). Detected skew: ${shown}${suffix}. Output pages are images (text not selectable).`
+        : `Straightened ${angles.length} page(s) by ${override > 0 ? "+" : ""}${override}°. Output pages are images (text not selectable).`;
+    })} />
+  </ToolForm>;
+}
+
+function PdfaPrepTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [raster, setRaster] = useState(false);
+  const [title, setTitle] = useState("");
+  const [author, setAuthor] = useState("");
+  const [report, setReport] = useState<{ applied: string[]; removed: string[]; conformance: string } | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => { setFiles([]); setRaster(false); setTitle(""); setAuthor(""); setReport(null); setStatus(initialStatus); };
+
+  return <ToolForm status={status} onReset={reset}>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      Best-effort archival hygiene — <strong>not</strong> a certified, veraPDF-validated PDF/A conversion. It adds an sRGB OutputIntent with an embedded ICC profile, writes XMP metadata carrying the PDF/A conformance identifier, sets the document Info, /ID, and /MarkInfo, and strips things PDF/A forbids where it can (JavaScript, auto-run OpenAction, and Launch actions). True PDF/A also needs every font embedded and a strict validation pass, which a browser cannot guarantee — so this does not claim compliance it cannot prove.
+    </div>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <Checkbox label="Guaranteed self-contained (rasterise every page)" checked={raster} onChange={setRaster} />
+    {raster && (
+      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+        Rasterising renders each page to an image, which removes any missing-font or transparency risk — the most reliable client-side path — but makes text non-selectable. You can re-add a searchable text layer afterwards with the OCR / Searchable PDF tool.
+      </div>
+    )}
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Input label="Title (optional)" value={title} onChange={setTitle} placeholder="Document title" />
+      <Input label="Author (optional)" value={author} onChange={setAuthor} placeholder="Author" />
+    </div>
+    <PrimaryButton label="Prepare for archiving" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const originalBytes = new Uint8Array(await file.arrayBuffer());
+      let source = originalBytes;
+      if (raster) {
+        // Refuse encrypted originals with a clear message before rasterising.
+        await assertPdfDecryptable(originalBytes);
+        source = await rasterRebuild(file, { format: "png", onProgress: pageProgress(setStatus, "Rasterising") });
+      }
+      const { bytes, report: prepReport } = await archivalPrepPdf(source, { title: title.trim(), author: author.trim() });
+      if (raster) prepReport.removed.unshift("rasterised all pages (text no longer selectable)");
+      setReport(prepReport);
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-archival`, "pdf"), "application/pdf");
+      return `Prepped for archiving (${prepReport.conformance}). Applied ${prepReport.applied.length} change(s); removed ${prepReport.removed.length} item(s). This is best-effort hygiene, not certified PDF/A.`;
+    })} />
+
+    {report && (
+      <div className="surface-card wabi-card-edge grid gap-3 p-4">
+        <p className="font-black">What was done — {report.conformance}</p>
+        <div className="grid gap-1 text-sm font-semibold text-neutral-600">
+          <p className="text-xs font-black uppercase text-neutral-500">Applied</p>
+          {report.applied.map((item, index) => <p key={index} className="text-[var(--foreground)]">• {item}</p>)}
+        </div>
+        <div className="grid gap-1 text-sm font-semibold text-neutral-600">
+          <p className="text-xs font-black uppercase text-neutral-500">Removed</p>
+          {report.removed.length ? report.removed.map((item, index) => <p key={index} className="text-[var(--foreground)]">• {item}</p>) : <p>Nothing forbidden was found to remove.</p>}
+        </div>
+        <p className="text-sm font-semibold text-neutral-500">Not guaranteed: font embedding, colour-space coverage for every object, transparency flattening, and a validation pass. Verify with a PDF/A validator (e.g. veraPDF) if certification matters.</p>
+      </div>
+    )}
   </ToolForm>;
 }
 
