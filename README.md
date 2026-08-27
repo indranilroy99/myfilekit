@@ -24,7 +24,7 @@
 </p>
 
 [![Version](https://img.shields.io/badge/version-3.13.4-2563eb)](./package.json)
-[![Tests](https://img.shields.io/badge/tests-204%20passing-16a34a)](./tests/core.test.js)
+[![Tests](https://img.shields.io/badge/tests-213%20passing-16a34a)](./tests/core.test.js)
 [![Tools](https://img.shields.io/badge/tools-96%20local-2563eb)](./src/registry/tools.registry.js)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20known%20vulnerabilities-16a34a)](./SECURITY.md)
 
