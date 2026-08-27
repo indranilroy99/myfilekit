@@ -4765,7 +4765,7 @@ test("isNew is boolean everywhere and flags the newest tools", () => {
   const expectedNew = [
     "edit-pdf-text-tool", "annotate-pdf-tool", "compare-pdf-tool", "sign-pdf-tool", "verify-signature-tool",
     "batch-process-tool", "smart-split-pdf-tool", "impose-pdf-tool", "bookmarks-editor-tool",
-    "create-form-tool", "deskew-pdf-tool", "pdfa-prep-tool",
+    "create-form-tool", "deskew-pdf-tool", "pdfa-prep-tool", "sanitize-pdf-tool", "extract-images-tool",
   ];
   for (const id of expectedNew) {
     assert.equal(tools.find((tool) => tool.id === id).isNew, true, `${id} should be isNew`);
@@ -4864,4 +4864,248 @@ test("Input/Label primitives mirror the app's .field-input look", () => {
   assert.doesNotMatch(inputSource, /bg-background/); // the old divergent look is gone
   assert.match(inputSource, /field-input/);          // comment noting the mirror
   assert.match(labelSource, /field-input/);
+});
+
+// --- Sanitize PDF -------------------------------------------------------------
+
+// Builds a PDF carrying every active-content threat Sanitize is meant to strip:
+// a JavaScript /OpenAction, a /Names /JavaScript name tree, a catalog /AA, a
+// /Launch action on a link annotation, and an embedded file attachment.
+async function buildActiveContentPdf() {
+  const { PDFDocument, PDFName, PDFString } = window.PDFLib;
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([300, 300]);
+  const ctx = pdf.context;
+
+  const openAction = ctx.obj({ S: "JavaScript", JS: PDFString.of("app.alert('open');") });
+  pdf.catalog.set(PDFName.of("OpenAction"), ctx.register(openAction));
+
+  const wcAction = ctx.obj({ S: "JavaScript", JS: PDFString.of("this.print();") });
+  pdf.catalog.set(PDFName.of("AA"), ctx.obj({ WC: ctx.register(wcAction) }));
+
+  const nameTreeAction = ctx.obj({ S: "JavaScript", JS: PDFString.of("doc.evil();") });
+  const nameTree = ctx.obj({ Names: [PDFString.of("Doc"), ctx.register(nameTreeAction)] });
+
+  const fileStream = ctx.flateStream("secret attachment payload", { Type: "EmbeddedFile" });
+  const spec = ctx.obj({ Type: "Filespec", F: PDFString.of("payload.bin"), UF: PDFString.of("payload.bin"), EF: { F: ctx.register(fileStream) } });
+  const specRef = ctx.register(spec);
+
+  const namesDict = ctx.obj({});
+  namesDict.set(PDFName.of("JavaScript"), ctx.register(nameTree));
+  namesDict.set(PDFName.of("EmbeddedFiles"), ctx.obj({ Names: [PDFString.of("payload.bin"), specRef] }));
+  pdf.catalog.set(PDFName.of("Names"), ctx.register(namesDict));
+
+  const launch = ctx.obj({ S: "Launch", Win: ctx.obj({ F: PDFString.of("cmd.exe /c calc.exe") }) });
+  const annot = ctx.obj({ Type: "Annot", Subtype: "Link", Rect: [0, 0, 20, 20], A: ctx.register(launch) });
+  page.node.set(PDFName.of("Annots"), ctx.obj([ctx.register(annot)]));
+
+  return pdf.save({ useObjectStreams: false });
+}
+
+function countFilespecs(pdf) {
+  const { PDFName, PDFDict, PDFRawStream } = window.PDFLib;
+  let filespecs = 0;
+  let embeddedStreams = 0;
+  for (const [, obj] of pdf.context.enumerateIndirectObjects()) {
+    if (obj instanceof PDFDict && String(obj.get(PDFName.of("Type"))) === "/Filespec") filespecs += 1;
+    if (obj instanceof PDFRawStream && String(obj.dict?.get?.(PDFName.of("Type"))) === "/EmbeddedFile") embeddedStreams += 1;
+  }
+  return { filespecs, embeddedStreams };
+}
+
+test("sanitize: strips OpenAction, /AA, /Names JavaScript, Launch action, and attachments — and the Analyser agrees", async () => {
+  const { sanitizePdf, residualActiveContent } = await import("../src/services/pdf-sanitize.service.js");
+  const { PDFDocument, PDFName, PDFDict } = window.PDFLib;
+  const src = await buildActiveContentPdf();
+
+  // The Analyser sees the threats before sanitising.
+  const before = residualActiveContent(await analyzePdfBytes(src));
+  assert.ok(before.length > 0, "Analyser flags active content in the source");
+
+  const { bytes, report } = await sanitizePdf(src, { removeAttachments: true });
+
+  // The removal report counts each category.
+  assert.equal(report.counts.openAction, 1);
+  assert.equal(report.counts.documentJavaScript, 1);
+  assert.ok(report.counts.additionalActions >= 1, "catalog /AA counted");
+  assert.ok(report.counts.actionScripts >= 1, "JavaScript/Launch actions counted");
+  assert.equal(report.counts.embeddedFiles, 1);
+  assert.equal(report.clean, false);
+  assert.ok(report.total >= 5);
+
+  // Reloading with pdf-lib shows every entry is gone.
+  const out = await PDFDocument.load(bytes);
+  assert.equal(out.catalog.get(PDFName.of("OpenAction")), undefined);
+  assert.equal(out.catalog.get(PDFName.of("AA")), undefined);
+  const names = out.context.lookup(out.catalog.get(PDFName.of("Names")));
+  if (names instanceof PDFDict) {
+    assert.equal(names.get(PDFName.of("JavaScript")), undefined);
+    assert.equal(names.get(PDFName.of("EmbeddedFiles")), undefined);
+  }
+  assert.deepEqual(countFilespecs(out), { filespecs: 0, embeddedStreams: 0 }, "attachment objects removed");
+
+  // The Analyser and Sanitize agree: re-analysing the output reports none of them.
+  const after = residualActiveContent(await analyzePdfBytes(bytes));
+  assert.equal(after.length, 0, `no residual active content, got: ${after.map((f) => f.indicator).join(", ")}`);
+});
+
+test("sanitize: a clean PDF reports nothing to remove", async () => {
+  const { sanitizePdf } = await import("../src/services/pdf-sanitize.service.js");
+  const { PDFDocument } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  doc.addPage([200, 200]);
+  const { report } = await sanitizePdf(await doc.save());
+  assert.equal(report.clean, true);
+  assert.equal(report.total, 0);
+  assert.deepEqual(report.removed, []);
+});
+
+test("sanitize: refuses an encrypted PDF with a friendly message", async () => {
+  const { sanitizePdf } = await import("../src/services/pdf-sanitize.service.js");
+  const { PDFDocument } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  doc.addPage([200, 200]);
+  const { bytes } = await pdfCrypto.encryptPdf(new File([await doc.save()], "s.pdf", { type: "application/pdf" }), { userPassword: "pw" });
+  await assert.rejects(() => sanitizePdf(bytes), /encrypted/i);
+});
+
+test("sanitize: keep-attachments keeps the embedded file while still stripping JavaScript", async () => {
+  const { sanitizePdf } = await import("../src/services/pdf-sanitize.service.js");
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const { bytes, report } = await sanitizePdf(await buildActiveContentPdf(), { removeAttachments: false });
+
+  assert.equal(report.counts.embeddedFiles, 0, "no attachment removed");
+  assert.ok(report.counts.actionScripts >= 1, "JavaScript still stripped");
+  assert.equal(report.counts.openAction, 1);
+
+  const out = await PDFDocument.load(bytes);
+  assert.equal(out.catalog.get(PDFName.of("OpenAction")), undefined, "OpenAction still stripped");
+  assert.equal(countFilespecs(out).filespecs, 1, "attachment kept");
+});
+
+// --- Extract Images & Attachments --------------------------------------------
+
+// A recognisable, byte-controlled "JPEG" (SOI + payload + EOI). The extractor
+// treats DCTDecode image XObjects as opaque JPEG bytes and copies them verbatim.
+const SOURCE_JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 10, 20, 30, 40, 50, 60, 0xff, 0xd9]);
+
+async function buildAssetPdf() {
+  const { PDFDocument, PDFName, PDFString } = window.PDFLib;
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([200, 200]);
+  const ctx = pdf.context;
+
+  const jpegDict = { Type: "XObject", Subtype: "Image", Width: 4, Height: 1, ColorSpace: "DeviceRGB", BitsPerComponent: 8, Filter: "DCTDecode" };
+  const jpeg1 = ctx.register(ctx.stream(SOURCE_JPEG, jpegDict));
+  const jpeg2 = ctx.register(ctx.stream(SOURCE_JPEG.slice(), jpegDict)); // identical → must de-dupe
+
+  const rgbSamples = new Uint8Array([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0]); // 2×2 RGB
+  const flateImg = ctx.register(ctx.flateStream(rgbSamples, { Type: "XObject", Subtype: "Image", Width: 2, Height: 2, ColorSpace: "DeviceRGB", BitsPerComponent: 8 }));
+
+  page.node.set(PDFName.of("Resources"), ctx.obj({ XObject: ctx.obj({ Im0: jpeg1, Im1: jpeg2, Im2: flateImg }) }));
+
+  const fileStream = ctx.flateStream("hello attachment", { Type: "EmbeddedFile" });
+  const spec = ctx.obj({ Type: "Filespec", F: PDFString.of("notes.txt"), UF: PDFString.of("notes.txt"), EF: { F: ctx.register(fileStream) } });
+  pdf.catalog.set(PDFName.of("Names"), ctx.obj({ EmbeddedFiles: { Names: [PDFString.of("notes.txt"), ctx.register(spec)] } }));
+
+  return pdf.save({ useObjectStreams: false });
+}
+
+test("extract: pulls embedded JPEG + attachment, de-dupes, rebuilds Flate raster to PNG, and zips them", async () => {
+  const { extractPdfAssets, buildExtractionZip } = await import("../src/services/pdf-extract.service.js");
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const result = await extractPdfAssets(await buildAssetPdf());
+
+  assert.equal(result.counts.imageXObjects, 3, "three image XObjects seen");
+  assert.equal(result.images.length, 2, "identical JPEG de-duplicated to one, plus the PNG");
+
+  const jpeg = result.images.find((image) => image.mime === "image/jpeg");
+  assert.ok(jpeg, "a JPEG was extracted");
+  assert.deepEqual(jpeg.bytes, SOURCE_JPEG, "JPEG bytes copied verbatim");
+  assert.match(jpeg.name, /^image-\d+\.jpg$/);
+
+  const png = result.images.find((image) => image.mime === "image/png");
+  assert.ok(png, "a PNG was rebuilt from FlateDecode raster");
+  assert.deepEqual([...png.bytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], "valid PNG signature");
+
+  assert.equal(result.attachments.length, 1);
+  assert.equal(result.attachments[0].name, "notes.txt");
+  assert.equal(strFromU8(result.attachments[0].bytes), "hello attachment");
+
+  const entries = unzipSync(buildExtractionZip(result));
+  assert.deepEqual(entries[`images/${jpeg.name}`], SOURCE_JPEG, "zip carries the JPEG bytes");
+  assert.equal(strFromU8(entries["attachments/notes.txt"]), "hello attachment", "zip carries the attachment");
+});
+
+test("extract: a PDF with no embedded images or attachments is reported clearly", async () => {
+  const { extractPdfAssets, buildExtractionZip } = await import("../src/services/pdf-extract.service.js");
+  const { PDFDocument } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  doc.addPage([200, 200]);
+  const result = await extractPdfAssets(await doc.save());
+  assert.equal(result.counts.imageXObjects, 0);
+  assert.equal(result.images.length, 0);
+  assert.equal(result.attachments.length, 0);
+  assert.throws(() => buildExtractionZip(result), /nothing to bundle/);
+});
+
+// --- Workflow presets ---------------------------------------------------------
+
+test("workflow presets map to non-empty step lists whose op ids all exist, with every field filled", async () => {
+  const business = await import("../src/services/business.service.js");
+  assert.ok(business.WORKFLOW_PRESETS.length >= 6, "the six requested presets exist");
+  for (const preset of business.WORKFLOW_PRESETS) {
+    const steps = business.presetSteps(preset.id);
+    assert.ok(Array.isArray(steps) && steps.length > 0, `${preset.id} has a non-empty step list`);
+    for (const step of steps) {
+      assert.equal(Object.hasOwn(business.WORKFLOW_OPS, step.op), true, `${preset.id} → op "${step.op}" exists in WORKFLOW_OPS`);
+      // Every field the op declares has a value in the pre-filled step.
+      for (const field of business.WORKFLOW_OPS[step.op].fields) {
+        assert.ok(step.options[field.key] !== undefined, `${preset.id} → ${step.op}.${field.key} is filled`);
+      }
+    }
+  }
+  assert.throws(() => business.presetSteps("no-such-preset"), /not a known workflow preset/);
+  // The new ops backing the presets are registered.
+  const opIds = business.workflowOpList().map((op) => op.id);
+  for (const id of ["sanitize", "standardize", "bates", "pdfa"]) assert.ok(opIds.includes(id), `${id} op registered`);
+});
+
+test("workflow preset runs end-to-end through runWorkflow", async () => {
+  const business = await import("../src/services/business.service.js");
+  const { PDFDocument } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  doc.addPage([200, 200]);
+  const source = new File([await doc.save()], "doc.pdf", { type: "application/pdf" });
+
+  // "Print Ready" = standardize A4 + page numbers, both pure pdf-lib (no raster).
+  const result = await business.runWorkflow(source, business.presetSteps("print-ready"));
+  assert.equal(result.ok, true, result.failed ? result.failed.message : "");
+  assert.equal(result.completed.length, 2);
+
+  const out = await PDFDocument.load(result.bytes);
+  const { width, height } = out.getPage(0).getSize();
+  assert.ok(Math.abs(width - 595.28) < 1 && Math.abs(height - 841.89) < 1, "standardized to A4");
+});
+
+test("Sanitize PDF and Extract Images tools are registered, routed, and wired", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+
+  const sanitize = tools.find((tool) => tool.id === "sanitize-pdf-tool");
+  assert.ok(sanitize, "sanitize-pdf-tool registered");
+  assert.equal(sanitize.category, "Security & Privacy");
+  assert.equal(sanitize.group, "Secure");
+  assert.equal(sanitize.status, "available");
+  assert.equal(sanitize.localProcessing, true);
+  assert.equal(routeForHash(sanitize.route).tool.id, "sanitize-pdf-tool");
+  assert.ok(appSource.includes('"sanitize-pdf-tool"'), "sanitize wired into ToolRenderer");
+
+  const extract = tools.find((tool) => tool.id === "extract-images-tool");
+  assert.ok(extract, "extract-images-tool registered");
+  assert.equal(extract.category, "PDF Tools");
+  assert.equal(extract.group, "Organize");
+  assert.equal(extract.status, "available");
+  assert.equal(extract.localProcessing, true);
+  assert.equal(routeForHash(extract.route).tool.id, "extract-images-tool");
+  assert.ok(appSource.includes('"extract-images-tool"'), "extract wired into ToolRenderer");
 });

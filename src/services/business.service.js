@@ -6,8 +6,11 @@
 // (no 0.01 drift), and every pure function is unit-testable in Node.
 
 import { getPdfLib, loadPdf, addPdfPageNumbers, cleanPdfMetadata, extractPdfPages, rotatePdfPages, watermarkPdf } from "./pdf.service.js";
-import { organizePdfPages } from "./pdf-edit.service.js";
+import { organizePdfPages, cropResizePdf } from "./pdf-edit.service.js";
 import { compressPdf, flattenPdf, invertPdf } from "./pdf-render.service.js";
+import { archivalPrepPdf } from "./pdf-review.service.js";
+import { batesNumberPdf } from "./pdf-advanced.service.js";
+import { sanitizePdf } from "./pdf-sanitize.service.js";
 import { loadXlsx } from "./office.service.js";
 import { parseCsv } from "./csv.service.js";
 import { parsePageRanges } from "../utils/format.js";
@@ -1005,7 +1008,71 @@ export const WORKFLOW_OPS = {
     fields: [{ key: "dpi", label: "DPI", type: "select", options: ["120", "150", "200"], default: "150" }],
     run: (file, options) => invertPdf(file, { dpi: Number(options.dpi || 150) }),
   },
+  sanitize: {
+    label: "Sanitize (strip active content)",
+    hint: "Remove OpenAction, /AA, JavaScript, Launch/SubmitForm actions, and attachments.",
+    fields: [{ key: "attachments", label: "Attachments", type: "select", options: ["remove", "keep"], default: "remove" }],
+    run: async (file, options) => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const result = await sanitizePdf(bytes, { removeAttachments: options.attachments !== "keep" });
+      return result.bytes;
+    },
+  },
+  standardize: {
+    label: "Standardize page size",
+    hint: "Scale every page to a standard sheet size.",
+    fields: [{ key: "size", label: "Size", type: "select", options: ["A4", "Letter", "Legal"], default: "A4" }],
+    run: (file, options) => cropResizePdf(file, { mode: "resize", size: options.size || "A4" }),
+  },
+  bates: {
+    label: "Bates numbering",
+    hint: "Stamp continuous legal Bates numbers on every page.",
+    fields: [
+      { key: "prefix", label: "Prefix", type: "text", placeholder: "ABC", default: "" },
+      { key: "start", label: "Start at", type: "text", placeholder: "1", default: "1" },
+      { key: "padding", label: "Digits", type: "text", placeholder: "6", default: "6" },
+    ],
+    run: (file, options) => batesNumberPdf(file, { prefix: options.prefix || "", start: Number(options.start || 1), padding: Number(options.padding || 6), position: "bottom-right" }),
+  },
+  pdfa: {
+    label: "PDF/A archival prep",
+    hint: "Best-effort archival hygiene: sRGB OutputIntent, PDF/A XMP id, and strip active content.",
+    fields: [],
+    run: async (file) => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const result = await archivalPrepPdf(bytes, {});
+      return result.bytes;
+    },
+  },
 };
+
+/**
+ * One-click Workflow Builder presets. Each maps to a chain of ids that already
+ * exist in WORKFLOW_OPS, so a preset always runs end-to-end through runWorkflow.
+ * The chips only pre-fill steps; the user can still edit them before running.
+ */
+export const WORKFLOW_PRESETS = [
+  { id: "email-ready", label: "Email Ready", hint: "Flatten, then compress to a small, portable file.", steps: [{ op: "flatten", options: { dpi: "150" } }, { op: "compress", options: { quality: "0.6", dpi: "120" } }] },
+  { id: "confidential", label: "Confidential", hint: "Strip active content, clean metadata, and flatten so text is no longer selectable.", steps: [{ op: "sanitize", options: { attachments: "remove" } }, { op: "metadata-clean", options: {} }, { op: "flatten", options: { dpi: "150" } }] },
+  { id: "print-ready", label: "Print Ready", hint: "Standardize to A4, then add page numbers.", steps: [{ op: "standardize", options: { size: "A4" } }, { op: "page-numbers", options: { prefix: "", fontSize: "10" } }] },
+  { id: "archive", label: "Archive", hint: "Best-effort PDF/A archival preparation.", steps: [{ op: "pdfa", options: {} }] },
+  { id: "legal-bates", label: "Legal Bates", hint: "Stamp Bates numbers, then add plain page numbers.", steps: [{ op: "bates", options: { prefix: "", start: "1", padding: "6" } }, { op: "page-numbers", options: { prefix: "Page ", fontSize: "10" } }] },
+  { id: "standardize-a4", label: "Standardize A4", hint: "Scale every page to A4.", steps: [{ op: "standardize", options: { size: "A4" } }] },
+];
+
+/**
+ * Returns the fully-formed step list for a preset id — merging preset overrides
+ * onto each op's field defaults, so every field has a value. Pure. Throws on an
+ * unknown preset or a preset that references an op that does not exist.
+ */
+export function presetSteps(presetId) {
+  const preset = WORKFLOW_PRESETS.find((entry) => entry.id === presetId);
+  if (!preset) throw new Error(`"${presetId}" is not a known workflow preset.`);
+  return preset.steps.map((step) => {
+    if (!Object.hasOwn(WORKFLOW_OPS, step.op)) throw new Error(`Preset "${presetId}" references unknown op "${step.op}".`);
+    return { op: step.op, options: { ...defaultStepOptions(step.op), ...(step.options || {}) } };
+  });
+}
 
 export function workflowOpList() {
   return Object.entries(WORKFLOW_OPS).map(([id, op]) => ({ id, label: op.label, hint: op.hint, browserOnly: Boolean(op.browserOnly), fields: op.fields }));

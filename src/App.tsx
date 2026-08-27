@@ -58,9 +58,11 @@ import { ALL_PERMISSIONS_ALLOWED, PDF_ENCRYPTION_ALGORITHMS, PDF_PERMISSION_LABE
 import { signPdf, verifyPdfSignatures } from "./services/pdf-sign.service.js";
 import { CONFIDENCE as PII_CONFIDENCE, PII_TYPE_LABELS, buildPrivacyReportText, confidenceLabel, extractPdfPiiHits, isPersonalType, scanPdfStructure } from "./services/pii.service.js";
 import { analyzePdfBytes, buildAnalyzerReportText } from "./services/pdf-analyzer.service.js";
+import { sanitizePdf, buildSanitizeReportText, residualActiveContent } from "./services/pdf-sanitize.service.js";
+import { extractPdfAssets, buildExtractionZip } from "./services/pdf-extract.service.js";
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "./services/text-tools.service.js";
 import { canvasToPdf, canvasesToPdf, csvToPdf, markdownToPdf } from "./services/convert.service.js";
-import { STATE_CODES, computeGstInvoice, computePosBill, defaultStepOptions, formatAmount, gstInvoicePdf, gstr1SummaryCsv, gstr1SummaryPdf, gstr1SummaryXlsx, posReceiptPdf, readInvoiceRows, runWorkflow, summariseGstr1, summarisePosSession, workflowOpList } from "./services/business.service.js";
+import { STATE_CODES, WORKFLOW_PRESETS, computeGstInvoice, computePosBill, defaultStepOptions, formatAmount, gstInvoicePdf, gstr1SummaryCsv, gstr1SummaryPdf, gstr1SummaryXlsx, posReceiptPdf, presetSteps, readInvoiceRows, runWorkflow, summariseGstr1, summarisePosSession, workflowOpList } from "./services/business.service.js";
 import { MAX_BATCH_FILES, batchAcceptFor, batchOpList, defaultBatchOptions, runBatch, zipOutputs } from "./services/batch.service.js";
 import { captureVideoFrame, enhanceCanvas, getHtml2Canvas, startCameraStream, stopCameraStream } from "./services/capture.service.js";
 import { docxToHtml, epubToHtml, pptxToSlides, readWorkbookSheets, sanitizeHtmlForOffline, sheetsToHtml } from "./services/office.service.js";
@@ -1170,6 +1172,8 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "auto-redact-pii-tool") return <AutoRedactPiiTool tool={tool} />;
   if (tool.id === "privacy-scanner-tool") return <PrivacyScannerTool tool={tool} />;
   if (tool.id === "pdf-analyzer-tool") return <PdfAnalyzerTool tool={tool} />;
+  if (tool.id === "sanitize-pdf-tool") return <SanitizePdfTool tool={tool} />;
+  if (tool.id === "extract-images-tool") return <ExtractImagesTool tool={tool} />;
   if (tool.id === "create-pdf-tool") return <CreatePdfTool />;
   if (tool.id === "repair-pdf-tool") return <RepairPdfTool tool={tool} />;
   if (tool.id === "fingerprint-pdf-tool") return <FingerprintPdfTool tool={tool} />;
@@ -3689,6 +3693,168 @@ function PdfAnalyzerTool({ tool }: { tool: Tool }) {
             <p>This reads bytes; it does not run the file. It will miss novel or heavy obfuscation, payloads behind unsupported filters or encryption, exploits that live inside malformed object internals, and anything that only reveals itself when the PDF is opened in a real reader. There is deliberately no numeric "threat score": the findings above are the report, and the call is yours. When in doubt, detonate the file in an isolated sandbox.</p>
           </div>
         </>
+      )}
+    </ToolForm>
+  );
+}
+
+type SanitizeReport = { counts: Record<string, number>; removed: { category: string; label: string; count: number }[]; total: number; clean: boolean; removeAttachments: boolean };
+type SanitizeResult = { bytes: Uint8Array; report: SanitizeReport; before: number; residual: AnalyzerFinding[] };
+
+function SanitizePdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [removeAttachments, setRemoveAttachments] = useState(true);
+  const [result, setResult] = useState<SanitizeResult | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => { setFiles([]); setRemoveAttachments(true); setResult(null); setStatus(initialStatus); };
+
+  const filename = files.length ? withExtension(`${safeFilename(files[0].name)}-sanitized`, "pdf") : "sanitized.pdf";
+
+  return (
+    <ToolForm status={status} onReset={reset}>
+      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+        The active counterpart to the PDF Analyser. It opens the PDF and removes active-content threats at the object level — document open actions, additional actions, JavaScript, Launch/SubmitForm/ImportData actions, embedded files, and RichMedia/3D/movie annotations — then reports exactly what it stripped. It removes the same categories the Analyser flags, so re-analysing the cleaned file reports none of them. Everything happens in this browser.
+      </div>
+      <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setResult(null); setStatus(initialStatus); }} />
+      <Checkbox label="Remove embedded files / attachments" checked={removeAttachments} onChange={(value) => { setRemoveAttachments(value); setResult(null); }} />
+
+      <PrimaryButton label="Sanitize PDF" onClick={() => runSafely(setStatus, async () => {
+        const [file] = validateFiles(files, tool.file);
+        const inputBytes = new Uint8Array(await file.arrayBuffer());
+        setStatus({ tone: "idle", message: "Scanning for active content…", progress: { value: 1, total: 3, label: "Analysing original" } });
+        const beforeReport = (await analyzePdfBytes(inputBytes)) as AnalyzerReport;
+        const beforeActive = residualActiveContent(beforeReport);
+        setStatus({ tone: "idle", message: "Stripping active content…", progress: { value: 2, total: 3, label: "Sanitising" } });
+        const { bytes, report } = await sanitizePdf(inputBytes, { removeAttachments });
+        setStatus({ tone: "idle", message: "Verifying with the Analyser…", progress: { value: 3, total: 3, label: "Re-analysing" } });
+        const afterReport = (await analyzePdfBytes(bytes)) as AnalyzerReport;
+        const residual = residualActiveContent(afterReport);
+        setResult({ bytes, report: report as SanitizeReport, before: beforeActive.length, residual });
+        if (report.clean) return "Nothing to remove — no active-content threats were found. A clean, re-saved copy is ready.";
+        return `Removed ${report.total} active-content item${report.total === 1 ? "" : "s"}. The Analyser now reports ${residual.length} active-content indicator${residual.length === 1 ? "" : "s"} in the output.`;
+      })} />
+
+      {result && (
+        <>
+          <div className="surface-card wabi-card-edge grid gap-3 p-4">
+            <p className="font-black">Removal report</p>
+            {result.report.clean ? (
+              <p className="text-sm font-semibold text-neutral-600">Nothing to remove — this PDF carried no OpenAction, additional actions, JavaScript, launch/submit actions, embedded files, or multimedia annotations. A re-saved copy is ready below.</p>
+            ) : (
+              <ul className="grid gap-1 text-sm font-semibold text-neutral-600">
+                {result.report.removed.map((item) => (
+                  <li key={item.category} className="flex items-center justify-between gap-3 border-b border-[var(--border)] pb-1 last:border-b-0">
+                    <span className="text-[var(--foreground)]">{item.label}</span>
+                    <span className="tabular-nums font-black">{item.count}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className={`wabi-card-edge grid gap-1 rounded-2xl border p-3 text-sm font-semibold ${result.residual.length ? verdictTone("caution") : verdictTone("clean")}`}>
+              <p className="text-xs font-black uppercase tracking-wide">Cross-check with the PDF Analyser</p>
+              <p>Active-content indicators: {result.before} before → {result.residual.length} after.</p>
+              {result.residual.length > 0 && (
+                <p>Residual (could not be removed — likely inside an encrypted or unusual stream): {result.residual.map((finding) => finding.indicator).join(", ")}.</p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <SecondaryButton label="Download .txt report" onClick={() => {
+                if (!files.length) throw new Error("Sanitize a file first.");
+                downloadText(buildSanitizeReportText(result.report, { fileName: files[0].name }), `${safeFilename(files[0].name)}-sanitize-report`, "txt");
+              }} />
+            </div>
+          </div>
+          <PrimaryButton label="Download sanitized PDF" onClick={() => runSafely(setStatus, async () => {
+            downloadBytes(result.bytes, filename, "application/pdf");
+            return `${filename} downloaded.`;
+          })} />
+          {status.tone === "success" && <ResultConsequenceNote>Sanitizing rewrites the file to drop active content; it does not decode or neutralise an exploit hidden inside an image, font, or encrypted stream. For an untrusted file, still triage it with the PDF Analyser and detonate in a sandbox when in doubt.</ResultConsequenceNote>}
+        </>
+      )}
+    </ToolForm>
+  );
+}
+
+type ExtractResult = {
+  images: { name: string; bytes: Uint8Array; mime: string; kind: string }[];
+  attachments: { name: string; bytes: Uint8Array; size: number }[];
+  skipped: { reason: string; width?: number; height?: number; filters?: string[] }[];
+  counts: { imageXObjects: number; extractedImages: number; attachments: number; skipped: number };
+};
+
+function ExtractImagesTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [result, setResult] = useState<ExtractResult | null>(null);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => { setFiles([]); setResult(null); setStatus(initialStatus); };
+
+  const zipName = files.length ? withExtension(`${safeFilename(files[0].name)}-extracted`, "zip") : "extracted.zip";
+
+  return (
+    <ToolForm status={status} onReset={reset}>
+      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+        Pulls out the raster images and file attachments actually stored inside a PDF — not page renders. JPEG (DCTDecode) images are saved byte-for-byte as .jpg; FlateDecode raster is rebuilt as lossless PNG. Repeated images are de-duplicated, attachment names are sanitized, and anything in a codec that cannot be extracted losslessly is listed rather than guessed at.
+      </div>
+      <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setResult(null); setStatus(initialStatus); }} />
+
+      <PrimaryButton label="Extract" onClick={() => runSafely(setStatus, async () => {
+        const [file] = validateFiles(files, tool.file);
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const extracted = (await extractPdfAssets(bytes, {
+          onProgress: (done: number, total: number) => setStatus({ tone: "idle", message: `Decoding images ${done} of ${total}…`, progress: { value: done, total: Math.max(total, 1), label: "Extracting" } }),
+        })) as ExtractResult;
+        setResult(extracted);
+        if (!extracted.images.length && !extracted.attachments.length) {
+          return extracted.counts.imageXObjects > 0
+            ? `No images could be extracted losslessly — ${extracted.counts.skipped} image${extracted.counts.skipped === 1 ? "" : "s"} use an unsupported codec (see below).`
+            : "This PDF has no embedded raster images or file attachments to extract.";
+        }
+        return `Found ${extracted.images.length} image${extracted.images.length === 1 ? "" : "s"} and ${extracted.attachments.length} attachment${extracted.attachments.length === 1 ? "" : "s"}.`;
+      })} />
+
+      {result && (
+        <div className="surface-card wabi-card-edge grid gap-3 p-4">
+          <p className="font-black">Extraction summary</p>
+          <dl className="grid gap-2 text-sm font-semibold text-neutral-600 sm:grid-cols-2">
+            <InfoRow label="Image XObjects found" value={String(result.counts.imageXObjects)} />
+            <InfoRow label="Images extracted" value={String(result.counts.extractedImages)} />
+            <InfoRow label="Attachments" value={String(result.counts.attachments)} />
+            <InfoRow label="Skipped (unsupported)" value={String(result.counts.skipped)} />
+          </dl>
+          {result.images.length > 0 && (
+            <div className="grid gap-1 text-sm font-semibold text-neutral-600">
+              <p className="text-xs font-black uppercase text-neutral-500">Images</p>
+              <ul className="grid gap-1">
+                {result.images.map((image) => <li key={image.name} className="flex flex-wrap items-center justify-between gap-2"><span className="break-words text-[var(--foreground)]">{image.name}</span><span className="text-xs text-neutral-500">{image.kind} · {formatBytes(image.bytes.length)}</span></li>)}
+              </ul>
+            </div>
+          )}
+          {result.attachments.length > 0 && (
+            <div className="grid gap-1 text-sm font-semibold text-neutral-600">
+              <p className="text-xs font-black uppercase text-neutral-500">Attachments</p>
+              <ul className="grid gap-1">
+                {result.attachments.map((attachment) => <li key={attachment.name} className="flex flex-wrap items-center justify-between gap-2"><span className="break-words text-[var(--foreground)]">{attachment.name}</span><span className="text-xs text-neutral-500">{formatBytes(attachment.size)}</span></li>)}
+              </ul>
+            </div>
+          )}
+          {result.skipped.length > 0 && (
+            <div className="grid gap-1 text-sm font-semibold text-neutral-600">
+              <p className="text-xs font-black uppercase text-neutral-500">Skipped</p>
+              <ul className="grid gap-1">
+                {result.skipped.map((entry, index) => <li key={index} className="break-words text-neutral-500">{entry.width && entry.height ? `${entry.width}×${entry.height}: ` : ""}{entry.reason}</li>)}
+              </ul>
+            </div>
+          )}
+          {(result.images.length > 0 || result.attachments.length > 0) && (
+            <PrimaryButton label="Download ZIP" onClick={() => runSafely(setStatus, async () => {
+              const zipped = buildExtractionZip(result);
+              downloadBytes(zipped, zipName, "application/zip");
+              return `${zipName} downloaded (${result.images.length + result.attachments.length} file${result.images.length + result.attachments.length === 1 ? "" : "s"}).`;
+            })} />
+          )}
+        </div>
       )}
     </ToolForm>
   );
@@ -7412,6 +7578,7 @@ type WorkflowStep = { op: string; options: Record<string, string> };
 const workflowOps = workflowOpList() as { id: string; label: string; hint: string; browserOnly: boolean; fields: { key: string; label: string; type: string; options?: string[]; placeholder?: string }[] }[];
 const workflowOpIds = workflowOps.map((op) => op.id);
 const workflowOpLabels = workflowOps.map((op) => `${op.label}${op.browserOnly ? " (rasterises pages)" : ""}`);
+const workflowPresets = WORKFLOW_PRESETS as { id: string; label: string; hint: string; steps: { op: string; options: Record<string, string> }[] }[];
 
 function WorkflowBuilderTool({ tool }: { tool: Tool }) {
   const [files, setFiles] = useState<File[]>([]);
@@ -7439,6 +7606,23 @@ function WorkflowBuilderTool({ tool }: { tool: Tool }) {
       Chain PDF operations over one file: each step's output PDF becomes the next step's input. Steps marked "rasterises pages" turn text into page images, so put them last if you want selectable text earlier in the chain. Merge is not available here because it needs more than one input file.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setOutput(null); setProgress([]); }} />
+
+    <div className="grid gap-2">
+      <p className="text-xs font-black uppercase text-neutral-500">Presets — one click fills a chain you can still edit</p>
+      <div className="flex flex-wrap gap-2">
+        {workflowPresets.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            className="quick-chip"
+            title={preset.hint}
+            onClick={() => { setSteps(presetSteps(preset.id) as WorkflowStep[]); setOutput(null); setProgress([]); setStatus({ tone: "idle", message: `Loaded the "${preset.label}" preset. Edit the steps or run the workflow.` }); }}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+    </div>
 
     <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
       <Select label="Add a step" value={nextOp} onChange={setNextOp} options={workflowOpIds} labels={workflowOpLabels} />
