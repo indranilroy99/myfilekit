@@ -8,25 +8,25 @@
   <title>Invoice Studio - MyFileKit</title>
   <style>
     :root {
-      --ink: #15120e;
-      --muted: #6b665e;
-      --soft: #f7f4ee;
-      --paper: #fffdf8;
-      --line: #ddd4c5;
-      --accent: #0f5b55;
-      --accent-2: #b48a3b;
-      --accent-05: rgba(15, 91, 85, .05);
-      --accent-07: rgba(15, 91, 85, .07);
-      --accent-09: rgba(15, 91, 85, .09);
-      --accent-10: rgba(15, 91, 85, .1);
-      --accent-12: rgba(15, 91, 85, .12);
-      --accent-13: rgba(15, 91, 85, .13);
-      --accent-24: rgba(15, 91, 85, .24);
-      --accent-2-12: rgba(180, 138, 59, .12);
-      --accent-2-55: rgba(180, 138, 59, .55);
-      --title-badge-color: rgba(15, 91, 85, .22);
-      --danger: #a83d32;
-      --shadow: 0 24px 70px rgba(32, 26, 17, .16);
+      --ink: #0f172a;
+      --muted: #64748b;
+      --soft: #f1f5f9;
+      --paper: #ffffff;
+      --line: #e2e8f0;
+      --accent: #3b82f6;
+      --accent-2: #64748b;
+      --accent-05: rgba(59, 130, 246, .05);
+      --accent-07: rgba(59, 130, 246, .07);
+      --accent-09: rgba(59, 130, 246, .09);
+      --accent-10: rgba(59, 130, 246, .1);
+      --accent-12: rgba(59, 130, 246, .12);
+      --accent-13: rgba(59, 130, 246, .13);
+      --accent-24: rgba(59, 130, 246, .24);
+      --accent-2-12: rgba(100, 116, 139, .12);
+      --accent-2-55: rgba(100, 116, 139, .55);
+      --title-badge-color: rgba(59, 130, 246, .22);
+      --danger: #dc2626;
+      --shadow: 0 20px 50px rgba(15, 23, 42, .1);
       --radius: 8px;
       --invoice-font-scale: 1;
     }
@@ -40,9 +40,8 @@
       color: var(--ink);
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background:
-        linear-gradient(120deg, rgba(15, 91, 85, .11), transparent 34%),
-        linear-gradient(240deg, rgba(180, 138, 59, .13), transparent 36%),
-        #eee8dd;
+        radial-gradient(1100px 560px at 12% -12%, rgba(59, 130, 246, .06), transparent 60%),
+        #eef2f7;
       min-height: 100vh;
       overflow-x: hidden;
     }
@@ -79,15 +78,15 @@
       overflow: auto;
       border: 1px solid rgba(221, 212, 197, .85);
       border-radius: var(--radius);
-      background: rgba(255, 253, 248, .82);
-      box-shadow: 0 18px 44px rgba(40, 31, 20, .1);
+      background: rgba(255, 255, 255, .82);
+      box-shadow: 0 18px 44px rgba(15, 23, 42, .1);
       backdrop-filter: blur(16px);
     }
 
     .panel-head {
       padding: 22px;
       border-bottom: 1px solid var(--line);
-      background: linear-gradient(180deg, rgba(255, 253, 248, .96), rgba(255, 253, 248, .66));
+      background: linear-gradient(180deg, rgba(255, 255, 255, .96), rgba(255, 255, 255, .66));
     }
 
     .back-link {
@@ -120,12 +119,12 @@
       width: 42px;
       height: 42px;
       border-radius: 50%;
-      color: #fffdf8;
+      color: #ffffff;
       font-family: Newsreader, serif;
       font-size: 24px;
       font-weight: 700;
       background: var(--accent);
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,.35), 0 10px 20px rgba(15, 91, 85, .22);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.35), 0 10px 20px rgba(59, 130, 246, .22);
     }
 
     h1 {
@@ -154,9 +153,9 @@
       gap: 10px;
       margin-top: 12px;
       padding: 12px;
-      border: 1px solid rgba(92, 76, 54, .13);
+      border: 1px solid rgba(15, 23, 42, .13);
       border-radius: 18px;
-      background: rgba(255, 253, 248, .72);
+      background: rgba(255, 255, 255, .72);
     }
 
     .export-ready[hidden] {
@@ -202,25 +201,25 @@
     }
 
     .btn-primary {
-      color: #fffdf8;
+      color: #ffffff;
       background: var(--accent);
-      box-shadow: 0 12px 24px rgba(15, 91, 85, .22);
+      box-shadow: 0 12px 24px rgba(59, 130, 246, .22);
     }
 
     .btn-primary:hover {
-      box-shadow: 0 16px 30px rgba(15, 91, 85, .27);
+      box-shadow: 0 16px 30px rgba(59, 130, 246, .27);
     }
 
     .btn-ghost {
       color: var(--ink);
-      background: #efe8da;
-      box-shadow: inset 0 0 0 1px rgba(92, 76, 54, .13);
+      background: #eef1f5;
+      box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .13);
     }
 
     .btn-danger {
       color: var(--danger);
       background: transparent;
-      box-shadow: inset 0 0 0 1px rgba(168, 61, 50, .25);
+      box-shadow: inset 0 0 0 1px rgba(220, 38, 38, .25);
     }
 
     .section {
@@ -276,10 +275,10 @@
     textarea {
       width: 100%;
       min-width: 0;
-      border: 1px solid #d8cfbf;
+      border: 1px solid #e2e8f0;
       border-radius: var(--radius);
       color: var(--ink);
-      background: rgba(255, 253, 248, .85);
+      background: rgba(255, 255, 255, .85);
       outline: none;
       padding: 11px 12px;
       transition: border-color .16s ease, box-shadow .16s ease;
@@ -294,7 +293,7 @@
     select:focus,
     textarea:focus {
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(15, 91, 85, .14);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, .14);
     }
 
     .line-editor {
@@ -308,15 +307,15 @@
       gap: 8px;
       align-items: end;
       padding: 12px;
-      border: 1px solid #ddd4c5;
+      border: 1px solid #e2e8f0;
       border-radius: var(--radius);
-      background: rgba(255, 253, 248, .62);
+      background: rgba(255, 255, 255, .62);
       transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
     }
 
     .item-row.is-drag-over {
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(15, 91, 85, .12);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, .12);
       transform: translateY(-1px);
     }
 
@@ -326,9 +325,9 @@
       gap: 8px;
       align-items: end;
       padding: 12px;
-      border: 1px solid #ddd4c5;
+      border: 1px solid #e2e8f0;
       border-radius: var(--radius);
-      background: rgba(255, 253, 248, .62);
+      background: rgba(255, 255, 255, .62);
     }
 
     .icon-btn {
@@ -338,13 +337,13 @@
       width: 36px;
       border-radius: var(--radius);
       color: var(--danger);
-      background: #f6ebe8;
+      background: #fef2f2;
       font-weight: 900;
     }
 
     .drag-handle {
       color: var(--muted);
-      background: #fffaf0;
+      background: #f8fafc;
       border-style: dashed;
       cursor: grab;
       font-size: 11px;
@@ -373,11 +372,11 @@
       height: 34px;
       border-radius: 50%;
       border: 3px solid var(--paper);
-      box-shadow: 0 0 0 1px rgba(21, 18, 14, .22), 0 8px 16px rgba(21, 18, 14, .1);
+      box-shadow: 0 0 0 1px rgba(15, 23, 42, .22), 0 8px 16px rgba(15, 23, 42, .1);
     }
 
     .swatch.is-active {
-      box-shadow: 0 0 0 2px var(--ink), 0 8px 16px rgba(21, 18, 14, .1);
+      box-shadow: 0 0 0 2px var(--ink), 0 8px 16px rgba(15, 23, 42, .1);
     }
 
     .template-tools {
@@ -393,7 +392,7 @@
       padding: 5px 10px;
       border-radius: 999px;
       color: var(--accent);
-      background: rgba(15, 91, 85, .1);
+      background: rgba(59, 130, 246, .1);
       font-size: 11px;
       font-weight: 900;
       white-space: nowrap;
@@ -416,13 +415,13 @@
       min-height: 76px;
       border-radius: var(--radius);
       color: var(--ink);
-      background: rgba(255, 253, 248, .75);
-      box-shadow: inset 0 0 0 1px #d8cfbf;
+      background: rgba(255, 255, 255, .75);
+      box-shadow: inset 0 0 0 1px #e2e8f0;
       text-align: left;
     }
 
     .template-card.is-active {
-      box-shadow: inset 0 0 0 2px var(--accent), 0 10px 20px rgba(15, 91, 85, .12);
+      box-shadow: inset 0 0 0 2px var(--accent), 0 10px 20px rgba(59, 130, 246, .12);
     }
 
     .template-mini {
@@ -449,7 +448,7 @@
     .template-line.thin {
       height: 3px;
       width: 84%;
-      background: #d8cfbf;
+      background: #e2e8f0;
     }
 
     .template-card span {
@@ -478,9 +477,9 @@
       gap: 8px;
       min-height: 38px;
       padding: 8px 10px;
-      border: 1px solid #d8cfbf;
+      border: 1px solid #e2e8f0;
       border-radius: var(--radius);
-      background: rgba(255, 253, 248, .68);
+      background: rgba(255, 255, 255, .68);
       color: var(--ink);
       font-size: 12px;
       font-weight: 800;
@@ -509,8 +508,8 @@
       padding: 8px 10px;
       border-radius: var(--radius);
       color: var(--ink);
-      background: rgba(255, 253, 248, .7);
-      box-shadow: inset 0 0 0 1px #d8cfbf;
+      background: rgba(255, 255, 255, .7);
+      box-shadow: inset 0 0 0 1px #e2e8f0;
       font-size: 12px;
       font-weight: 900;
     }
@@ -546,7 +545,7 @@
       height: 8px;
       border-radius: 50%;
       background: var(--accent);
-      box-shadow: 0 0 0 5px rgba(15, 91, 85, .12);
+      box-shadow: 0 0 0 5px rgba(59, 130, 246, .12);
     }
 
     .paper-wrap {
@@ -563,10 +562,9 @@
       min-height: 1180px;
       padding: 52px;
       border-radius: var(--radius);
-      color: #1f1a14;
-      background:
-        linear-gradient(90deg, var(--accent) 0 10px, transparent 10px),
-        var(--paper);
+      color: var(--ink);
+      background: var(--paper);
+      border: 1px solid rgba(15, 23, 42, .06);
       box-shadow: var(--shadow);
       position: relative;
       overflow: hidden;
@@ -597,7 +595,7 @@
     }
 
     .invoice.paper-cream {
-      --paper: #fffdf8;
+      --paper: #fbfcfd;
     }
 
     .invoice.density-airy {
@@ -653,9 +651,7 @@
     }
 
     .invoice.layout-classic {
-      background:
-        linear-gradient(90deg, var(--accent) 0 10px, transparent 10px),
-        var(--paper);
+      background: var(--paper);
     }
 
     .invoice.layout-editorial {
@@ -665,22 +661,21 @@
     }
 
     .invoice.layout-editorial .invoice-head {
-      color: #fffdf8;
+      color: #ffffff;
     }
 
-    .invoice.layout-editorial .company-meta,
-    .invoice.layout-editorial .invoice-title strong {
-      color: rgba(255, 253, 248, .78);
+    .invoice.layout-editorial .company-meta {
+      color: rgba(255, 255, 255, .78);
     }
 
     .invoice.layout-editorial .invoice-logo {
       color: var(--accent);
-      background: #fffdf8;
+      background: #ffffff;
     }
 
     .invoice.layout-modern {
       background:
-        linear-gradient(135deg, rgba(15, 91, 85, .13), transparent 38%),
+        linear-gradient(135deg, rgba(59, 130, 246, .13), transparent 38%),
         var(--paper);
     }
 
@@ -704,7 +699,7 @@
 
     .invoice.layout-letterhead .invoice-head {
       padding-top: 20px;
-      border-bottom: 1px solid #dfd5c4;
+      border-bottom: 1px solid #e2e8f0;
       padding-bottom: 28px;
     }
 
@@ -779,7 +774,7 @@
 
     .invoice.layout-luxe {
       background:
-        linear-gradient(180deg, transparent 0 28px, rgba(180, 138, 59, .16) 28px 30px, transparent 30px),
+        linear-gradient(180deg, transparent 0 28px, rgba(100, 116, 139, .16) 28px 30px, transparent 30px),
         var(--paper);
     }
 
@@ -805,22 +800,22 @@
 
     .invoice.layout-stripe .invoice-title {
       text-align: left;
-      color: #fffdf8;
+      color: #ffffff;
       margin-bottom: 30px;
     }
 
     .invoice.layout-stripe .invoice-brand {
-      color: #fffdf8;
+      color: #ffffff;
     }
 
     .invoice.layout-stripe .company-meta,
     .invoice.layout-stripe .invoice-title strong {
-      color: rgba(255, 253, 248, .76);
+      color: rgba(255, 255, 255, .76);
     }
 
     .invoice.layout-stripe .invoice-logo {
       color: var(--accent);
-      background: #fffdf8;
+      background: #ffffff;
     }
 
     .invoice.layout-border {
@@ -854,7 +849,7 @@
       max-width: 760px;
       background:
         linear-gradient(90deg, transparent 0 12px, var(--paper) 12px calc(100% - 12px), transparent calc(100% - 12px)),
-        repeating-linear-gradient(180deg, #d8cfbf 0 1px, transparent 1px 14px),
+        repeating-linear-gradient(180deg, #e2e8f0 0 1px, transparent 1px 14px),
         var(--paper);
     }
 
@@ -876,7 +871,7 @@
     .invoice.layout-blocks .billing-block {
       background: rgba(255, 255, 255, .34);
       padding: 16px;
-      border: 1px solid #dfd5c4;
+      border: 1px solid #e2e8f0;
       border-radius: 8px;
     }
 
@@ -896,7 +891,7 @@
     }
 
     .invoice.table-boxed td {
-      border: 1px solid #e5dccf;
+      border: 1px solid #e2e8f0;
     }
 
     .invoice.table-boxed tr {
@@ -934,7 +929,7 @@
     .invoice-footer {
       margin-top: 36px;
       padding-top: 16px;
-      border-top: 1px solid #dfd5c4;
+      border-top: 1px solid #e2e8f0;
       color: var(--muted);
       font-size: 12px;
       line-height: 1.6;
@@ -1018,7 +1013,7 @@
       width: var(--logo-size, 52px);
       height: var(--logo-size, 52px);
       border-radius: 50%;
-      color: #fffdf8;
+      color: #ffffff;
       background: var(--accent);
       font-family: Newsreader, serif;
       font-size: 26px;
@@ -1031,7 +1026,7 @@
     .invoice-logo.has-image {
       padding: var(--logo-padding, 5px);
       border: 1px solid rgba(0, 0, 0, .08);
-      background: var(--logo-image-bg, #fffdf8);
+      background: var(--logo-image-bg, #ffffff);
     }
 
     .invoice-logo img {
@@ -1074,7 +1069,7 @@
     .client-meta,
     .notes,
     .terms {
-      color: #696054;
+      color: #475569;
       font-size: 13px;
       line-height: 1.65;
       white-space: pre-line;
@@ -1085,11 +1080,36 @@
     }
 
     .invoice-title strong {
-      display: block;
+      display: inline-flex;
+      align-items: center;
       font-size: var(--status-font-size, 12px);
-      color: var(--accent);
-      letter-spacing: 0;
-      margin-bottom: 8px;
+      font-weight: 700;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: var(--soft);
+      padding: 4px 11px;
+      border-radius: 999px;
+      margin-bottom: 12px;
+    }
+
+    .invoice-title strong:empty {
+      display: none;
+    }
+
+    .invoice-title strong.status-paid {
+      color: #166534;
+      background: #dcfce7;
+    }
+
+    .invoice-title strong.status-due {
+      color: #92400e;
+      background: #fef3c7;
+    }
+
+    .invoice-title strong.status-danger {
+      color: #991b1b;
+      background: #fee2e2;
     }
 
     .invoice-title span {
@@ -1191,13 +1211,13 @@
     .meta-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      border-block: 1px solid #dfd5c4;
+      border-block: 1px solid #e2e8f0;
       margin-bottom: 38px;
     }
 
     .meta-cell {
       padding: 18px 20px;
-      border-right: 1px solid #dfd5c4;
+      border-right: 1px solid #e2e8f0;
     }
 
     .meta-cell:last-child {
@@ -1227,8 +1247,8 @@
     }
 
     .billing-block {
-      border-top: 3px solid var(--accent);
-      padding-top: 15px;
+      border-top: 2px solid var(--ink);
+      padding-top: 14px;
     }
 
     .billing-block h3 {
@@ -1246,20 +1266,23 @@
     }
 
     th {
-      color: #fffdf8;
-      background: var(--accent);
+      color: var(--muted);
+      background: var(--soft);
+      border-bottom: 1px solid var(--line);
       font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .04em;
       text-align: left;
       text-transform: uppercase;
-      padding: 12px 14px;
+      padding: 11px 14px;
     }
 
     th:first-child {
-      border-radius: 6px 0 0 6px;
+      border-radius: 6px 0 0 0;
     }
 
     th:last-child {
-      border-radius: 0 6px 6px 0;
+      border-radius: 0 6px 0 0;
       text-align: right;
     }
 
@@ -1271,7 +1294,7 @@
     th:nth-child(2),
     td:nth-child(2) {
       width: 10%;
-      text-align: center;
+      text-align: right;
     }
 
     th:nth-child(3),
@@ -1283,7 +1306,7 @@
     }
 
     td {
-      border-bottom: 1px solid #e5dccf;
+      border-bottom: 1px solid #e2e8f0;
       padding: 16px 14px;
       vertical-align: top;
       font-size: 14px;
@@ -1293,6 +1316,14 @@
     td:nth-child(3),
     td:nth-child(4) {
       white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum" 1;
+    }
+
+    .value,
+    .total-row strong {
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum" 1;
     }
 
     .item-name {
@@ -1337,7 +1368,7 @@
     }
 
     .detail-pill {
-      border-top: 1px solid #dfd5c4;
+      border-top: 1px solid #e2e8f0;
       padding-top: 10px;
     }
 
@@ -1367,7 +1398,7 @@
     }
 
     .totals {
-      border: 1px solid #dfd5c4;
+      border: 1px solid #e2e8f0;
       border-radius: var(--radius);
       overflow: hidden;
     }
@@ -1379,7 +1410,7 @@
       gap: 16px;
       min-height: 44px;
       padding: 13px 16px;
-      border-bottom: 1px solid #dfd5c4;
+      border-bottom: 1px solid #e2e8f0;
       color: var(--muted);
       font-size: 14px;
       line-height: 1.25;
@@ -1404,7 +1435,7 @@
     }
 
     .total-row.grand {
-      color: #fffdf8;
+      color: #ffffff;
       background: var(--accent);
       border-bottom: 0;
       font-size: 17px;
@@ -1412,7 +1443,7 @@
     }
 
     .total-row.grand strong {
-      color: #fffdf8;
+      color: #ffffff;
     }
 
     .invoice.totals-plain .totals {
@@ -1425,7 +1456,7 @@
     .invoice.totals-plain .total-row {
       min-height: 38px;
       padding: 8px 0;
-      border-bottom: 1px solid #dfd5c4;
+      border-bottom: 1px solid #e2e8f0;
       background: transparent;
     }
 
@@ -1467,7 +1498,7 @@
     .signature-caption {
       display: block;
       padding-top: 8px;
-      border-top: 1px solid #cfc5b4;
+      border-top: 1px solid #e2e8f0;
     }
 
     .signature-pad-wrap {
@@ -1478,10 +1509,10 @@
     .signature-pad {
       width: 100%;
       height: 140px;
-      border: 1px solid #d8cfbf;
+      border: 1px solid #e2e8f0;
       border-radius: var(--radius);
-      background: #fffdf8;
-      box-shadow: inset 0 0 0 1px rgba(92, 76, 54, .04);
+      background: #ffffff;
+      box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .04);
       touch-action: none;
     }
 
@@ -1554,9 +1585,7 @@
       .invoice {
         min-height: auto;
         padding: 28px 20px;
-        background:
-          linear-gradient(180deg, var(--accent) 0 8px, transparent 8px),
-          var(--paper);
+        background: var(--paper);
       }
 
       .invoice.layout-sidebar {
@@ -1580,7 +1609,7 @@
 
       .meta-cell {
         border-right: 0;
-        border-bottom: 1px solid #dfd5c4;
+        border-bottom: 1px solid #e2e8f0;
       }
 
       .meta-cell:last-child {
@@ -1601,7 +1630,7 @@
       }
 
       tr {
-        border: 1px solid #e5dccf;
+        border: 1px solid #e2e8f0;
         border-radius: var(--radius);
         margin-bottom: 12px;
         overflow: hidden;
@@ -1611,7 +1640,7 @@
         display: flex;
         justify-content: space-between;
         gap: 18px;
-        border-bottom: 1px solid #ece3d6;
+        border-bottom: 1px solid #eef0f3;
       }
 
       td::before {
@@ -1710,25 +1739,20 @@
 
       <section class="section">
         <div class="section-title">
-          <h2>Templates</h2>
-          <span class="template-count" id="templateCount">540 styles</span>
+          <h2>Template</h2>
         </div>
         <div class="template-tools">
           <div class="field full">
-            <label for="templateSelect">Template Library</label>
+            <label for="templateSelect">Layout</label>
             <select id="templateSelect"></select>
-          </div>
-          <div class="template-actions">
-            <button class="btn btn-ghost mini" id="shuffleTemplatesBtn" type="button">Shuffle</button>
-            <button class="btn btn-ghost mini" id="showMoreTemplatesBtn" type="button">More Designs</button>
           </div>
           <div class="template-preview-row" id="templateCards"></div>
           <div class="grid">
             <div class="field">
               <label for="paperMode">Paper</label>
               <select id="paperMode" data-bind="paperMode">
-                <option value="cream">Warm Cream</option>
-                <option value="white">Pure White</option>
+                <option value="white">White</option>
+                <option value="cream">Soft Grey</option>
               </select>
             </div>
             <label class="toggle-row" for="monoMode">
@@ -2547,36 +2571,20 @@
     ];
 
     const palettes = [
-      { name: "Executive Teal", accent: "#0f5b55", accent2: "#b48a3b", paper: "#fffdf8" },
-      { name: "Cabernet Gold", accent: "#7f2434", accent2: "#c79952", paper: "#fffaf6" },
-      { name: "Graphite Brass", accent: "#30343b", accent2: "#a77d3b", paper: "#fbfaf7" },
-      { name: "Indigo Copper", accent: "#213f75", accent2: "#c38546", paper: "#fbfcff" },
-      { name: "Forest Ledger", accent: "#23543a", accent2: "#ba8d42", paper: "#fbfdf8" },
-      { name: "Charcoal Lime", accent: "#202225", accent2: "#8aa84f", paper: "#ffffff" },
-      { name: "Ocean Steel", accent: "#075c78", accent2: "#8595a3", paper: "#fbfdff" },
-      { name: "Merlot Ink", accent: "#5d2438", accent2: "#7f8a62", paper: "#fffafc" },
-      { name: "Pure Mono", accent: "#111111", accent2: "#686868", paper: "#ffffff" },
-      { name: "Aviation Navy", accent: "#16243f", accent2: "#d9a441", paper: "#fbfcff" },
-      { name: "Studio Clay", accent: "#8b3f2f", accent2: "#355f62", paper: "#fff9f4" },
-      { name: "Sage Legal", accent: "#4e6657", accent2: "#b89b61", paper: "#fcfff9" },
-      { name: "Electric Cyan", accent: "#084c61", accent2: "#00a6a6", paper: "#f9feff" },
-      { name: "Rose Ledger", accent: "#8f2d56", accent2: "#d9b08c", paper: "#fff9fb" }
+      { name: "Classic Blue", accent: "#3b82f6", accent2: "#64748b", paper: "#fbfcfd" },
+      { name: "Slate Navy", accent: "#1e3a5f", accent2: "#64748b", paper: "#fbfcfd" },
+      { name: "Graphite", accent: "#334155", accent2: "#64748b", paper: "#fbfcfd" },
+      { name: "Forest Green", accent: "#15803d", accent2: "#64748b", paper: "#fbfcfd" },
+      { name: "Burgundy", accent: "#9f1239", accent2: "#64748b", paper: "#fbfcfd" }
     ];
 
     const layouts = [
-      { id: "classic", name: "Classic Ledger" },
-      { id: "editorial", name: "Editorial Header" },
-      { id: "modern", name: "Modern Open" },
+      { id: "classic", name: "Classic" },
+      { id: "editorial", name: "Editorial" },
+      { id: "modern", name: "Modern" },
       { id: "letterhead", name: "Letterhead" },
-      { id: "sidebar", name: "Sidebar Pro" },
-      { id: "compact", name: "Compact Sheet" },
-      { id: "minimal", name: "Minimal Line" },
-      { id: "luxe", name: "Luxe Serif" },
-      { id: "stripe", name: "Color Stripe" },
-      { id: "border", name: "Gradient Border" },
-      { id: "stamp", name: "Status Stamp" },
-      { id: "receipt", name: "Receipt Narrow" },
-      { id: "blocks", name: "Modular Blocks" }
+      { id: "sidebar", name: "Sidebar" },
+      { id: "compact", name: "Compact" }
     ];
 
     const treatments = [
@@ -2674,7 +2682,7 @@
       plainTotals: false,
       statusBadgeText: "Due",
       statusBadgeLabel: "",
-      titleBadgeShape: "circle",
+      titleBadgeShape: "none",
       headerStyle: "reference",
       titleAlign: "right",
       titleBadgeSize: 150,
@@ -2775,7 +2783,7 @@
       paletteId: 0,
       layoutId: "classic",
       treatmentId: "balanced",
-      paperMode: "cream",
+      paperMode: "white",
       monoMode: false,
       visible: visibleDefaults,
       customFields: [],
@@ -2793,23 +2801,12 @@
     const dateFormat = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
     function buildTemplates() {
-      const result = [];
-      layouts.forEach((layout) => {
-        palettes.forEach((palette, paletteIndex) => {
-          treatments.forEach((treatment) => {
-            [false, true].forEach((mono) => {
-              result.push({
-                name: `${layout.name} / ${palette.name} / ${treatment.name}${mono ? " / B&W" : ""}`,
-                layoutId: layout.id,
-                paletteId: paletteIndex,
-                treatmentId: treatment.id,
-                mono
-              });
-            });
-          });
-        });
-      });
-      return result;
+      // One template per genuine layout. Accent, paper and B&W are chosen
+      // separately, so the picker reads as a few professional options.
+      return layouts.map((layout) => ({
+        name: layout.name,
+        layoutId: layout.id
+      }));
     }
 
     function nextDate(days) {
@@ -2955,7 +2952,7 @@
     function rgbaFromHex(value, opacity) {
       const hex = String(value || "").replace("#", "");
       const normalized = hex.length === 3 ? hex.split("").map((part) => part + part).join("") : hex;
-      if (!/^[0-9a-f]{6}$/i.test(normalized)) return `rgba(15, 91, 85, ${opacity})`;
+      if (!/^[0-9a-f]{6}$/i.test(normalized)) return `rgba(59, 130, 246, ${opacity})`;
       const red = Number.parseInt(normalized.slice(0, 2), 16);
       const green = Number.parseInt(normalized.slice(2, 4), 16);
       const blue = Number.parseInt(normalized.slice(4, 6), 16);
@@ -3037,6 +3034,15 @@
         maximumFractionDigits: 2
       });
       return moneyFormatters[code].format(Number.isFinite(amount) ? amount : 0);
+    }
+
+    function statusKind(status) {
+      const value = String(status || "").toLowerCase();
+      if (/overdue|cancel|refund|void|declin|reject/.test(value)) return "danger";
+      if (/partial/.test(value)) return "due";
+      if (/paid|approved|final|complete|settled/.test(value)) return "paid";
+      if (/draft/.test(value)) return "neutral";
+      return "due";
     }
 
     function formatDate(value) {
@@ -3232,17 +3238,6 @@
 
       document.getElementById("templateSelect").addEventListener("change", (event) => {
         applyTemplate(numeric(event.target.value));
-        render(true);
-      });
-
-      document.getElementById("showMoreTemplatesBtn").addEventListener("click", () => {
-        state.templatePage = (numeric(state.templatePage) + 1) % Math.ceil(layouts.length / 12);
-        renderTemplateCards();
-        saveState();
-      });
-
-      document.getElementById("shuffleTemplatesBtn").addEventListener("click", () => {
-        applyTemplate(Math.floor(Math.random() * templates.length));
         render(true);
       });
 
@@ -3579,18 +3574,10 @@
       const template = templates[clampIndex(index, templates.length)];
       state.templateIndex = clampIndex(index, templates.length);
       state.layoutId = template.layoutId;
-      state.paletteId = template.paletteId;
-      state.treatmentId = template.treatmentId;
-      state.monoMode = template.mono;
     }
 
     function syncTemplateSelectFromState() {
-      const match = templates.findIndex((template) =>
-        template.layoutId === state.layoutId &&
-        template.paletteId === state.paletteId &&
-        template.treatmentId === state.treatmentId &&
-        template.mono === Boolean(state.monoMode)
-      );
+      const match = templates.findIndex((template) => template.layoutId === state.layoutId);
       state.templateIndex = match >= 0 ? match : state.templateIndex;
       const select = document.getElementById("templateSelect");
       if (select) select.value = state.templateIndex;
@@ -3599,45 +3586,27 @@
     function renderTemplateSelect() {
       const select = document.getElementById("templateSelect");
       select.innerHTML = templates.map((template, index) =>
-        `<option value="${index}">${String(index + 1).padStart(3, "0")} - ${escapeText(template.name)}</option>`
+        `<option value="${index}">${escapeText(template.name)}</option>`
       ).join("");
-      setText("templateCount", `${templates.length}+ styles`);
       syncTemplateSelectFromState();
     }
 
     function renderTemplateCards() {
       const cards = document.getElementById("templateCards");
-      const currentTemplate = templates[state.templateIndex];
-      const treatmentId = currentTemplate ? currentTemplate.treatmentId : state.treatmentId;
-      const pageSize = 12;
-      const page = numeric(state.templatePage);
-      const rotatedLayouts = layouts.slice(page * pageSize).concat(layouts.slice(0, page * pageSize));
-      const featured = rotatedLayouts
-        .map((layout) => templates.find((template) =>
-          template.layoutId === layout.id &&
-          template.paletteId === state.paletteId &&
-          template.treatmentId === treatmentId &&
-          template.mono === state.monoMode
-        ))
-        .filter(Boolean)
-        .slice(0, pageSize);
-
-      if (currentTemplate && !featured.includes(currentTemplate)) featured.unshift(currentTemplate);
-
+      const palette = palettes[state.paletteId] || palettes[0];
+      const accent = state.monoMode ? "#111111" : palette.accent;
       cards.innerHTML = "";
-      featured.forEach((template) => {
-        const index = templates.indexOf(template);
-        const palette = palettes[template.paletteId];
+      templates.forEach((template, index) => {
         const button = document.createElement("button");
         button.type = "button";
         button.className = `template-card${index === state.templateIndex ? " is-active" : ""}`;
         button.innerHTML = `
-          <div class="template-mini" style="--accent:${template.mono ? "#111" : palette.accent}; --accent-2:${template.mono ? "#666" : palette.accent2};">
+          <div class="template-mini" style="--accent:${accent}; --accent-2:#94a3b8;">
             <div class="template-line"></div>
             <div class="template-line short"></div>
             <div class="template-line thin"></div>
           </div>
-          <span>${escapeText(layouts.find((layout) => layout.id === template.layoutId).name)}</span>
+          <span>${escapeText(template.name)}</span>
         `;
         button.addEventListener("click", () => {
           applyTemplate(index);
@@ -3855,6 +3824,8 @@
       setText("previewCompanyMeta", contact);
       setText("previewDocumentTitle", state.documentTitle || "Invoice");
       setText("previewStatus", [state.statusBadgeLabel, state.statusBadgeText || state.status].filter(Boolean).join(": "));
+      const statusEl = document.getElementById("previewStatus");
+      if (statusEl) statusEl.className = `status-${statusKind(state.statusBadgeText || state.status)}`;
       setText("previewInvoiceNoLabel", state.invoiceNoLabel || "Invoice No.");
       setText("previewInvoiceNo", state.invoiceNo);
       setText("previewIssueDateLabel", state.issueDateLabel || "Issue Date");
