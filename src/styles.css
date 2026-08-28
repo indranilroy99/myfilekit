@@ -1914,14 +1914,14 @@ html.dark .tool-card .tool-arrow {
   display: none !important;
 }
 
-.tool-card .tag-badge:first-child {
+.tool-card .tag-badge.category-badge {
   display: inline-flex !important;
   align-items: center;
   gap: 8px;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
-  color: #8a8a94 !important;
+  color: #a1a1aa !important;
   box-shadow: none !important;
   padding: 0 !important;
   font-size: 11px !important;
@@ -1930,7 +1930,7 @@ html.dark .tool-card .tool-arrow {
   letter-spacing: .08em !important;
 }
 
-.tool-card .tag-badge:first-child::before {
+.tool-card .tag-badge.category-badge::before {
   content: "";
   width: 4px;
   height: 4px;
@@ -2187,7 +2187,7 @@ html:not(.dark) .site-header .text-neutral-500,
 html:not(.dark) .dashboard-shelf h2,
 html:not(.dark) .category-heading h3,
 html:not(.dark) .related-tools-section h2,
-html:not(.dark) .tool-card .tag-badge:first-child,
+html:not(.dark) .tool-card .tag-badge.category-badge,
 html:not(.dark) .category-count,
 html:not(.dark) .site-footer {
   color: #52525b !important;

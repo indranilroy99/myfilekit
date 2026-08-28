@@ -4,28 +4,37 @@ import katex from "katex";
 import "katex/dist/katex.min.css";
 import { zipSync } from "fflate";
 import {
+  Accessibility,
   ArrowLeft,
   ArrowRight,
   ChevronRight,
+  Combine,
   Download,
   FileArchive,
+  FileCheck,
+  FileSignature,
   FileText,
   FolderSearch,
   Hash,
   Eye,
+  EyeOff,
   Image,
+  Languages,
   Layers3,
   LayoutDashboard,
   Moon,
   PenLine,
+  Pencil,
   Printer,
   ReceiptText,
   RotateCw,
+  ScanSearch,
   Scissors,
   Search,
   Share2,
   ShieldCheck,
   Sparkles,
+  Tags,
   Loader2,
   Menu,
   Sun,
@@ -127,7 +136,7 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
   "Business Tools": { description: "Invoices, Indian GST tax invoices, counter billing, and GSTR-1 filing prep.", accent: "Business" },
   "Signature Tools": { description: "Draw or type signatures and export them as PNG files.", accent: "Signature" },
   "Text & Data Tools": { description: "Format JSON, convert CSV, preview Markdown, and create PDFs from text.", accent: "Data" },
-  "Security & Privacy": { description: "Redact PII, run a privacy audit, and triage suspicious PDFs for malware — plus encrypt, unlock, and clean metadata, all locally in your browser.", accent: "Privacy" },
+  "Security & Privacy": { description: "Redact PII, run a privacy audit, and triage suspicious PDFs for malware — plus encrypt, unlock, and clean metadata, all locally in your browser.", accent: "Security" },
   "Developer Utilities": { description: "Handle hashes, Base64, and small file checks without leaving the page.", accent: "Utility" },
   "Sharing & Collaboration": { description: "Send files browser-to-browser and sketch together over a direct connection — still no server.", accent: "Sharing" },
 };
@@ -706,7 +715,7 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
         </div>
         <div className="mt-auto flex flex-wrap gap-2">
           {tool.isNew && <span className="new-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">New</span>}
-          <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{primaryBadge}</span>
+          <span className="tag-badge category-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{primaryBadge}</span>
           {!compact && visibleBadges.map((badge: string) => <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>)}
           {!compact && multiFile && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{multiFile}</span>}
           {!compact && fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
@@ -9043,16 +9052,32 @@ function multiFileLabel(tool: Tool) {
   return file.maxFiles && file.maxFiles > 1 ? "Multiple files" : "";
 }
 
+// Per-tool icon overrides so common tools don't collapse onto one category glyph
+// (e.g. four PDF tools all showing FileText). Keyed by id; checked before the
+// category fallback below.
+const toolIconOverrides: Record<string, typeof FileText> = {
+  "sign-pdf-tool": FileSignature,
+  "verify-signature-tool": FileCheck,
+  "merge-pdf-tool": Combine,
+  "edit-pdf-text-tool": Pencil,
+  "accessibility-check-tool": Accessibility,
+  "tag-pdf-tool": Tags,
+  "auto-redact-pii-tool": EyeOff,
+  "pdf-analyzer-tool": ScanSearch,
+  "translate-pdf-tool": Languages,
+};
+
 function iconForTool(tool: Tool) {
+  if (toolIconOverrides[tool.id]) return toolIconOverrides[tool.id];
+  if (tool.id.includes("rotate")) return RotateCw;
+  if (tool.id.includes("crop") || tool.id.includes("split")) return Scissors;
+  if (tool.id.includes("hash")) return Hash;
   if (tool.category === "PDF Tools") return FileText;
   if (tool.category === "Image Tools") return Image;
   if (tool.category === "Business Tools") return ReceiptText;
   if (tool.category === "Signature Tools") return PenLine;
   if (tool.category === "Security & Privacy") return ShieldCheck;
   if (tool.category === "Sharing & Collaboration") return Share2;
-  if (tool.id.includes("rotate")) return RotateCw;
-  if (tool.id.includes("crop") || tool.id.includes("split")) return Scissors;
-  if (tool.id.includes("hash")) return Hash;
   return Sparkles;
 }
 
