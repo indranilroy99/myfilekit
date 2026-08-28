@@ -7323,6 +7323,42 @@ test("C3: /A /Next chain JavaScript is flagged pre-strip and removed by archival
   assert.equal(check2.criteria.find((c) => c.id === "noJavaScript").pass, true, "cleaned file passes");
 });
 
+// DEFECT 2 follow-up (audit re-verify): JavaScript buried beyond the action-chain
+// depth cap must FAIL SAFE — an un-walked chain is reported forbidden, never clean.
+test("C3: JavaScript past the /Next depth cap fails checkPdfACompliance (fail-safe)", async () => {
+  const { checkPdfACompliance } = await import("../src/services/pdf-review.service.js");
+  const { PDFDocument, PDFName, PDFArray, PDFString } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]);
+  const ctx = doc.context;
+
+  // Build a benign /GoTo head with a 70-link /Next chain; the JS sits at the tail,
+  // deeper than MAX_ACTION_CHAIN (64).
+  const jsAction = ctx.obj({});
+  jsAction.set(PDFName.of("S"), PDFName.of("JavaScript"));
+  jsAction.set(PDFName.of("JS"), PDFString.of("app.alert('deep');"));
+  let next = ctx.register(jsAction);
+  for (let i = 0; i < 70; i += 1) {
+    const link = ctx.obj({});
+    link.set(PDFName.of("S"), PDFName.of("GoTo"));
+    link.set(PDFName.of("Next"), next);
+    next = ctx.register(link);
+  }
+  const annot = ctx.obj({});
+  annot.set(PDFName.of("Type"), PDFName.of("Annot"));
+  annot.set(PDFName.of("Subtype"), PDFName.of("Link"));
+  annot.set(PDFName.of("Rect"), ctx.obj([0, 0, 100, 100]));
+  annot.set(PDFName.of("A"), next);
+  const annots = PDFArray.withContext(ctx);
+  annots.push(ctx.register(annot));
+  page.node.set(PDFName.of("Annots"), annots);
+  const src = await doc.save({ useObjectStreams: false });
+
+  const check = await checkPdfACompliance(src, { part: "2", conformance: "B" });
+  const noJs = check.criteria.find((c) => c.id === "noJavaScript");
+  assert.equal(noJs.pass, false, "chain deeper than the cap fails safe, not reported clean");
+});
+
 // DEFECT 3: a document /OpenAction of type /Launch (launch a program on open)
 // must FAIL the noJavaScript criterion, not slip through unflagged.
 test("C3: a /Launch document OpenAction fails checkPdfACompliance noJavaScript", async () => {

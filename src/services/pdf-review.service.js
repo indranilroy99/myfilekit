@@ -480,9 +480,13 @@ function actionRefTag(value) {
  * dangerous action hidden behind a benign head (e.g. /GoTo → /Next → /JavaScript)
  * is still detected. Cycle-guarded by an object-ref set and bounded by a depth cap.
  */
-function collectChainForbidden(pdf, value, out = { javascript: false, launch: false }, seen = new Set(), depth = 0) {
+function collectChainForbidden(pdf, value, out = { javascript: false, launch: false, truncated: false }, seen = new Set(), depth = 0) {
   const { PDFDict, PDFArray, PDFName } = getPdfLib();
-  if (value === undefined || value === null || depth > MAX_ACTION_CHAIN) return out;
+  if (value === undefined || value === null) return out;
+  // Fail safe on cap overflow: a chain too deep to fully inspect is treated as
+  // possibly-forbidden (mirrors stripChainForbidden, which removes such an entry)
+  // so the compliance checker never reports an un-walked chain as clean.
+  if (depth > MAX_ACTION_CHAIN) { out.truncated = true; return out; }
   const resolved = pdf.context.lookup(value);
   if (resolved instanceof PDFArray) {
     for (let i = 0; i < resolved.size(); i += 1) {
@@ -857,7 +861,7 @@ function detectForbidden(pdf) {
   // Walk the OpenAction's full /Next chain and flag JavaScript OR Launch (a
   // /Launch OpenAction launches a program on open, so it must fail the check too).
   const oa = collectChainForbidden(pdf, openAction);
-  if (oa.javascript) result.javascript = true;
+  if (oa.javascript || oa.truncated) result.javascript = true;
   if (oa.launch) result.launch = true;
   if (catalog.get(PDFName.of("AA")) !== undefined) result.additionalActions = true;
 
@@ -878,7 +882,7 @@ function detectForbidden(pdf) {
       if (!annot || typeof annot.get !== "function") continue;
       // Walk the whole /A → /Next chain, not just the top-level /S.
       const chain = collectChainForbidden(pdf, annot.get(PDFName.of("A")));
-      if (chain.javascript) result.javascript = true;
+      if (chain.javascript || chain.truncated) result.javascript = true;
       if (chain.launch) result.launch = true;
       if (annot.get(PDFName.of("AA")) !== undefined) result.additionalActions = true;
     }
