@@ -1100,9 +1100,26 @@ export async function signPdf(pdfSource, options = {}) {
   if (visible) widgetEntries.push(["AP", mkDict([["N", mkRef(apNum)]])]);
   const widgetObj = mkDict(widgetEntries);
 
+  // --- Audit trail: first signature is "Signed"; if the incoming PDF already
+  // carries a signature, this one is a "CounterSigned" event. ---
+  const isCounterSign = documentHasSignature(doc);
+  const contact = String(options.contact || "").trim();
+  const summaryParts = [
+    `${isCounterSign ? "Counter-signed" : "Signed"} by ${signerName || "(unnamed)"}`,
+  ];
+  if (options.reason) summaryParts.push(`Reason: ${String(options.reason)}`);
+  if (options.location) summaryParts.push(`Location: ${String(options.location)}`);
+  summaryParts.push(`${signingDate.toISOString().replace(/\.\d+Z$/, "Z")} (client-asserted time)`);
+  summaryParts.push("Integrity: SHA-256 of the covered bytes, recorded in the CMS signature");
+  const audit = {
+    event: isCounterSign ? "CounterSigned" : "Signed",
+    contact,
+    summary: summaryParts.join(" | "),
+  };
+
   // --- The signature dictionary is emitted by hand so /ByteRange and /Contents
   // stay fixed-width and locatable for patching. ---
-  const sigDictText = buildSigDictText(signingDate, signerName, options.reason, options.location);
+  const sigDictText = buildSigDictText(signingDate, signerName, options.reason, options.location, audit);
 
   // --- AcroForm: merge into any existing one, else create it ---
   const existingAcroForm = dictGet(doc, catalog, "AcroForm");
@@ -1200,6 +1217,8 @@ export async function signPdf(pdfSource, options = {}) {
     signedPage: pageIndex + 1,
     pageCount: pages.length,
     selfSigned: key.subjectCommonName === key.issuerCommonName,
+    auditEvent: audit.event,
+    counterSigned: isCounterSign,
   };
 }
 
@@ -1229,14 +1248,53 @@ function buildAppearanceLines(name, reason, location, date) {
   lines.push([`Date: ${date.toISOString().replace("T", " ").slice(0, 19)} UTC`, false]);
   return lines;
 }
-function buildSigDictText(date, name, reason, location) {
+// True when the parsed document already carries at least one signature dict —
+// used to label a fresh signature as a counter-signature in its audit trail.
+function documentHasSignature(doc) {
+  for (const entry of doc.objects.values()) {
+    const object = entry.obj;
+    if (object.k !== "dict") continue;
+    const isSig = nameValue(dictGet(doc, object, "Type")) === "Sig"
+      || nameValue(dictGet(doc, object, "Filter")) === "Adobe.PPKLite";
+    if (isSig && dictGet(doc, object, "ByteRange").k === "array" && object.v.get("Contents")?.k === "str") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function buildSigDictText(date, name, reason, location, audit) {
   const slot = "0".repeat(BYTERANGE_SLOT);
+  const range = `[0 ${slot} ${slot} ${slot}]`;
   let text = "<</Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached";
   text += ` /M (${pdfDate(date)})`;
   if (name) text += ` /Name (${pdfLiteral(name)})`;
   if (reason) text += ` /Reason (${pdfLiteral(reason)})`;
   if (location) text += ` /Location (${pdfLiteral(location)})`;
-  text += ` /ByteRange [0 ${slot} ${slot} ${slot}]`;
+  // --- Embedded, tamper-evident audit trail (/MFKAuditTrail) ---------------
+  // This whole sub-dictionary sits INSIDE the signature's ByteRange, so the
+  // CMS signature protects it: any edit to a recorded field breaks the
+  // signature. /Covered mirrors /ByteRange (filled, pre-signing, by
+  // fillByteRange) so verification can confirm the recorded range matches the
+  // signature's own /ByteRange. The document hash itself is not duplicated
+  // here — it IS the CMS message digest (SHA-256 of the covered bytes), which
+  // verification recomputes and cross-checks. Storing a second copy inside the
+  // signed span would be self-referential; the CMS digest is the honest anchor.
+  text += " /MFKAuditTrail <<";
+  text += " /Producer (MyFileKit Local e-Sign)";
+  text += " /Version 1";
+  text += ` /Event /${audit.event}`; // "Signed" or "CounterSigned"
+  if (name) text += ` /Signer (${pdfLiteral(name)})`;
+  if (reason) text += ` /Reason (${pdfLiteral(reason)})`;
+  if (location) text += ` /Location (${pdfLiteral(location)})`;
+  if (audit.contact) text += ` /Contact (${pdfLiteral(audit.contact)})`;
+  text += ` /ClientTime (${pdfDate(date)})`;
+  text += " /ClientTimeAsserted true"; // NOT a trusted timestamp unless an RFC-3161 token is attached
+  text += " /HashAlg /SHA-256";
+  text += ` /Covered ${range}`;
+  text += ` /Summary (${pdfLiteral(audit.summary)})`;
+  text += " >>";
+  text += ` /ByteRange ${range}`;
   text += ` /Contents <${"0".repeat(CONTENTS_BYTES * 2)}>`;
   text += ">>";
   return text;
@@ -1337,6 +1395,20 @@ function fillByteRange(bytes, sigDictOffset) {
   writeSlot(bytes, slot2, start2);
   writeSlot(bytes, slot3, length2);
 
+  // Mirror the same range into the audit trail's /Covered array. It lies BEFORE
+  // /Contents (inside range 1), so it is filled here — before signing — and is
+  // covered by the CMS signature. Its slots share the ByteRange layout.
+  const covNeedle = latin1Bytes("/Covered [0 ");
+  const covStart = indexOfSequence(bytes, covNeedle, sigDictOffset);
+  if (covStart >= 0) {
+    const c1 = covStart + covNeedle.length;
+    const c2 = c1 + BYTERANGE_SLOT + 1;
+    const c3 = c2 + BYTERANGE_SLOT + 1;
+    writeSlot(bytes, c1, a);
+    writeSlot(bytes, c2, start2);
+    writeSlot(bytes, c3, length2);
+  }
+
   const signedData = concatBytes([bytes.subarray(0, a), bytes.subarray(start2, total)]);
   return { bytes, signedData, contentsOpen };
 }
@@ -1356,6 +1428,40 @@ function injectContents(bytes, contentsOpen, cmsDer) {
 // ---------------------------------------------------------------------------
 // Verification
 // ---------------------------------------------------------------------------
+
+// The honest limit of a self-embedded audit trail: it proves byte integrity and
+// what the signer certificate CLAIMS, never real-world identity.
+const IDENTITY_CAVEAT =
+  "This is a locally-signed document. The audit trail proves the covered bytes are "
+  + "unchanged and records what the signer's certificate claims — it does NOT prove the "
+  + "signer's real-world identity. Trusted identity needs a CA-issued certificate (and, for "
+  + "time, an RFC-3161 timestamp) or the hosted multi-party e-sign flow.";
+
+// Reads the embedded /MFKAuditTrail sub-dictionary from a signature dict. Every
+// field is data written by the signer; verification cross-checks it against the
+// signature, so a forged field cannot pass unless the CMS also verifies.
+function readAuditTrail(doc, sigObject) {
+  const at = dictGet(doc, sigObject, "MFKAuditTrail");
+  if (at.k !== "dict") return { present: false };
+  const str = (key) => { const v = dictGet(doc, at, key); return v.k === "str" ? decodePdfText(v.v) : null; };
+  const nm = (key) => nameValue(dictGet(doc, at, key));
+  const coveredObj = dictGet(doc, at, "Covered");
+  const covered = coveredObj.k === "array" ? coveredObj.v.map((x) => numberValue(resolve(doc, x))) : null;
+  return {
+    present: true,
+    producer: str("Producer"),
+    event: nm("Event"),
+    signer: str("Signer"),
+    reason: str("Reason"),
+    location: str("Location"),
+    contact: str("Contact"),
+    clientTime: str("ClientTime"),
+    clientTimeAsserted: true,
+    hashAlg: nm("HashAlg"),
+    covered,
+    summary: str("Summary"),
+  };
+}
 
 // Find every signature dictionary in the file and, for each, recompute the
 // digest over its /ByteRange and check the CMS. All maths is done locally; no
@@ -1384,12 +1490,21 @@ export async function verifyPdfSignatures(pdfSource) {
     if (!isSig || byteRange.k !== "array" || !contents || contents.k !== "str") continue;
 
     const range = byteRange.v.map((item) => numberValue(resolve(doc, item)));
-    const report = await verifyOneSignature(pdfBytes, range, contents.v).catch((error) => ({
+    const audit = readAuditTrail(doc, object);
+    const report = await verifyOneSignature(pdfBytes, range, contents.v, audit).catch((error) => ({
       fieldName: fieldNameByObj.get(entry.num) || "(unnamed)",
       subFilter: nameValue(dictGet(doc, object, "SubFilter")) || "",
       error: error?.message || "Could not verify this signature.",
       integrity: false,
+      digestValid: false,
       signatureValid: false,
+      byteRangeValid: false,
+      coversWholeDoc: false,
+      auditTrailPresent: audit.present,
+      auditHashMatches: null,
+      auditTrail: audit.present ? audit : null,
+      tamperFindings: [error?.message || "Could not parse this signature."],
+      identityCaveat: IDENTITY_CAVEAT,
       timestamp: { present: false },
       verdict: "invalid",
       detail: error?.message || "Could not parse this signature.",
@@ -1405,7 +1520,7 @@ export async function verifyPdfSignatures(pdfSource) {
   return { count: signatures.length, signatures, fileBytes: pdfBytes.length };
 }
 
-async function verifyOneSignature(pdfBytes, range, contentsBytes) {
+async function verifyOneSignature(pdfBytes, range, contentsBytes, audit = { present: false }) {
   if (!Array.isArray(range) || range.length < 4 || range.some((n) => !Number.isInteger(n) || n < 0)) {
     throw new Error("This signature has an unreadable /ByteRange.");
   }
@@ -1446,6 +1561,8 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes) {
   let integrity;
   let signatureValid;
   let unsupported = false;
+  let recordedDigest = null; // the SHA-256 the signature recorded for the covered bytes
+  let computedDigest = null; // the SHA-256 we recompute now over the actual bytes
   const signedAttrs = signerInfo.signedAttrs;
   try {
     if (signedAttrs && signedAttrs.attributes.length) {
@@ -1453,6 +1570,8 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes) {
       if (!mdAttr) throw new Error("The signature is missing its message-digest attribute.");
       const signedDigest = new Uint8Array(mdAttr.values[0].valueBlock.valueHexView);
       const actualDigest = await digestBytes(hashName, signedData);
+      recordedDigest = signedDigest;
+      computedDigest = actualDigest;
       integrity = bytesEqual(signedDigest, actualDigest);
 
       // Authenticity: verify the signature over the DER of the signed attributes
@@ -1462,6 +1581,7 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes) {
       signatureValid = await verifySignature(signerCert, hashName, signerInfo.signature.valueBlock.valueHexView, attrsDer);
     } else {
       // No signed attributes: the signature is directly over the document bytes.
+      computedDigest = await digestBytes(hashName, signedData);
       signatureValid = await verifySignature(signerCert, hashName, signerInfo.signature.valueBlock.valueHexView, signedData);
       integrity = signatureValid;
     }
@@ -1503,6 +1623,35 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes) {
     }
   }
 
+  // --- Audit-trail cross-checks (C2) ---------------------------------------
+  const digestValid = integrity === true;
+  // The recorded byte range is valid when it is structurally sane AND, if the
+  // audit trail recorded its own /Covered copy, that copy matches the actual
+  // /ByteRange (a mismatch means someone rewrote one but not the other).
+  const rangeSane = Array.isArray(range) && range.length >= 4 && (s2 + l2) <= pdfBytes.length && s1 === 0;
+  const coveredMatches = !audit.present || !Array.isArray(audit.covered)
+    ? true
+    : audit.covered.length === range.length && audit.covered.every((n, i) => n === range[i]);
+  const byteRangeValid = rangeSane && coveredMatches;
+
+  // auditHashMatches: does the SHA-256 the signature recorded for the covered
+  // bytes still match a fresh hash of those bytes? (Only meaningful when an
+  // audit trail is present; it is the same anchor as `integrity`, surfaced as
+  // an explicit, human-facing cross-check.)
+  const auditTrailPresent = Boolean(audit.present);
+  const auditHashMatches = auditTrailPresent && recordedDigest ? bytesEqual(recordedDigest, computedDigest) : null;
+
+  const tamperFindings = [];
+  if (!unsupported && signatureValid && !digestValid) {
+    tamperFindings.push("The covered bytes changed after signing: the recorded SHA-256 no longer matches the document.");
+  }
+  if (!unsupported && !signatureValid) {
+    tamperFindings.push("The CMS signature does not verify against the signer certificate (signature or certificate altered).");
+  }
+  if (auditTrailPresent && !coveredMatches) {
+    tamperFindings.push("The audit trail's recorded /Covered range does not match the signature's /ByteRange.");
+  }
+
   let verdict;
   let detail;
   if (unsupported) {
@@ -1523,6 +1672,7 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes) {
 
   return {
     subjectCommonName: certCommonName(signerCert, "subject"),
+    signerCN: certCommonName(signerCert, "subject"),
     issuerCommonName: certCommonName(signerCert, "issuer"),
     serialHex: certSerialHex(signerCert),
     notBefore: signerCert.notBefore.value,
@@ -1531,10 +1681,20 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes) {
     signingTime,
     hashName,
     integrity,
+    digestValid,
     signatureValid,
     coversWholeDocument,
+    coversWholeDoc: coversWholeDocument,
     byteRange: range,
+    byteRangeValid,
     contentsBytes: contentsBytes.length,
+    recordedSha256: recordedDigest ? hexOf(recordedDigest) : null,
+    computedSha256: computedDigest ? hexOf(computedDigest) : null,
+    auditTrailPresent,
+    auditHashMatches,
+    auditTrail: auditTrailPresent ? audit : null,
+    tamperFindings,
+    identityCaveat: IDENTITY_CAVEAT,
     timestamp,
     verdict,
     detail,

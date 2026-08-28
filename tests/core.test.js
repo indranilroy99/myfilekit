@@ -6917,3 +6917,209 @@ test("reflow-pdf-tool is registered, routed, wired, cross-references Edit PDF Te
   const searchable = [found.name, found.description, ...found.keywords].join(" ").toLowerCase();
   for (const term of ["reflow", "paragraph"]) assert.match(searchable, new RegExp(term));
 });
+
+// =============================================================================
+// PHASE C1 — PDF/A hardening toward validity (src/services/pdf-review.service.js)
+// HONEST: hardened toward PDF/A-2b, NOT veraPDF-certified. These lock in the
+// machine-checkable rules we DO enforce/check, the fail-loud on unembedded
+// fonts, and the vendored sha-pinned sRGB ICC profile.
+// =============================================================================
+
+// Registers an indirect Type1 font whose FontDescriptor embeds a FontFile3
+// program — i.e. a genuinely embedded ("embeddable") font, so archival prep
+// accepts it. Returns the saved bytes.
+async function pdfWithEmbeddedFont(title) {
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  doc.addPage([300, 300]);
+  const ctx = doc.context;
+  const fontFile = ctx.flateStream(new Uint8Array([0x01, 0x02, 0x03, 0x04]), { Subtype: PDFName.of("Type1C") });
+  const descriptor = ctx.obj({});
+  descriptor.set(PDFName.of("Type"), PDFName.of("FontDescriptor"));
+  descriptor.set(PDFName.of("FontName"), PDFName.of("EmbeddedTestFont"));
+  descriptor.set(PDFName.of("FontFile3"), ctx.register(fontFile));
+  const fontDict = ctx.obj({});
+  fontDict.set(PDFName.of("Type"), PDFName.of("Font"));
+  fontDict.set(PDFName.of("Subtype"), PDFName.of("Type1"));
+  fontDict.set(PDFName.of("BaseFont"), PDFName.of("EmbeddedTestFont"));
+  fontDict.set(PDFName.of("FontDescriptor"), ctx.register(descriptor));
+  ctx.register(fontDict);
+  if (title) doc.setTitle(title);
+  return doc.save();
+}
+
+test("C1: archivalPrepPdf on an embedded-font doc adds OutputIntent+ICC and PDF/A-2B XMP synced to DocInfo /Title", async () => {
+  const { archivalPrepPdf, checkPdfACompliance } = await import("../src/services/pdf-review.service.js");
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const src = await pdfWithEmbeddedFont("Quarterly Report");
+
+  const { bytes, report } = await archivalPrepPdf(src, { title: "Quarterly Report", part: "2", conformance: "B" });
+  assert.match(report.conformance, /PDF\/A-2B/);
+
+  const out = await PDFDocument.load(bytes);
+  // OutputIntent with an embedded 3-channel ICC DestOutputProfile.
+  const intents = out.context.lookup(out.catalog.get(PDFName.of("OutputIntents")));
+  assert.ok(intents && intents.size() === 1, "one OutputIntent");
+  const intent = out.context.lookup(intents.get(0));
+  const icc = out.context.lookup(intent.get(PDFName.of("DestOutputProfile")));
+  assert.equal(icc.dict.get(PDFName.of("N")).toString(), "3", "ICC is 3-channel");
+
+  // XMP carries pdfaid:part=2 / conformance=B and dc:title matching DocInfo.
+  const xmp = Buffer.from(out.context.lookup(out.catalog.get(PDFName.of("Metadata"))).contents).toString("utf8");
+  assert.match(xmp, /pdfaid:part>2</);
+  assert.match(xmp, /pdfaid:conformance>B</);
+  assert.match(xmp, /<dc:title>[\s\S]*?Quarterly Report[\s\S]*?<\/dc:title>/);
+  assert.equal(out.getTitle(), "Quarterly Report", "DocInfo /Title set");
+
+  // The checker agrees: title + pdfaid are in sync and everything passes.
+  const check = await checkPdfACompliance(bytes, { part: "2", conformance: "B" });
+  assert.equal(check.criteria.find((c) => c.id === "titleSync").pass, true, "XMP dc:title == DocInfo /Title");
+  assert.equal(check.criteria.find((c) => c.id === "pdfaid").pass, true);
+  assert.equal(check.criteria.find((c) => c.id === "fonts").pass, true, "embedded font passes");
+  assert.equal(check.passed, check.total, `hardened output passes all ${check.total} checked criteria`);
+});
+
+test("C1: a doc needing a non-embedded font FAILS LOUDLY and names the offending font", async () => {
+  const { archivalPrepPdf, scanFontEmbedding } = await import("../src/services/pdf-review.service.js");
+  const { PDFDocument, StandardFonts } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([300, 300]);
+  const helv = await doc.embedFont(StandardFonts.Helvetica); // standard-14 => NOT embedded
+  page.drawText("unembedded", { x: 20, y: 20, size: 12, font: helv });
+  const src = await doc.save();
+
+  const scan = scanFontEmbedding(await PDFDocument.load(src));
+  assert.deepEqual(scan.unembedded, ["Helvetica"], "scanner flags the standard font as unembedded");
+
+  await assert.rejects(
+    () => archivalPrepPdf(src, { part: "2" }),
+    (error) => /not embedded/i.test(error.message) && /Helvetica/.test(error.message),
+    "archival prep refuses and names Helvetica",
+  );
+});
+
+test("C1: checkPdfACompliance reports an N-of-M tally and flags a JavaScript file as non-conformant", async () => {
+  const { checkPdfACompliance } = await import("../src/services/pdf-review.service.js");
+  const { PDFDocument, PDFName, PDFString } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  doc.addPage([200, 200]);
+  const ctx = doc.context;
+  const action = ctx.obj({});
+  action.set(PDFName.of("S"), PDFName.of("JavaScript"));
+  action.set(PDFName.of("JS"), PDFString.of("app.alert('x')"));
+  doc.catalog.set(PDFName.of("OpenAction"), ctx.register(action));
+  const src = await doc.save();
+
+  const check = await checkPdfACompliance(src);
+  assert.equal(typeof check.passed, "number");
+  assert.equal(typeof check.total, "number");
+  assert.ok(check.passed < check.total, "an un-prepped JS file fails several criteria");
+  assert.equal(check.certified, false, "never claims certification");
+  assert.match(check.caveat, /not veraPDF-certified/i);
+  assert.ok(Array.isArray(check.notChecked) && check.notChecked.length > 0, "lists rules it does not check");
+  const js = check.criteria.find((c) => c.id === "noJavaScript");
+  assert.equal(js.pass, false, "JavaScript is flagged as non-conformant");
+});
+
+test("C1: buildSrgbIccProfile reproduces the vendored, sha256-pinned sRGB profile", async () => {
+  const { buildSrgbIccProfile } = await import("../src/services/pdf-review.service.js");
+  const vendored = fs.readFileSync(new URL("../assets/vendor/icc/sRGB-IEC61966-2.1.icc", import.meta.url));
+  const generated = Buffer.from(buildSrgbIccProfile());
+  assert.ok(generated.equals(vendored), "generator output matches the vendored asset byte-for-byte");
+
+  const digest = createHash("sha256").update(vendored).digest("hex");
+  const auditSrc = fs.readFileSync(new URL("../scripts/security-audit.js", import.meta.url), "utf8");
+  assert.ok(auditSrc.includes(digest), "the vendored ICC sha256 is pinned in scripts/security-audit.js");
+  assert.ok(auditSrc.includes("assets/vendor/icc/sRGB-IEC61966-2.1.icc"), "the ICC asset is listed in the audit");
+});
+
+// =============================================================================
+// PHASE C2 — client-side e-sign embedded audit trail (pdf-sign.service.js)
+// 100% offline. Cross-checks the embedded /MFKAuditTrail against the signature.
+// HONEST: proves integrity + what the cert claims, NOT real-world identity.
+// =============================================================================
+
+test("C2: signPdf embeds an audit trail that verify reads back with a matching hash", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("Alice Signer", "Alice Signer", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const pdf = await buildSamplePdf(false);
+
+  const signed = await signPdf(pdf, { p12, password: "pw", name: "Alice Signer", reason: "I approve", location: "Bengaluru", contact: "alice@example.com" });
+  assert.equal(signed.auditEvent, "Signed");
+  assert.equal(signed.counterSigned, false);
+
+  const report = await verifyPdfSignatures(signed.bytes);
+  assert.equal(report.count, 1);
+  const sig = report.signatures[0];
+  assert.equal(sig.auditTrailPresent, true, "embedded audit trail is present");
+  assert.equal(sig.auditHashMatches, true, "recorded document hash matches the actual signed bytes");
+  assert.equal(sig.digestValid, true);
+  assert.equal(sig.byteRangeValid, true, "recorded /Covered matches the signature /ByteRange");
+  assert.equal(sig.coversWholeDoc, true);
+  assert.equal(sig.signerCN, "Alice Signer");
+  assert.equal(sig.recordedSha256, sig.computedSha256, "recorded and recomputed SHA-256 agree");
+  assert.equal(sig.tamperFindings.length, 0, "no tamper findings on a clean signature");
+  assert.equal(sig.auditTrail.event, "Signed");
+  assert.equal(sig.auditTrail.signer, "Alice Signer");
+  assert.equal(sig.auditTrail.reason, "I approve");
+  assert.equal(sig.auditTrail.contact, "alice@example.com");
+  assert.equal(sig.auditTrail.clientTimeAsserted, true, "client time is labelled asserted, not TSA-trusted");
+  assert.match(sig.identityCaveat, /does NOT prove the signer's real-world identity/);
+});
+
+test("C2: mutating one covered byte breaks the audit hash and is reported as tampering", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("Tamper Audit", "Tamper Audit", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const pdf = await buildSamplePdf(false);
+  const signed = await signPdf(pdf, { p12, password: "pw", name: "Tamper Audit" });
+
+  const tampered = new Uint8Array(signed.bytes);
+  tampered[60] ^= 0x01; // deep inside the original body, within ByteRange 1
+
+  const report = await verifyPdfSignatures(tampered);
+  const sig = report.signatures[0];
+  assert.equal(sig.digestValid, false, "digest no longer matches");
+  assert.equal(sig.auditHashMatches, false, "recorded hash no longer matches the mutated bytes");
+  assert.ok(sig.tamperFindings.length > 0, "tamper findings are reported");
+  assert.equal(sig.verdict, "modified");
+});
+
+test("C2: counter-signing adds a second signature (incremental) without invalidating the first", async () => {
+  const aliceKey = await genRsaKeyPair();
+  const aliceCert = await makeSelfSignedCert("Alice", "Alice", aliceKey, aliceKey.privateKey);
+  const aliceP12 = await makePkcs12(aliceKey.privateKey, [aliceCert], "pw");
+  const bobKey = await genRsaKeyPair();
+  const bobCert = await makeSelfSignedCert("Bob", "Bob", bobKey, bobKey.privateKey);
+  const bobP12 = await makePkcs12(bobKey.privateKey, [bobCert], "pw");
+
+  const pdf = await buildSamplePdf(false);
+  const first = await signPdf(pdf, { p12: aliceP12, password: "pw", name: "Alice", reason: "Author" });
+  const second = await signPdf(first.bytes, { p12: bobP12, password: "pw", name: "Bob", reason: "Witness" });
+  assert.equal(second.counterSigned, true, "the second signature is labelled a counter-signature");
+  assert.equal(second.auditEvent, "CounterSigned");
+
+  const report = await verifyPdfSignatures(second.bytes);
+  assert.equal(report.count, 2, "both signatures are present");
+  const alice = report.signatures.find((s) => s.auditTrail && s.auditTrail.signer === "Alice");
+  const bob = report.signatures.find((s) => s.auditTrail && s.auditTrail.signer === "Bob");
+  assert.ok(alice && bob, "each signature carries its own audit entry");
+
+  // BOTH verify cryptographically.
+  assert.equal(alice.signatureValid, true);
+  assert.equal(alice.digestValid, true, "signature 1 still valid over its original covered range");
+  assert.equal(bob.signatureValid, true);
+  assert.equal(bob.digestValid, true);
+
+  // Each has a distinct audit event.
+  assert.equal(alice.auditTrail.event, "Signed");
+  assert.equal(bob.auditTrail.event, "CounterSigned");
+
+  // The edit after signature 1 (Bob's incremental append) falls OUTSIDE
+  // signature 1's byte range: signature 1 no longer covers the whole doc,
+  // while signature 2 (the latest revision) does.
+  assert.equal(alice.coversWholeDoc, false, "signature 1 does not cover the appended counter-signature");
+  assert.equal(alice.byteRangeValid, true, "signature 1 is still valid for the range it covers");
+  assert.equal(bob.coversWholeDoc, true, "signature 2 covers the whole current document");
+});

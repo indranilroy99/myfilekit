@@ -53,7 +53,7 @@ import { applyTextEdits, mapPdfFontToStandard, standardFontKey, textItemToPageRe
 import { parseParagraphs, detectColumnLayout, flowBlocks, rebuildReflowedPdf } from "./services/pdf-reflow.service.js";
 import { MyFileKit } from "./api/myfilekit.js";
 import { applyAnnotations, screenToPagePoint, pagePointToScreen, HIGHLIGHT_PALETTE, MAX_ANNOTATIONS_PER_PAGE } from "./services/annotate.service.js";
-import { archivalPrepPdf, assertPdfDecryptable, comparePdfText, comparePdfReportText, estimateSkewAngle } from "./services/pdf-review.service.js";
+import { archivalPrepPdf, assertPdfDecryptable, checkPdfACompliance, comparePdfText, comparePdfReportText, estimateSkewAngle } from "./services/pdf-review.service.js";
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
 import { BATES_POSITION_IDS, NUP_COUNTS, batesNumberPdf, createFormPdf, imposePdf, parseOutlineInput, parseSplitPages, readOutline, setOutline, smartSplitPdf } from "./services/pdf-advanced.service.js";
 import { ALL_PERMISSIONS_ALLOWED, PDF_ENCRYPTION_ALGORITHMS, PDF_PERMISSION_LABELS, decryptPdf, encryptPdf, unlockPdf } from "./services/pdf-crypto.service.js";
@@ -4939,9 +4939,10 @@ function PdfaPrepTool({ tool }: { tool: Tool }) {
   const [author, setAuthor] = useState("");
   const [lang, setLang] = useState("en");
   const [report, setReport] = useState<{ applied: string[]; removed: string[]; conformance: string } | null>(null);
+  const [compliance, setCompliance] = useState<{ target: string; criteria: { id: string; label: string; pass: boolean; detail: string }[]; passed: number; total: number; certified: boolean; notChecked: string[]; caveat: string } | null>(null);
   const [status, setStatus] = useState(initialStatus);
 
-  const reset = () => { setFiles([]); setRaster(false); setOcrLayer(false); setOcrLang(DEFAULT_OCR_LANG); setTitle(""); setAuthor(""); setLang("en"); setReport(null); setStatus(initialStatus); };
+  const reset = () => { setFiles([]); setRaster(false); setOcrLayer(false); setOcrLang(DEFAULT_OCR_LANG); setTitle(""); setAuthor(""); setLang("en"); setReport(null); setCompliance(null); setStatus(initialStatus); };
 
   return <ToolForm status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
@@ -4996,9 +4997,51 @@ function PdfaPrepTool({ tool }: { tool: Tool }) {
       if (raster) prepReport.removed.unshift(ocrApplied ? "rasterised all pages, then added a searchable OCR text layer" : "rasterised all pages (text no longer selectable)");
       if (ocrApplied) prepReport.applied.push("searchable OCR text layer over the raster (invisible, selectable)");
       setReport(prepReport);
+      // Re-run the self-check on the produced bytes so the user sees exactly
+      // which machine-checkable PDF/A criteria the output now satisfies.
+      setCompliance(await checkPdfACompliance(bytes));
       downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-archival`, "pdf"), "application/pdf");
       return `Prepped for archiving (${prepReport.conformance}). Applied ${prepReport.applied.length} change(s); removed ${prepReport.removed.length} item(s). Aims for PDF/A-2b — run veraPDF to certify.`;
     })} />
+
+    <SecondaryButton label="Check PDF/A compliance (no conversion)" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      setReport(null);
+      const result = await checkPdfACompliance(bytes);
+      setCompliance(result);
+      const failed = result.criteria.filter((c) => !c.pass).length;
+      return failed === 0
+        ? `${result.passed} of ${result.total} machine-checkable ${result.target} criteria pass. Not a veraPDF certification.`
+        : `${result.passed} of ${result.total} ${result.target} criteria pass; ${failed} need work. See the breakdown below.`;
+    })} />
+
+    {compliance && (
+      <div className="surface-card wabi-card-edge grid gap-3 p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="font-black">Pre-flight check — {compliance.target}</p>
+          <p className="text-sm font-black text-neutral-500">{compliance.passed} of {compliance.total} machine-checkable criteria pass</p>
+        </div>
+        <div className="grid gap-2">
+          {compliance.criteria.map((c) => (
+            <div key={c.id} className="surface-muted wabi-card-edge grid gap-1 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black uppercase ${c.pass ? "border-[var(--success)] bg-[var(--success-bg)] text-[var(--success-fg)]" : "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"}`}>{c.pass ? "PASS" : "FAIL"}</span>
+                <span className="font-black text-[var(--foreground)]">{c.label}</span>
+              </div>
+              <p className="text-sm font-semibold leading-6 text-neutral-600">{c.detail}</p>
+            </div>
+          ))}
+        </div>
+        {compliance.notChecked?.length ? (
+          <div className="grid gap-1 text-sm font-semibold text-neutral-600">
+            <p className="text-xs font-black uppercase text-neutral-500">Not checked here (needs veraPDF / a human)</p>
+            {compliance.notChecked.map((item, index) => <p key={index}>• {item}</p>)}
+          </div>
+        ) : null}
+        <p className="text-sm font-semibold leading-6 text-neutral-500">{compliance.caveat}</p>
+      </div>
+    )}
 
     {report && (
       <div className="surface-card wabi-card-edge grid gap-3 p-4">

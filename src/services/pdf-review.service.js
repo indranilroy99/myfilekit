@@ -300,10 +300,20 @@ export function buildSrgbIccProfile() {
     return out; // 20 bytes
   };
 
-  // curv with one entry = gamma in u8Fixed8 (2.2 → 563).
-  const curvTag = (() => {
-    const gamma = Math.round(2.2 * 256);
-    return [...enc("curv"), 0, 0, 0, 0, 0, 0, 0, 1, (gamma >>> 8) & 0xff, gamma & 0xff]; // 14 bytes
+  // The exact IEC 61966-2.1 sRGB tone response curve, encoded as an ICC
+  // parametricCurveType ('para') function type 3: Y = ((a·X + b)^g) for X ≥ d,
+  // Y = c·X for X < d — the true piecewise sRGB curve (g=2.4, a=1/1.055,
+  // b=0.055/1.055, c=1/12.92, d=0.04045), not a gamma-2.2 approximation.
+  const trcTag = (() => {
+    const s15 = (value) => Math.round(value * 65536) >>> 0;
+    const params = [2.4, 1 / 1.055, 0.055 / 1.055, 1 / 12.92, 0.04045];
+    const out = [...enc("para"), 0, 0, 0, 0]; // sig + reserved
+    out.push(0x00, 0x03, 0x00, 0x00);         // function type 3, reserved
+    for (const p of params) {
+      const f = s15(p);
+      out.push((f >>> 24) & 0xff, (f >>> 16) & 0xff, (f >>> 8) & 0xff, f & 0xff);
+    }
+    return out; // 12 + 5*4 = 32 bytes
   })();
 
   // 'desc' textDescriptionType with a short ASCII name.
@@ -328,7 +338,7 @@ export function buildSrgbIccProfile() {
   const gXYZ = xyzTag(0.3851, 0.7169, 0.0971);
   const bXYZ = xyzTag(0.1431, 0.0606, 0.7139);
 
-  // TRC tags share one curv block; XYZ tags are distinct.
+  // TRC tags share one parametric-curve block; XYZ tags are distinct.
   const blocks = [
     { sig: "desc", data: descTag },
     { sig: "wtpt", data: wtpt },
@@ -355,11 +365,11 @@ export function buildSrgbIccProfile() {
     dataParts.push({ offset, bytes: block.data });
     cursor = align4(cursor + block.data.length);
   }
-  // Shared curv block for the three TRC tags.
-  const curvOffset = cursor;
-  dataParts.push({ offset: curvOffset, bytes: curvTag });
-  cursor = align4(cursor + curvTag.length);
-  for (const sig of trcSigs) tagEntries.push({ sig, offset: curvOffset, size: curvTag.length });
+  // Shared parametric TRC block for the three TRC tags.
+  const trcOffset = cursor;
+  dataParts.push({ offset: trcOffset, bytes: trcTag });
+  cursor = align4(cursor + trcTag.length);
+  for (const sig of trcSigs) tagEntries.push({ sig, offset: trcOffset, size: trcTag.length });
 
   const totalSize = cursor;
   const buf = new Uint8Array(totalSize);
@@ -468,10 +478,85 @@ export async function assertPdfDecryptable(bytes) {
   }
 }
 
+/** Best-effort human name for a font, from /BaseFont (subset prefix trimmed). */
+function fontDisplayName(pdf, fontDict) {
+  const { PDFName } = getPdfLib();
+  const base = fontDict.get(PDFName.of("BaseFont"));
+  let name = base && typeof base.decodeText === "function" ? base.decodeText()
+    : base ? String(base).replace(/^\//, "") : "(unnamed font)";
+  // Subset fonts are tagged "ABCDEF+FontName"; keep the readable half.
+  const plus = name.indexOf("+");
+  if (plus === 6) name = name.slice(plus + 1);
+  return name || "(unnamed font)";
+}
+
+/**
+ * Walks every font in the document and reports embedding. PDF/A forbids any
+ * font whose glyph program is not embedded — including the standard-14 fonts,
+ * which carry no /FontDescriptor at all. Type3 fonts define their glyphs as
+ * content streams and need no font file, so they count as self-contained. Pure.
+ *
+ * Returns { fonts: [{ name, subtype, embedded }], unembedded: string[] }.
+ */
+export function scanFontEmbedding(pdf) {
+  const { PDFDict, PDFName, PDFArray } = getPdfLib();
+  const ctx = pdf.context;
+  const fonts = [];
+  const unembeddedSet = new Set();
+  const seen = new Set();
+
+  const descriptorEmbedded = (descriptor) => {
+    if (!(descriptor instanceof PDFDict)) return false;
+    return ["FontFile", "FontFile2", "FontFile3"].some(
+      (k) => descriptor.get(PDFName.of(k)) !== undefined,
+    );
+  };
+
+  for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFDict)) continue;
+    const type = obj.get(PDFName.of("Type"));
+    const typeName = type && typeof type.encodedName === "string" ? type.encodedName : type ? String(type) : "";
+    if (typeName !== "/Font") continue;
+    if (seen.has(ref.tag)) continue;
+    seen.add(ref.tag);
+
+    const subtypeObj = obj.get(PDFName.of("Subtype"));
+    const subtype = subtypeObj ? String(subtypeObj).replace(/^\//, "") : "";
+    const name = fontDisplayName(pdf, obj);
+
+    let embedded;
+    if (subtype === "Type3") {
+      embedded = true; // glyphs are inline content streams
+    } else if (subtype === "Type0") {
+      // Composite font: the embedded program lives on the descendant CIDFont.
+      const descendants = ctx.lookup(obj.get(PDFName.of("DescendantFonts")));
+      let anyEmbedded = false;
+      if (descendants instanceof PDFArray && descendants.size() > 0) {
+        for (let i = 0; i < descendants.size(); i += 1) {
+          const cid = ctx.lookup(descendants.get(i));
+          if (cid instanceof PDFDict) {
+            anyEmbedded = descriptorEmbedded(ctx.lookup(cid.get(PDFName.of("FontDescriptor")))) || anyEmbedded;
+          }
+        }
+      }
+      embedded = anyEmbedded;
+    } else {
+      embedded = descriptorEmbedded(ctx.lookup(obj.get(PDFName.of("FontDescriptor"))));
+    }
+
+    fonts.push({ name, subtype, embedded });
+    if (!embedded) unembeddedSet.add(name);
+  }
+
+  return { fonts, unembedded: [...unembeddedSet] };
+}
+
 /**
  * Best-effort PDF/A archival prep on raw PDF bytes (pure pdf-lib, Node-testable).
- * Refuses encrypted input. Strips JavaScript / OpenAction / Launch actions,
- * adds an sRGB OutputIntent, XMP with the PDF/A id, Info, /MarkInfo and /ID.
+ * Refuses encrypted input. FAILS LOUDLY if any font is not embedded (a core
+ * PDF/A rule). Strips JavaScript / OpenAction / Launch actions and embedded
+ * files (unless targeting PDF/A-3), adds an sRGB OutputIntent, XMP with the
+ * PDF/A id synced to DocInfo, Info, /Lang, /MarkInfo and /ID.
  *
  * Returns { bytes, report: { applied: string[], removed: string[], conformance } }.
  * The caller handles the optional "rasterise first" mode (browser-only) and
@@ -505,9 +590,34 @@ export async function archivalPrepPdf(sourceBytes, options = {}) {
   const applied = [];
   const removed = [];
 
+  // --- FAIL LOUDLY on unembedded fonts (a core PDF/A rule) ------------------
+  // A missing font program cannot be repaired from the browser without
+  // re-typesetting, so we refuse rather than silently emit non-conformant
+  // output. The raster path (image-only pages) has no fonts and passes.
+  const { unembedded } = scanFontEmbedding(pdf);
+  if (unembedded.length > 0) {
+    throw new Error(
+      `Cannot produce PDF/A: ${unembedded.length} font(s) are not embedded — `
+      + `${unembedded.join(", ")}. PDF/A requires every font (including the `
+      + `standard 14) to be embedded. Embed the fonts in the source, or use the `
+      + `"rasterise pages" archival mode, then try again.`,
+    );
+  }
+
   // --- remove things PDF/A forbids where easy -------------------------------
   if (stripEntry(pdf, catalog, "OpenAction")) removed.push("document OpenAction (auto-run action)");
   if (stripEntry(pdf, catalog, "AA")) removed.push("document additional-actions (/AA)");
+
+  // Embedded files are forbidden except in PDF/A-3. Strip the catalog
+  // /Names /EmbeddedFiles tree (and the AF associated-files array) unless the
+  // caller is explicitly targeting part 3.
+  if (part !== "3") {
+    const nm = ctx.lookup(catalog.get(PDFName.of("Names")));
+    if (nm && typeof nm.get === "function" && stripEntry(pdf, nm, "EmbeddedFiles")) {
+      removed.push("embedded files (/Names /EmbeddedFiles) — not allowed outside PDF/A-3");
+    }
+    if (stripEntry(pdf, catalog, "AF")) removed.push("document associated files (/AF)");
+  }
 
   // Catalog /Names /JavaScript name tree.
   const names = ctx.lookup(catalog.get(PDFName.of("Names")));
@@ -600,3 +710,228 @@ export async function archivalPrepPdf(sourceBytes, options = {}) {
   const bytes = await pdf.save({ useObjectStreams: false, updateMetadata: false });
   return { bytes, report: { applied, removed, conformance: `PDF/A-${part}${conformance} (best-effort, not validated)` } };
 }
+
+// =============================================================================
+// 3b. PDF/A PRE-FLIGHT CHECKER — reports which machine-checkable criteria a
+// given file passes. HONEST: this checks a well-defined subset of PDF/A-2b /
+// PDF/A-1b rules. It is NOT veraPDF and issues NO certification. Rules we do
+// NOT check (all colour spaces, every annotation flag, deep ICC validity,
+// tagged-structure completeness for level A) are listed under `notChecked`.
+// =============================================================================
+
+const NOT_CHECKED_RULES = [
+  "Every colour operator resolves to a device-independent space (we anchor colour with an OutputIntent but do not walk every content-stream colour operator).",
+  "All annotation appearance streams and flags conform (e.g. every annotation has a normal appearance, no forbidden flags).",
+  "Deep ICC profile validity (we confirm an ICC stream is present with a channel count, not that the profile passes ICC's own validation).",
+  "Complete tagged-structure tree for PDF/A level A (this checker targets level B only).",
+  "Absence of every forbidden operator/filter across all content streams (e.g. LZW, certain transfer functions).",
+];
+
+/** Reads the XMP packet text from the catalog /Metadata stream, or "". */
+function readXmpText(pdf) {
+  const { PDFName } = getPdfLib();
+  const meta = pdf.context.lookup(pdf.catalog.get(PDFName.of("Metadata")));
+  if (!meta || !meta.contents) return "";
+  try {
+    return new TextDecoder("utf-8").decode(meta.contents);
+  } catch {
+    let out = "";
+    for (const b of meta.contents) out += String.fromCharCode(b);
+    return out;
+  }
+}
+
+/** Detects PDF/A-forbidden active content still present in a loaded document. */
+function detectForbidden(pdf) {
+  const { PDFName } = getPdfLib();
+  const ctx = pdf.context;
+  const catalog = pdf.catalog;
+  const result = { javascript: false, launch: false, openAction: false, additionalActions: false, embeddedFiles: false };
+
+  const oaType = actionType(pdf, catalog.get(PDFName.of("OpenAction")));
+  if (catalog.get(PDFName.of("OpenAction")) !== undefined) result.openAction = true;
+  if (oaType === "JavaScript" || oaType === "Launch") result.javascript = result.javascript || oaType === "JavaScript";
+  if (catalog.get(PDFName.of("AA")) !== undefined) result.additionalActions = true;
+
+  const names = ctx.lookup(catalog.get(PDFName.of("Names")));
+  if (names && typeof names.get === "function") {
+    if (names.get(PDFName.of("JavaScript")) !== undefined) result.javascript = true;
+    if (names.get(PDFName.of("EmbeddedFiles")) !== undefined) result.embeddedFiles = true;
+  }
+  if (catalog.get(PDFName.of("AF")) !== undefined) result.embeddedFiles = true;
+
+  for (const page of pdf.getPages()) {
+    const node = page.node;
+    if (node.get(PDFName.of("AA")) !== undefined) result.additionalActions = true;
+    const annots = ctx.lookup(node.get(PDFName.of("Annots")));
+    if (!annots || typeof annots.size !== "function") continue;
+    for (let i = 0; i < annots.size(); i += 1) {
+      const annot = ctx.lookup(annots.get(i));
+      if (!annot || typeof annot.get !== "function") continue;
+      const t = actionType(pdf, annot.get(PDFName.of("A")));
+      if (t === "JavaScript") result.javascript = true;
+      if (t === "Launch") result.launch = true;
+      if (annot.get(PDFName.of("AA")) !== undefined) result.additionalActions = true;
+    }
+  }
+  return result;
+}
+
+/** Best-effort detection of page-level transparency (a group with /S /Transparency). */
+function detectTransparency(pdf) {
+  const { PDFName, PDFDict } = getPdfLib();
+  const ctx = pdf.context;
+  for (const page of pdf.getPages()) {
+    const group = ctx.lookup(page.node.get(PDFName.of("Group")));
+    if (group instanceof PDFDict) {
+      const s = group.get(PDFName.of("S"));
+      if (s && String(s) === "/Transparency") return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Runs the PDF/A pre-flight over raw bytes and returns a pass/fail tally.
+ * Pure (pdf-lib only), Node-testable. Never throws on a normal PDF — an
+ * encrypted file is reported as a failed criterion, not an exception.
+ *
+ * Returns { target, criteria: [{ id, label, pass, detail }], passed, total,
+ *   certified:false, caveat, notChecked }.
+ */
+export async function checkPdfACompliance(bytes, options = {}) {
+  const { PDFDocument, PDFName, PDFArray, PDFDict } = getPdfLib();
+  const part = String(options.part || "2");
+  const conformance = String(options.conformance || "B");
+  const criteria = [];
+  const add = (id, label, pass, detail) => criteria.push({ id, label, pass: Boolean(pass), detail });
+
+  let pdf = null;
+  try {
+    pdf = await PDFDocument.load(bytes, { throwOnInvalidObject: false });
+  } catch (error) {
+    if (/encrypt/i.test(String(error?.message))) {
+      add("encryption", "Not encrypted", false, "The file is encrypted; PDF/A forbids encryption. Remove the password first.");
+    } else {
+      add("parse", "File parses as PDF", false, error?.message || "The file could not be parsed as a PDF.");
+    }
+    const passed = criteria.filter((c) => c.pass).length;
+    return { target: `PDF/A-${part}${conformance}`, criteria, passed, total: criteria.length, certified: false, caveat: NOT_VERAPDF_CAVEAT, notChecked: NOT_CHECKED_RULES };
+  }
+
+  const ctx = pdf.context;
+  const catalog = pdf.catalog;
+
+  // 1. Encryption.
+  add("encryption", "Not encrypted", !pdf.isEncrypted,
+    pdf.isEncrypted ? "The file is encrypted; PDF/A forbids encryption." : "No document encryption.");
+
+  // 2. Fonts embedded.
+  const { fonts, unembedded } = scanFontEmbedding(pdf);
+  add("fonts", "All fonts embedded", unembedded.length === 0,
+    unembedded.length === 0
+      ? `${fonts.length} font(s) checked; all embedded (or self-contained Type3).`
+      : `Not embedded: ${unembedded.join(", ")}. PDF/A requires every font embedded.`);
+
+  // 3. OutputIntent + ICC.
+  const intents = ctx.lookup(catalog.get(PDFName.of("OutputIntents")));
+  let iccChannels = null;
+  let hasOutputIntent = false;
+  if (intents instanceof PDFArray && intents.size() > 0) {
+    const intent = ctx.lookup(intents.get(0));
+    if (intent instanceof PDFDict) {
+      const dest = ctx.lookup(intent.get(PDFName.of("DestOutputProfile")));
+      if (dest && dest.dict && dest.dict.get(PDFName.of("N")) !== undefined) {
+        hasOutputIntent = true;
+        iccChannels = Number(String(dest.dict.get(PDFName.of("N"))));
+      } else if (dest) {
+        hasOutputIntent = true;
+      }
+    }
+  }
+  add("outputIntent", "sRGB OutputIntent with embedded ICC profile", hasOutputIntent,
+    hasOutputIntent
+      ? `OutputIntent present with an embedded ICC DestOutputProfile${iccChannels ? ` (${iccChannels}-channel)` : ""}.`
+      : "No OutputIntent with an embedded ICC profile.");
+
+  // 4/5. XMP present + carries the PDF/A identifier.
+  const xmp = readXmpText(pdf);
+  add("xmp", "XMP metadata packet present", xmp.length > 0,
+    xmp.length > 0 ? "An XMP /Metadata stream is present." : "No XMP /Metadata stream.");
+  const xmpPart = (xmp.match(/<pdfaid:part>\s*([^<\s]+)\s*<\/pdfaid:part>/) || [])[1] || null;
+  const xmpConf = (xmp.match(/<pdfaid:conformance>\s*([^<\s]+)\s*<\/pdfaid:conformance>/) || [])[1] || null;
+  add("pdfaid", "XMP carries pdfaid:part / :conformance", Boolean(xmpPart && xmpConf),
+    xmpPart && xmpConf ? `pdfaid:part=${xmpPart}, pdfaid:conformance=${xmpConf}.` : "The XMP is missing the pdfaid:part / :conformance identifier.");
+
+  // 6. XMP dc:title agrees with DocInfo /Title (PDF/A requires them consistent).
+  const infoTitle = (() => { try { return pdf.getTitle() || ""; } catch { return ""; } })();
+  const xmpTitle = (() => {
+    const m = xmp.match(/<dc:title>[\s\S]*?<rdf:li[^>]*>([\s\S]*?)<\/rdf:li>/);
+    return m ? m[1] : null;
+  })();
+  const titlesAgree = xmpTitle !== null && xmpTitle === xmlEscape(infoTitle) && infoTitle !== "";
+  add("titleSync", "XMP dc:title matches DocInfo /Title", titlesAgree,
+    titlesAgree ? `Both carry "${infoTitle}".`
+      : `XMP dc:title (${xmpTitle === null ? "absent" : `"${xmpTitle}"`}) and DocInfo /Title ("${infoTitle}") must match.`);
+
+  // 7. XMP CreateDate / ModifyDate agree with DocInfo dates (to the second).
+  const toIso = (d) => (d instanceof Date && !Number.isNaN(d.getTime()) ? d.toISOString().replace(/\.\d+Z$/, "Z") : null);
+  const infoCreate = (() => { try { return toIso(pdf.getCreationDate()); } catch { return null; } })();
+  const infoModify = (() => { try { return toIso(pdf.getModificationDate()); } catch { return null; } })();
+  const xmpCreate = (xmp.match(/<xmp:CreateDate>\s*([^<\s]+)\s*<\/xmp:CreateDate>/) || [])[1] || null;
+  const xmpModify = (xmp.match(/<xmp:ModifyDate>\s*([^<\s]+)\s*<\/xmp:ModifyDate>/) || [])[1] || null;
+  const datesAgree = Boolean(xmpCreate && xmpModify && infoCreate && infoModify && xmpCreate === infoCreate && xmpModify === infoModify);
+  add("dateSync", "XMP CreateDate / ModifyDate match DocInfo", datesAgree,
+    datesAgree ? "XMP and DocInfo dates agree." : "XMP xmp:CreateDate / xmp:ModifyDate must match DocInfo CreationDate / ModDate.");
+
+  // 8. No JavaScript / forbidden auto-run actions.
+  const forbidden = detectForbidden(pdf);
+  const noJs = !forbidden.javascript && !forbidden.launch && !forbidden.additionalActions;
+  add("noJavaScript", "No JavaScript / Launch / additional-actions", noJs,
+    noJs ? "No document or annotation JavaScript, /Launch, or /AA found."
+      : `Forbidden active content present: ${[forbidden.javascript && "JavaScript", forbidden.launch && "/Launch", forbidden.additionalActions && "/AA"].filter(Boolean).join(", ")}.`);
+
+  // 9. No embedded files (unless PDF/A-3).
+  const embeddedOk = part === "3" || !forbidden.embeddedFiles;
+  add("embeddedFiles", part === "3" ? "Embedded files allowed (PDF/A-3)" : "No embedded files", embeddedOk,
+    part === "3" ? "PDF/A-3 permits embedded files." : forbidden.embeddedFiles ? "Embedded files present; forbidden outside PDF/A-3." : "No embedded files.");
+
+  // 10. Device-independent colour anchor (best-effort — see notChecked).
+  add("deviceIndependentColor", "Device-independent colour anchor", hasOutputIntent,
+    hasOutputIntent ? "An OutputIntent supplies a device-independent colour anchor for device colours."
+      : "No OutputIntent, so device colours (DeviceRGB/Gray/CMYK) have no PDF/A colour anchor.");
+
+  // 11. No detectable transparency (best-effort).
+  const transparency = detectTransparency(pdf);
+  add("transparency", "No detectable transparency group", !transparency,
+    transparency ? "A page transparency group (/Group /S /Transparency) was detected; PDF/A-1 forbids transparency (PDF/A-2 allows it with a blending colour space)."
+      : "No page-level transparency group detected.");
+
+  // 12. Document /Lang.
+  const hasLang = catalog.get(PDFName.of("Lang")) !== undefined;
+  add("lang", "Document /Lang set", hasLang, hasLang ? "A document language is declared." : "No document /Lang.");
+
+  // 13. /MarkInfo.
+  const hasMarkInfo = catalog.get(PDFName.of("MarkInfo")) !== undefined;
+  add("markInfo", "/MarkInfo present", hasMarkInfo, hasMarkInfo ? "/MarkInfo is present." : "No /MarkInfo dictionary.");
+
+  // 14. Document /ID.
+  const hasId = Boolean(ctx.trailerInfo && ctx.trailerInfo.ID);
+  add("documentId", "Document /ID present", hasId, hasId ? "A trailer /ID is present." : "No trailer /ID.");
+
+  const passed = criteria.filter((c) => c.pass).length;
+  return {
+    target: `PDF/A-${part}${conformance}`,
+    criteria,
+    passed,
+    total: criteria.length,
+    certified: false,
+    caveat: NOT_VERAPDF_CAVEAT,
+    notChecked: NOT_CHECKED_RULES,
+  };
+}
+
+const NOT_VERAPDF_CAVEAT =
+  "Hardened toward PDF/A-2b, not veraPDF-certified. This is a best-effort self-check of "
+  + "machine-checkable rules from the browser — it cannot guarantee every veraPDF rule, and it "
+  + "issues no certification. See the not-checked list for rules outside this checker's scope.";
