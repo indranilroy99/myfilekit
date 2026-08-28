@@ -50,6 +50,7 @@ import { inspectImageMetadata, metadataReportToJson } from "./services/metadata.
 import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, getPdfLib, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "./services/pdf.service.js";
 import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip, rasterRebuild } from "./services/pdf-render.service.js";
 import { applyTextEdits, mapPdfFontToStandard, standardFontKey, textItemToPageRect } from "./services/pdf-textedit.service.js";
+import { parseParagraphs, detectColumnLayout, flowBlocks, rebuildReflowedPdf } from "./services/pdf-reflow.service.js";
 import { MyFileKit } from "./api/myfilekit.js";
 import { applyAnnotations, screenToPagePoint, pagePointToScreen, HIGHLIGHT_PALETTE, MAX_ANNOTATIONS_PER_PAGE } from "./services/annotate.service.js";
 import { archivalPrepPdf, assertPdfDecryptable, comparePdfText, comparePdfReportText, estimateSkewAngle } from "./services/pdf-review.service.js";
@@ -1156,6 +1157,7 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (tool.id === "rotate-pdf-tool") return <RotatePdfTool tool={tool} />;
   if (tool.id === "add-text-to-pdf-tool") return <AddTextToPdfTool tool={tool} />;
   if (tool.id === "edit-pdf-text-tool") return <EditPdfTextTool tool={tool} />;
+  if (tool.id === "reflow-pdf-tool") return <ReflowEditorTool tool={tool} />;
   if (tool.id === "add-signature-to-pdf-tool") return <AddSignatureToPdfTool tool={tool} />;
   if (tool.id === "annotate-pdf-tool") return <AnnotatePdfTool tool={tool} />;
   if (tool.id === "pdf-page-numbers-tool") return <PdfPageNumbersTool tool={tool} />;
@@ -1716,6 +1718,326 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
       <ResultConsequenceNote>Edits are applied by covering and redrawing — a longer replacement re-wraps within its own block, but the surrounding text is never re-flowed, and the original text remains in the file underneath the cover. For permanent removal of sensitive text, use Redact PDF instead.</ResultConsequenceNote>
     </ToolForm>
   );
+}
+
+// --- Reflow Editor (genuine paragraph reflow) --------------------------------
+// The heavier sibling of Edit PDF Text. Instead of covering one run and redrawing
+// it in the SAME box, this extracts the document's text as an ordered sequence of
+// PARAGRAPHS, lets the user edit/add/delete/split/merge them, then RE-LAYS-OUT the
+// whole single text column: an edit re-wraps its paragraph AND pushes the
+// following paragraphs down, repaginating onto new pages on overflow. The pure
+// model + layout engine (parse/flow/rebuild) lives in services/pdf-reflow.service.js;
+// only the pdf.js extraction (needs a browser canvas + worker) is here.
+
+type ReflowBlock = {
+  id: string;
+  type: "paragraph" | "heading" | "list-item";
+  text: string;
+  fontSize: number;
+  fontName: string;
+  fontKey: string;
+  family: string;
+  bold: boolean;
+  italic: boolean;
+  align: "left" | "center" | "right";
+  color: { r: number; g: number; b: number } | null;
+  sourcePage: number;
+};
+type ReflowModel = { pageWidth: number; pageHeight: number; column: { x: number; width: number; top: number; bottom: number } };
+
+let reflowIdCounter = 0;
+const nextReflowId = () => `b${(reflowIdCounter += 1).toString(36)}`;
+
+// CSS font string that approximates a block's matched base-14 substitute, so the
+// live preview wraps roughly where the exported PDF will (which measures with the
+// real pdf-lib standard font).
+function reflowFontCss(block: ReflowBlock, sizePx: number) {
+  const family = block.family === "Times"
+    ? 'Georgia, "Times New Roman", serif'
+    : block.family === "Courier"
+      ? '"Courier New", monospace'
+      : "Helvetica, Arial, sans-serif";
+  return `${block.italic ? "italic " : ""}${block.bold ? "700 " : "400 "}${sizePx}px ${family}`;
+}
+
+// One shared canvas 2D context for measuring preview text width.
+let reflowMeasureCtx: CanvasRenderingContext2D | null = null;
+function reflowMeasure(text: string, block: ReflowBlock) {
+  if (!reflowMeasureCtx) reflowMeasureCtx = document.createElement("canvas").getContext("2d");
+  if (!reflowMeasureCtx) return String(text).length * block.fontSize * 0.5;
+  reflowMeasureCtx.font = reflowFontCss(block, block.fontSize);
+  return reflowMeasureCtx.measureText(String(text)).width;
+}
+
+function ReflowEditorTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [doc, setDoc] = useState<any>(null);
+  const [fileName, setFileName] = useState("document.pdf");
+  const [blocks, setBlocks] = useState<ReflowBlock[]>([]);
+  const [model, setModel] = useState<ReflowModel | null>(null);
+  const [complexPages, setComplexPages] = useState<number[]>([]);
+  const [extracted, setExtracted] = useState(false);
+  const [status, setStatus] = useState(initialStatus);
+  const bytesRef = useRef<Uint8Array | null>(null);
+  const caretRef = useRef<Map<string, number>>(new Map());
+
+  const reset = () => {
+    setFiles([]);
+    setDoc(null);
+    setBlocks([]);
+    setModel(null);
+    setComplexPages([]);
+    setExtracted(false);
+    bytesRef.current = null;
+    caretRef.current = new Map();
+    setStatus(initialStatus);
+  };
+
+  useEffect(() => () => { try { doc?.destroy?.(); } catch { /* already gone */ } }, [doc]);
+
+  // Load + extract: render nothing to screen, but read every page's text into an
+  // ordered list of flowable blocks and detect complex (multi-column/table) pages.
+  useEffect(() => {
+    let cancelled = false;
+    setDoc(null);
+    setBlocks([]);
+    setModel(null);
+    setComplexPages([]);
+    setExtracted(false);
+    if (!files.length) return undefined;
+    runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const buffer = new Uint8Array(await file.arrayBuffer());
+      bytesRef.current = buffer.slice();
+      const { loadPdfDocument } = await import("./lib/pdfjs");
+      const loaded = await loadPdfDocument(buffer.slice());
+      if (cancelled) { try { await loaded.destroy(); } catch { /* ignore */ } return "Ready."; }
+      setFileName(file.name);
+      setDoc(loaded);
+
+      const total = loaded.numPages;
+      const page1 = await loaded.getPage(1);
+      const view = page1.view;
+      const pageWidth = view[2] - view[0];
+      const pageHeight = view[3] - view[1];
+      const collected: ReflowBlock[] = [];
+      const complex: number[] = [];
+      let column: ReflowModel["column"] | null = null;
+
+      for (let pageNumber = 1; pageNumber <= total; pageNumber += 1) {
+        if (cancelled) break;
+        setStatus({ tone: "idle", message: `Extracting paragraphs from page ${pageNumber} of ${total}…`, progress: { value: pageNumber - 1, total, label: "Reading text" } });
+        const page = pageNumber === 1 ? page1 : await loaded.getPage(pageNumber);
+        const content = await page.getTextContent();
+        const geom = { width: pageWidth, height: pageHeight };
+        const items = content.items
+          .filter((raw: any) => typeof raw.str === "string")
+          .map((raw: any) => ({ str: raw.str, transform: raw.transform, width: raw.width, height: raw.height, fontName: resolveRunFontName(page, content, raw.fontName) }));
+        const layout = detectColumnLayout(items, geom);
+        if (pageNumber === 1) column = layout.column;
+        if (layout.complex) complex.push(pageNumber);
+        for (const parsed of parseParagraphs(items, geom)) {
+          if (!parsed.text) continue;
+          collected.push({ id: nextReflowId(), sourcePage: pageNumber, ...parsed } as ReflowBlock);
+        }
+        page.cleanup();
+      }
+      if (cancelled) return "Ready.";
+
+      const margin = 54;
+      setModel({ pageWidth, pageHeight, column: column || { x: margin, width: pageWidth - margin * 2, top: pageHeight - margin, bottom: margin } });
+      setBlocks(collected);
+      setComplexPages(complex);
+      setExtracted(true);
+      const warn = complex.length ? ` ${complex.length} page${complex.length === 1 ? "" : "s"} look multi-column/tabular — see the warning below.` : "";
+      return `Extracted ${collected.length} paragraph${collected.length === 1 ? "" : "s"} from ${total} page${total === 1 ? "" : "s"}. Edit any paragraph — the whole column re-flows live.${warn}`;
+    });
+    return () => { cancelled = true; };
+  }, [files, tool.file]);
+
+  // Live reflow: flow the (edited) blocks down the column with a canvas width model.
+  const flowed = useMemo(() => {
+    if (!model || !blocks.length) return null;
+    try {
+      return flowBlocks(blocks, model.column, { measure: reflowMeasure as any });
+    } catch {
+      return null;
+    }
+  }, [blocks, model]);
+
+  const updateBlock = (id: string, patch: Partial<ReflowBlock>) =>
+    setBlocks((current) => current.map((block) => (block.id === id ? { ...block, ...patch } : block)));
+
+  const deleteBlock = (id: string) => {
+    caretRef.current.delete(id);
+    setBlocks((current) => current.filter((block) => block.id !== id));
+  };
+
+  const addBlockAfter = (index: number) => setBlocks((current) => {
+    const template = current[index];
+    const fresh: ReflowBlock = {
+      id: nextReflowId(),
+      type: "paragraph",
+      text: "New paragraph.",
+      fontSize: template ? template.fontSize : 11,
+      fontName: template ? template.fontName : "",
+      fontKey: template ? template.fontKey : "Helvetica",
+      family: template ? template.family : "Helvetica",
+      bold: false,
+      italic: false,
+      align: "left",
+      color: null,
+      sourcePage: template ? template.sourcePage : 1,
+    };
+    const next = current.slice();
+    next.splice(index + 1, 0, fresh);
+    return next;
+  });
+
+  const mergeUp = (index: number) => setBlocks((current) => {
+    if (index <= 0) return current;
+    const next = current.slice();
+    const prev = next[index - 1];
+    next[index - 1] = { ...prev, text: `${prev.text} ${next[index].text}`.replace(/\s+/g, " ").trim() };
+    next.splice(index, 1);
+    return next;
+  });
+
+  const splitBlock = (index: number) => setBlocks((current) => {
+    const block = current[index];
+    if (!block) return current;
+    const caret = caretRef.current.get(block.id);
+    const at = Number.isFinite(caret) && caret! > 0 && caret! < block.text.length ? caret! : Math.floor(block.text.length / 2);
+    const head = block.text.slice(0, at).trim();
+    const tail = block.text.slice(at).trim();
+    if (!head || !tail) return current;
+    const next = current.slice();
+    next[index] = { ...block, text: head };
+    next.splice(index + 1, 0, { ...block, id: nextReflowId(), text: tail });
+    return next;
+  });
+
+  const download = () => runSafely(setStatus, async () => {
+    if (!model) throw new Error("Load a PDF first.");
+    const usable = blocks.filter((block) => block.text.trim());
+    if (!usable.length) throw new Error("There is no text to reflow — add or keep at least one paragraph.");
+    const payload = usable.map((block) => ({ type: block.type, text: block.text, fontSize: block.fontSize, fontKey: block.fontKey, family: block.family, bold: block.bold, italic: block.italic, align: block.align, color: block.color }));
+    const out = await rebuildReflowedPdf(bytesRef.current || new Uint8Array(), { pageWidth: model.pageWidth, pageHeight: model.pageHeight, column: model.column, blocks: payload });
+    downloadBytes(out, withExtension(`${safeFilename(fileName)}-reflowed`, "pdf"), "application/pdf");
+    return `Reflowed ${usable.length} paragraph${usable.length === 1 ? "" : "s"} into ${flowed ? flowed.pageCount : 1} page${flowed && flowed.pageCount === 1 ? "" : "s"}. Text was re-wrapped and repaginated; images and exact original positions are not preserved.`;
+  });
+
+  const previewScale = model ? 320 / model.pageWidth : 1;
+
+  return (
+    <ToolForm status={status} onReset={reset}>
+      <div className="surface-muted wabi-card-edge grid gap-1 p-4 text-sm font-semibold leading-6 text-neutral-600">
+        <p className="text-xs font-black uppercase text-neutral-500">How this works — and its limits</p>
+        <p className="text-[var(--foreground)]">This is genuine reflow: edit a paragraph and the whole text column re-wraps, the following paragraphs move, and content repaginates onto new pages when it overflows. It is the heavier sibling of <a className="underline" href="#edit-pdf-text-tool">Edit PDF Text</a> (which edits one block in place and moves nothing).</p>
+        <ul className="ml-4 list-disc">
+          <li>Works well for <strong>single-column text documents</strong>. Multi-column pages, tables, and complex layouts may reorder or misplace content — for those, prefer <a className="underline" href="#edit-pdf-text-tool">Edit PDF Text</a>.</li>
+          <li>The output <strong>rebuilds the text column</strong> on fresh pages, so exact original positioning of untouched paragraphs may shift slightly.</li>
+          <li>Fonts are matched to <strong>base-14 substitutes</strong> (Helvetica / Times / Courier); the original embedded font is not reused. Drawn text is <strong>Latin-1 only</strong> (no CJK/emoji).</li>
+          <li><strong>Images and other non-text content are not carried</strong> into the reflowed text column. Needs a real text layer — scanned PDFs must be <a className="underline" href="#ocr-pdf-tool">OCR'd</a> first.</li>
+          <li>This is honest single-column reflow, <strong>not pixel-perfect Adobe reflow</strong>.</li>
+        </ul>
+      </div>
+
+      <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+
+      {complexPages.length > 0 && (
+        <div className="surface-card wabi-card-edge grid gap-1 border-[var(--warning)] p-4 text-sm font-semibold leading-6 text-neutral-600">
+          <p className="text-xs font-black uppercase text-[var(--warning)]">Complex layout detected</p>
+          <p className="text-[var(--foreground)]">Page{complexPages.length === 1 ? "" : "s"} {complexPages.join(", ")} look multi-column or tabular. Reflow treats the document as one single column, so side-by-side content there may be reordered. You can still proceed, but for those pages <a className="underline" href="#edit-pdf-text-tool">Edit PDF Text</a> preserves the layout.</p>
+        </div>
+      )}
+
+      {extracted && blocks.length === 0 && (
+        <div className="surface-card wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+          <p className="font-black text-[var(--foreground)]">No editable text found</p>
+          <p className="mt-1">This PDF has no extractable text runs — it is likely a scan or image. Run <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a> first, then reflow the OCR'd copy.</p>
+        </div>
+      )}
+
+      {blocks.length > 0 && model && (
+        <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
+          <div className="grid gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-black uppercase text-neutral-500">Paragraphs ({blocks.length})</p>
+              <span className="text-xs font-bold text-neutral-500">Reflows to {flowed ? flowed.pageCount : 1} page{flowed && flowed.pageCount === 1 ? "" : "s"}</span>
+            </div>
+            <div className="grid gap-3" style={{ maxHeight: "62vh", overflowY: "auto" }}>
+              {blocks.map((block, index) => (
+                <div key={block.id} className="surface-card wabi-card-edge grid gap-2 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-black uppercase text-neutral-500">p{block.sourcePage}</span>
+                    <select className="field-input h-8 w-auto py-0 text-xs" value={block.type} aria-label="Paragraph type" onChange={(event) => updateBlock(block.id, { type: event.target.value as ReflowBlock["type"], isHeading: event.target.value === "heading" } as Partial<ReflowBlock>)}>
+                      <option value="paragraph">Paragraph</option>
+                      <option value="heading">Heading</option>
+                      <option value="list-item">List item</option>
+                    </select>
+                    <select className="field-input h-8 w-auto py-0 text-xs" value={block.align} aria-label="Alignment" onChange={(event) => updateBlock(block.id, { align: event.target.value as ReflowBlock["align"] })}>
+                      <option value="left">Left</option>
+                      <option value="center">Center</option>
+                      <option value="right">Right</option>
+                    </select>
+                    <div className="ml-auto flex flex-wrap gap-1">
+                      <button className="text-xs font-black uppercase text-neutral-500 hover:underline" type="button" onClick={() => splitBlock(index)}><Scissors size={12} className="inline" /> Split</button>
+                      <button className="text-xs font-black uppercase text-neutral-500 hover:underline disabled:opacity-40" type="button" disabled={index === 0} onClick={() => mergeUp(index)}>Merge up</button>
+                      <button className="text-xs font-black uppercase text-[var(--danger-fg)] hover:underline" type="button" onClick={() => deleteBlock(block.id)}>Delete</button>
+                    </div>
+                  </div>
+                  <textarea
+                    className="field-input min-h-16 font-mono text-sm leading-6"
+                    value={block.text}
+                    aria-label={`Paragraph ${index + 1} on page ${block.sourcePage}`}
+                    onChange={(event) => updateBlock(block.id, { text: event.target.value })}
+                    onSelect={(event) => caretRef.current.set(block.id, (event.target as HTMLTextAreaElement).selectionStart)}
+                    onKeyUp={(event) => caretRef.current.set(block.id, (event.target as HTMLTextAreaElement).selectionStart)}
+                    onClick={(event) => caretRef.current.set(block.id, (event.target as HTMLTextAreaElement).selectionStart)}
+                  />
+                  <button className="justify-self-start text-xs font-black uppercase text-[var(--moss)] hover:underline" type="button" onClick={() => addBlockAfter(index)}>+ Add paragraph below</button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <p className="text-xs font-black uppercase text-neutral-500">Live reflow preview</p>
+            <div className="surface-card wabi-card-edge grid justify-items-center gap-3 p-3" style={{ maxHeight: "62vh", overflowY: "auto" }}>
+              {flowed ? flowed.pages.map((page, pi) => (
+                <div key={pi} className="relative shrink-0 border border-[var(--border)] bg-white shadow-sm" style={{ width: model.pageWidth * previewScale, height: model.pageHeight * previewScale }}>
+                  {page.lines.map((line, li) => (
+                    <span
+                      key={li}
+                      className="absolute whitespace-pre text-black"
+                      style={{ left: line.x * previewScale, top: (model.pageHeight - line.baseline) * previewScale - line.fontSize * previewScale, ...reflowPreviewLineStyle(blocks[line.block], line.fontSize * previewScale) }}
+                    >{line.text}</span>
+                  ))}
+                  <span className="absolute bottom-0 right-1 text-[8px] font-bold text-neutral-400">{pi + 1}</span>
+                </div>
+              )) : <p className="text-sm font-semibold text-neutral-500">Preview will appear here.</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <PrimaryButton label="Reflow & download PDF" disabled={!extracted || !blocks.some((block) => block.text.trim())} onClick={download} />
+
+      <ResultConsequenceNote>Reflow rebuilds the document's text column on fresh pages: your edits re-wrap and the following paragraphs move and repaginate. Untouched paragraphs may shift slightly, fonts are base-14 substitutes, and images / non-text content are not carried over. To edit a single run without moving anything, use Edit PDF Text.</ResultConsequenceNote>
+    </ToolForm>
+  );
+}
+
+// Inline CSS for a preview line, matching the block's substitute font/style.
+function reflowPreviewLineStyle(block: ReflowBlock | undefined, sizePx: number): React.CSSProperties {
+  if (!block) return {};
+  const fontFamily = block.family === "Times"
+    ? 'Georgia, "Times New Roman", serif'
+    : block.family === "Courier"
+      ? '"Courier New", monospace'
+      : "Helvetica, Arial, sans-serif";
+  return { fontFamily, fontWeight: block.bold ? 700 : 400, fontStyle: block.italic ? "italic" : "normal", lineHeight: 1, fontSize: sizePx };
 }
 
 function AddSignatureToPdfTool({ tool }: { tool: Tool }) {

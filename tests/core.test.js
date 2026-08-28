@@ -4764,7 +4764,7 @@ test("Text & Data tools are fully grouped too", () => {
 test("isNew is boolean everywhere and flags the newest tools", () => {
   for (const tool of tools) assert.equal(typeof tool.isNew, "boolean");
   const expectedNew = [
-    "edit-pdf-text-tool", "annotate-pdf-tool", "compare-pdf-tool", "sign-pdf-tool", "verify-signature-tool",
+    "edit-pdf-text-tool", "reflow-pdf-tool", "annotate-pdf-tool", "compare-pdf-tool", "sign-pdf-tool", "verify-signature-tool",
     "batch-process-tool", "smart-split-pdf-tool", "impose-pdf-tool", "bookmarks-editor-tool",
     "create-form-tool", "deskew-pdf-tool", "pdfa-prep-tool", "sanitize-pdf-tool", "extract-images-tool",
     "accessibility-check-tool", "tag-pdf-tool", "translate-pdf-tool", "batch-workflow-tool",
@@ -6458,4 +6458,167 @@ test("New & Notable shelf points at real, isNew flagship tools", () => {
   }
   // The shelf features this release's flagships, not the previous one.
   assert.ok(shelf.includes("sanitize-pdf-tool"), "shelf features the Sanitize flagship");
+});
+
+// --- Reflow Editor: genuine paragraph reflow ---------------------------------
+// The pure model + layout engine (parseParagraphs / flowBlocks / rebuildReflowedPdf)
+// re-lays-out the whole text column so an edit re-wraps its paragraph AND pushes
+// the following paragraphs down, repaginating on overflow. The pdf.js extraction
+// from a real PDF is browser-only; these tests exercise the pure engine.
+
+test("parseParagraphs groups body lines into one paragraph, then flags a heading, in reading order", async () => {
+  const { parseParagraphs } = await import("../src/services/pdf-reflow.service.js");
+  const item = (str, x, y, size, width, font) => ({ str, transform: [size, 0, 0, size, x, y], width, height: size, fontName: font });
+  // Three body lines (size 12, ~14pt leading) form ONE paragraph; then a large
+  // vertical gap and a bigger, bold line reads as a HEADING.
+  const items = [
+    item("Line one of the body", 72, 700, 12, 120, "Helvetica"),
+    item("Line two of the body", 72, 686, 12, 120, "Helvetica"),
+    item("Line three of the body", 72, 672, 12, 130, "Helvetica"),
+    item("Big Heading", 72, 620, 18, 90, "Helvetica-Bold"),
+  ];
+  const blocks = parseParagraphs(items, { width: 612, height: 792 });
+  assert.equal(blocks.length, 2, "one paragraph + one heading");
+  assert.equal(blocks[0].type, "paragraph");
+  assert.equal(blocks[0].isHeading, false);
+  assert.equal(blocks[0].text, "Line one of the body Line two of the body Line three of the body");
+  assert.equal(blocks[1].type, "heading");
+  assert.equal(blocks[1].isHeading, true);
+  assert.equal(blocks[1].text, "Big Heading");
+  assert.equal(blocks[1].bold, true, "heading picked up the bold font");
+});
+
+test("flowBlocks re-wraps a longer edit, moves following blocks, and paginates on overflow", async () => {
+  const { flowBlocks } = await import("../src/services/pdf-reflow.service.js");
+  // Simple measured-width model: ~0.5em per character.
+  const measure = (text, block) => text.length * block.fontSize * 0.5;
+  const column = { x: 72, width: 200, top: 700, bottom: 100 };
+  const para = (text) => ({ type: "paragraph", text, fontSize: 12, align: "left" });
+
+  const followerText = "The following paragraph after the first.";
+  const longText = "The quick brown fox jumps over the lazy dog again and again while the following paragraph waits its turn to be pushed further down the page as the text reflows naturally.";
+
+  const shortRun = flowBlocks([para("Short intro."), para(followerText)], column, { measure });
+  const longRun = flowBlocks([para(longText), para(followerText)], column, { measure });
+
+  // No wrapped line exceeds the column width (1pt wrap slack).
+  for (const run of [shortRun, longRun]) {
+    for (const page of run.pages) {
+      for (const line of page.lines) assert.ok(measure(line.text, { fontSize: 12 }) <= 201, `line "${line.text}" fits column`);
+    }
+  }
+
+  // The long first paragraph wraps to more lines than the short one.
+  const firstCount = (run) => run.pages.flatMap((p) => p.lines).filter((l) => l.block === 0).length;
+  assert.ok(firstCount(longRun) > firstCount(shortRun), "longer edit uses more lines");
+
+  // The following block moved: lower baseline (or a later page) after the long edit.
+  const follower = (run) => {
+    for (let pi = 0; pi < run.pages.length; pi += 1) {
+      const line = run.pages[pi].lines.find((l) => l.block === 1);
+      if (line) return { page: pi, baseline: line.baseline };
+    }
+    return null;
+  };
+  const fShort = follower(shortRun);
+  const fLong = follower(longRun);
+  assert.ok(fLong.page > fShort.page || fLong.baseline < fShort.baseline, "following block shifted down after the long edit");
+
+  // Force overflow with a short column: the long paragraph paginates.
+  const tight = flowBlocks([para(longText)], { x: 72, width: 200, top: 700, bottom: 640 }, { measure });
+  assert.ok(tight.pageCount >= 2, "overflow paginates to a new page");
+});
+
+test("rebuildReflowedPdf reflows edited blocks, paginates on overflow, and rejects non-Latin", async () => {
+  const { rebuildReflowedPdf, flowBlocks } = await import("../src/services/pdf-reflow.service.js");
+  const { PDFDocument, StandardFonts } = window.PDFLib;
+
+  const column = { x: 72, width: 400, top: 720, bottom: 72 };
+  const blocks = (firstText) => ([
+    { type: "paragraph", text: firstText, fontSize: 12, fontKey: "Helvetica", align: "left", color: null },
+    { type: "paragraph", text: "SECONDPARAGRAPHMARKER stays after the first.", fontSize: 12, fontKey: "Helvetica", align: "left", color: null },
+  ]);
+
+  // Real pdf-lib measuring for the baseline-moved assertion (matches the rebuild).
+  const measureDoc = await PDFDocument.create();
+  const helv = await measureDoc.embedFont(StandardFonts.Helvetica);
+  const measure = (text, block) => helv.widthOfTextAtSize(String(text), block.fontSize);
+
+  const longFirst = "The quick brown fox jumps over the lazy dog and keeps on running well past the edge so this paragraph must wrap onto several lines and push everything below it further down the page.";
+
+  const secondShort = flowBlocks(blocks("Short."), column, { measure }).pages[0].lines.find((l) => l.block === 1).baseline;
+  const secondLong = flowBlocks(blocks(longFirst), column, { measure }).pages[0].lines.find((l) => l.block === 1).baseline;
+  assert.ok(secondLong < secondShort, "second paragraph baseline moved DOWN after the long edit (reflowed)");
+
+  // Rebuild the long edit and reload: the second paragraph's text is present.
+  const out = await rebuildReflowedPdf(new Uint8Array(), { pageWidth: 612, pageHeight: 792, column, blocks: blocks(longFirst) });
+  assert.ok(out instanceof Uint8Array && out.byteLength > 0);
+  const ops = (await decodeAllPageOps(out)).join("\n");
+  assert.ok(ops.includes(hexOf("SECONDPARAGRAPHMARKER")), "second paragraph drawn in the reflowed output");
+
+  // Force overflow: a single long paragraph in a short, narrow column paginates.
+  const overflow = await rebuildReflowedPdf(new Uint8Array(), {
+    pageWidth: 612, pageHeight: 792,
+    column: { x: 72, width: 200, top: 720, bottom: 660 },
+    blocks: [{ type: "paragraph", text: longFirst, fontSize: 12, fontKey: "Helvetica" }],
+  });
+  const reloaded = await PDFDocument.load(overflow);
+  assert.ok(reloaded.getPageCount() >= 2, "overflow created a second page");
+
+  // Non-Latin text raises the friendly Latin-1 error.
+  await assert.rejects(
+    () => rebuildReflowedPdf(new Uint8Array(), { pageWidth: 612, pageHeight: 792, column, blocks: [{ type: "paragraph", text: "日本語の段落", fontSize: 12, fontKey: "Helvetica" }] }),
+    /Latin-1/,
+  );
+
+  // An empty model is rejected.
+  await assert.rejects(() => rebuildReflowedPdf(new Uint8Array(), { pageWidth: 612, pageHeight: 792, column, blocks: [] }), /no text to reflow/i);
+});
+
+test("detectColumnLayout flags side-by-side / tabular content and derives a column box", async () => {
+  const { detectColumnLayout } = await import("../src/services/pdf-reflow.service.js");
+  const item = (str, x, y, size, width) => ({ str, transform: [size, 0, 0, size, x, y], width, height: size, fontName: "Helvetica" });
+
+  // A clean single-column page: no big internal gaps.
+  const single = detectColumnLayout([
+    item("First line of a normal paragraph", 72, 700, 12, 300),
+    item("Second line of that paragraph", 72, 686, 12, 300),
+    item("Third line continues the flow", 72, 672, 12, 300),
+  ], { width: 612, height: 792 });
+  assert.equal(single.complex, false, "single-column page is not flagged complex");
+  assert.ok(single.column.width > 0 && single.column.x >= 0, "derived a column box");
+
+  // A table-like page: each line has two runs far apart (a wide internal gap).
+  const rows = [];
+  for (let i = 0; i < 4; i += 1) {
+    const y = 700 - i * 16;
+    rows.push(item(`Label ${i}`, 72, y, 12, 60));
+    rows.push(item(`Value ${i}`, 360, y, 12, 60)); // gap 360-132 = 228 >> 3.2*12
+  }
+  const table = detectColumnLayout(rows, { width: 612, height: 792 });
+  assert.equal(table.tableLike, true, "wide side-by-side runs flagged as tabular");
+  assert.equal(table.complex, true, "complex layout warns the user to prefer Edit PDF Text");
+});
+
+test("reflow-pdf-tool is registered, routed, wired, cross-references Edit PDF Text, and is discoverable", () => {
+  const found = tools.find((tool) => tool.id === "reflow-pdf-tool");
+  assert.ok(found, "reflow-pdf-tool registered");
+  assert.equal(found.category, "PDF Tools");
+  assert.equal(found.status, "available");
+  assert.equal(found.localProcessing, true);
+  assert.equal(found.group, "Edit & Annotate");
+  assert.equal(found.file.maxFiles, 1);
+  assert.equal(routeForHash(found.route).tool.id, "reflow-pdf-tool");
+
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.ok(appSource.includes(`"reflow-pdf-tool"`), "wired into ToolRenderer");
+  assert.ok(appSource.includes("ReflowEditorTool"), "component defined");
+
+  // The two edit tools cross-reference each other honestly.
+  assert.match(found.description.toLowerCase(), /edit pdf text/);
+  const editText = tools.find((tool) => tool.id === "edit-pdf-text-tool");
+  assert.match(editText.description.toLowerCase(), /reflow/);
+
+  const searchable = [found.name, found.description, ...found.keywords].join(" ").toLowerCase();
+  for (const term of ["reflow", "paragraph"]) assert.match(searchable, new RegExp(term));
 });
