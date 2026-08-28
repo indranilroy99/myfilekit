@@ -6349,6 +6349,301 @@ test("auto-tag: a malicious lang string cannot inject active content into the ca
   assert.equal(okDoc.catalog.get(PDFName.of("Lang")).decodeText(), "en-US", "a valid tag is written unchanged");
 });
 
+// --- Accessibility: CERTIFIED-grade structure (lists / tables / links /
+// artifacts / role map / heading nesting) -------------------------------------
+// The tagger now builds a much fuller PDF/UA-oriented structure tree. These evals
+// pin each new structure type from a real remediation output, and the expanded
+// checker's new criteria + honest not-certified caveat.
+
+// Small struct-tree navigators shared by the tests below.
+function a11yKidsOf(ctx, PDFName, el) {
+  const k = el.get(PDFName.of("K"));
+  const resolved = k ? ctx.lookup(k) : undefined;
+  const out = [];
+  if (resolved instanceof window.PDFLib.PDFArray) {
+    for (let i = 0; i < resolved.size(); i += 1) {
+      const child = ctx.lookup(resolved.get(i));
+      if (child && typeof child.get === "function") out.push(child);
+    }
+  } else if (resolved && typeof resolved.get === "function") {
+    out.push(resolved);
+  }
+  return out;
+}
+function a11yRole(ctx, PDFName, el) {
+  const s = el.get(PDFName.of("S"));
+  return s ? s.toString().replace(/^\//, "") : "";
+}
+function a11yDocEl(ctx, PDFName, cat) {
+  const structRoot = ctx.lookup(cat.get(PDFName.of("StructTreeRoot")));
+  return { structRoot, docEl: ctx.lookup(structRoot.get(PDFName.of("K"))) };
+}
+
+async function makeLinkPdf() {
+  const { PDFDocument, PDFName, PDFString } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]);
+  const ctx = doc.context;
+  const annot = ctx.obj({
+    Type: "Annot", Subtype: "Link", Rect: [72, 690, 300, 710],
+    A: ctx.obj({ S: "URI", URI: PDFString.of("https://example.com") }),
+  });
+  page.node.set(PDFName.of("Annots"), ctx.obj([ctx.register(annot)]));
+  return doc.save();
+}
+
+test("auto-tag groups consecutive bullet lines into an /L > /LI > /Lbl + /LBody list", async () => {
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const bytes = await makeTextPdf(1, "Doc");
+  const { bytes: out, report } = await a11y.remediatePdfAccessibility(bytes, {
+    lang: "en-US", title: "Doc",
+    textBlocks: [
+      { page: 1, text: "• First item", x: 72, y: 700, fontSize: 12, heading: 0 },
+      { page: 1, text: "• Second item", x: 72, y: 684, fontSize: 12, heading: 0 },
+      { page: 1, text: "• Third item", x: 72, y: 668, fontSize: 12, heading: 0 },
+    ],
+    figures: [],
+  });
+  assert.equal(report.structSummary.lists, 1, "one /L list");
+  assert.equal(report.structSummary.listItems, 3, "three /LI items");
+
+  const doc = await PDFDocument.load(out, { throwOnInvalidObject: false });
+  const ctx = doc.context;
+  const { docEl } = a11yDocEl(ctx, PDFName, doc.catalog);
+  const lists = a11yKidsOf(ctx, PDFName, docEl).filter((el) => a11yRole(ctx, PDFName, el) === "L");
+  assert.equal(lists.length, 1, "exactly one /L element under the document");
+  const items = a11yKidsOf(ctx, PDFName, lists[0]);
+  assert.equal(items.length, 3, "three /LI children");
+  for (const li of items) {
+    assert.equal(a11yRole(ctx, PDFName, li), "LI");
+    const roles = a11yKidsOf(ctx, PDFName, li).map((c) => a11yRole(ctx, PDFName, c));
+    assert.ok(roles.includes("Lbl"), "LI has an /Lbl marker");
+    assert.ok(roles.includes("LBody"), "LI has an /LBody");
+  }
+});
+
+test("auto-tag tags a positioned grid as /Table > /TR > /TH (first row) + /TD, and leaves a single column alone", async () => {
+  const { PDFDocument, PDFName } = window.PDFLib;
+
+  // A clearly table-like 2x3 grid: two rows, three aligned columns.
+  const grid = await a11y.remediatePdfAccessibility(await makeTextPdf(1, "Doc"), {
+    lang: "en-US", title: "Doc",
+    textBlocks: [
+      { page: 1, text: "Name", x: 72, y: 700, fontSize: 12, heading: 0 },
+      { page: 1, text: "Q1", x: 220, y: 700, fontSize: 12, heading: 0 },
+      { page: 1, text: "Q2", x: 360, y: 700, fontSize: 12, heading: 0 },
+      { page: 1, text: "Alpha", x: 72, y: 680, fontSize: 12, heading: 0 },
+      { page: 1, text: "10", x: 220, y: 680, fontSize: 12, heading: 0 },
+      { page: 1, text: "20", x: 360, y: 680, fontSize: 12, heading: 0 },
+    ],
+    figures: [],
+  });
+  assert.equal(grid.report.structSummary.tables, 1, "one /Table detected");
+
+  const doc = await PDFDocument.load(grid.bytes, { throwOnInvalidObject: false });
+  const ctx = doc.context;
+  const { docEl } = a11yDocEl(ctx, PDFName, doc.catalog);
+  const tables = a11yKidsOf(ctx, PDFName, docEl).filter((el) => a11yRole(ctx, PDFName, el) === "Table");
+  assert.equal(tables.length, 1, "exactly one /Table");
+  const rows = a11yKidsOf(ctx, PDFName, tables[0]);
+  assert.equal(rows.length, 2, "two /TR rows");
+  assert.ok(rows.every((r) => a11yRole(ctx, PDFName, r) === "TR"), "rows are /TR");
+  const headerCells = a11yKidsOf(ctx, PDFName, rows[0]);
+  assert.equal(headerCells.length, 3, "header row has three cells");
+  assert.ok(headerCells.every((c) => a11yRole(ctx, PDFName, c) === "TH"), "first row cells are /TH");
+  assert.ok(headerCells.every((c) => c.get(PDFName.of("Scope")).toString() === "/Column"), "header cells carry /Scope /Column");
+  const bodyCells = a11yKidsOf(ctx, PDFName, rows[1]);
+  assert.ok(bodyCells.every((c) => a11yRole(ctx, PDFName, c) === "TD"), "second row cells are /TD");
+
+  // A single-column block of the same three lines must NOT be tagged as a table.
+  const column = await a11y.remediatePdfAccessibility(await makeTextPdf(1, "Doc"), {
+    lang: "en-US", title: "Doc",
+    textBlocks: [
+      { page: 1, text: "Line one", x: 72, y: 700, fontSize: 12, heading: 0 },
+      { page: 1, text: "Line two", x: 72, y: 680, fontSize: 12, heading: 0 },
+      { page: 1, text: "Line three", x: 72, y: 660, fontSize: 12, heading: 0 },
+    ],
+    figures: [],
+  });
+  assert.equal(column.report.structSummary.tables, 0, "an ambiguous single column is not a table");
+  assert.equal(column.report.structSummary.paragraphs, 3, "the single column stays paragraphs");
+});
+
+test("auto-tag wires each /Link annotation into the tree with a /Link element + /OBJR", async () => {
+  const { PDFDocument, PDFName, PDFRef } = window.PDFLib;
+  const bytes = await makeLinkPdf();
+  const { bytes: out, report } = await a11y.remediatePdfAccessibility(bytes, {
+    lang: "en-US", title: "Doc",
+    textBlocks: [{ page: 1, text: "See our site", x: 72, y: 695, fontSize: 12, heading: 0 }],
+    figures: [],
+  });
+  assert.equal(report.structSummary.links, 1, "one /Link element");
+
+  const doc = await PDFDocument.load(out, { throwOnInvalidObject: false });
+  const ctx = doc.context;
+  const { docEl } = a11yDocEl(ctx, PDFName, doc.catalog);
+  const linkEls = a11yKidsOf(ctx, PDFName, docEl).filter((el) => a11yRole(ctx, PDFName, el) === "Link");
+  assert.equal(linkEls.length, 1, "exactly one /Link structure element");
+  const objr = a11yKidsOf(ctx, PDFName, linkEls[0]).find((c) => {
+    const t = c.get(PDFName.of("Type"));
+    return t && t.toString() === "/OBJR";
+  });
+  assert.ok(objr, "the /Link contains an /OBJR");
+  const obj = objr.get(PDFName.of("Obj"));
+  assert.ok(obj instanceof PDFRef, "the /OBJR references the annotation by /Obj");
+  const annot = ctx.lookup(obj);
+  assert.equal(annot.get(PDFName.of("Subtype")).toString(), "/Link", "the /OBJR points at the /Link annotation");
+  // The link annotation gained /Contents alt text derived from its URI.
+  assert.match(annot.get(PDFName.of("Contents")).decodeText(), /example\.com/);
+});
+
+test("auto-tag marks repeated header/footer text as /Artifact and excludes it from the reading order", async () => {
+  const { PDFDocument, PDFName, PDFArray, decodePDFRawStream } = window.PDFLib;
+  const bytes = await makeTextPdf(2, "Doc");
+  const { bytes: out, report } = await a11y.remediatePdfAccessibility(bytes, {
+    lang: "en-US", title: "Doc",
+    textBlocks: [
+      { page: 1, text: "Chapter one body", x: 72, y: 700, fontSize: 12, heading: 0 },
+      { page: 1, text: "Confidential - Page 1", x: 72, y: 40, fontSize: 9, heading: 0 },
+      { page: 2, text: "Chapter two body", x: 72, y: 700, fontSize: 12, heading: 0 },
+      { page: 2, text: "Confidential - Page 2", x: 72, y: 40, fontSize: 9, heading: 0 },
+    ],
+    figures: [],
+  });
+  assert.equal(report.structSummary.runningArtifacts, 2, "both repeated footers artifacted");
+  // Only the two body paragraphs are in the reading order; footers are excluded.
+  assert.equal(report.structSummary.paragraphs, 2, "footers are not tagged as paragraphs");
+
+  const doc = await PDFDocument.load(out, { throwOnInvalidObject: false });
+  const ctx = doc.context;
+  let content = "";
+  for (const page of doc.getPages()) {
+    const contents = page.node.get(PDFName.of("Contents"));
+    const resolved = ctx.lookup(contents);
+    const refs = resolved instanceof PDFArray ? resolved.asArray() : [contents];
+    for (const ref of refs) {
+      try { content += new TextDecoder().decode(decodePDFRawStream(ctx.lookup(ref)).decode()); } catch { /* skip */ }
+    }
+  }
+  assert.match(content, /\/Artifact\b/, "running content is marked /Artifact in the page content");
+
+  // No paragraph in the structure tree carries the footer text.
+  const { docEl } = a11yDocEl(ctx, PDFName, doc.catalog);
+  const paraText = a11yKidsOf(ctx, PDFName, docEl)
+    .filter((el) => a11yRole(ctx, PDFName, el) === "P")
+    .map((el) => (el.get(PDFName.of("ActualText")) ? el.get(PDFName.of("ActualText")).decodeText() : ""));
+  assert.ok(!paraText.some((t) => /Confidential/.test(t)), "the footer is not in the reading order");
+});
+
+test("upgraded checker reports the new PDF/UA criteria, an N-of-M summary, and the not-certified caveat", async () => {
+  // A rich remediation output: heading + table + list + a tagged link.
+  const linkBytes = await makeLinkPdf();
+  const { bytes: rich } = await a11y.remediatePdfAccessibility(linkBytes, {
+    lang: "en-US", title: "Rich Doc",
+    textBlocks: [
+      { page: 1, text: "Report", x: 72, y: 760, fontSize: 24, heading: 1 },
+      { page: 1, text: "Name", x: 72, y: 700, fontSize: 12, heading: 0 },
+      { page: 1, text: "Q1", x: 220, y: 700, fontSize: 12, heading: 0 },
+      { page: 1, text: "Q2", x: 360, y: 700, fontSize: 12, heading: 0 },
+      { page: 1, text: "Alpha", x: 72, y: 680, fontSize: 12, heading: 0 },
+      { page: 1, text: "10", x: 220, y: 680, fontSize: 12, heading: 0 },
+      { page: 1, text: "20", x: 360, y: 680, fontSize: 12, heading: 0 },
+      { page: 1, text: "• first", x: 72, y: 640, fontSize: 12, heading: 0 },
+      { page: 1, text: "• second", x: 72, y: 624, fontSize: 12, heading: 0 },
+    ],
+    figures: [],
+  });
+  const report = await a11y.auditPdfAccessibility(rich, { textLayer: { characters: 80, pageCount: 1 } });
+  const checks = a11yById(report);
+
+  // Every new criterion is present and passes on the rich, well-formed output.
+  assert.equal(checks["lists-structured"].status, "pass", "list structure passes");
+  assert.equal(checks["table-headers"].status, "pass", "table header cells pass");
+  assert.equal(checks["links-tagged"].status, "pass", "tagged links pass");
+  assert.equal(checks["running-content"].status, "pass", "running-content criterion present");
+  assert.equal(checks["heading-nesting"].status, "pass", "heading nesting passes");
+  assert.equal(checks["role-map"].status, "pass", "role map present");
+
+  // Conformance-style N-of-M summary.
+  assert.ok(report.conformance, "conformance tally present");
+  assert.match(report.conformance.summary, /^\d+ of \d+ automated PDF\/UA checks pass$/);
+  assert.equal(report.conformance.applicable, report.summary.pass + report.summary.warn + report.summary.fail);
+
+  // The rendered report keeps the honest not-certified caveat prominent.
+  const text = a11y.buildAccessibilityReportText(report, { fileName: "rich.pdf" });
+  assert.match(text, /CONFORMANCE: \d+ of \d+ automated PDF\/UA checks pass/);
+  assert.match(text, /NOT a veraPDF/i);
+});
+
+test("upgraded checker fails the new structural criteria on an untagged document with clear messages", async () => {
+  // Untagged, but it DOES carry a link annotation — so links-tagged must fail too.
+  const report = await a11y.auditPdfAccessibility(await makeLinkPdf(), { textLayer: { characters: 10, pageCount: 1 } });
+  const checks = a11yById(report);
+  for (const id of ["lists-structured", "table-headers", "links-tagged", "running-content", "role-map", "heading-nesting"]) {
+    assert.equal(checks[id].status, "fail", `${id} fails on an untagged document`);
+    assert.match(checks[id].detail, /not tagged/i, `${id} explains it is because the document is not tagged`);
+  }
+  assert.equal(report.stats.linkAnnots, 1, "the untagged document's link annotation was seen");
+});
+
+test("upgraded checker flags a skipped heading level (H1 -> H3 with no H2)", async () => {
+  const { bytes: out } = await a11y.remediatePdfAccessibility(await makeTextPdf(1, "Doc"), {
+    lang: "en-US", title: "Doc",
+    textBlocks: [
+      { page: 1, text: "Top", x: 72, y: 740, fontSize: 24, heading: 1 },
+      { page: 1, text: "Sub sub", x: 72, y: 700, fontSize: 14, heading: 3 },
+    ],
+    figures: [],
+  });
+  const report = await a11y.auditPdfAccessibility(out, { textLayer: { characters: 20, pageCount: 1 } });
+  const check = a11yById(report)["heading-nesting"];
+  assert.equal(check.status, "fail", "the H1 -> H3 skip is flagged");
+  assert.match(check.detail, /H1.*H3|skip/i, "the message names the skipped level");
+});
+
+test("richer structure is still idempotent: re-tagging lists/tables/links does not orphan or stack", async () => {
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const blocks = [
+    { page: 1, text: "Report", x: 72, y: 760, fontSize: 24, heading: 1 },
+    { page: 1, text: "Name", x: 72, y: 700, fontSize: 12, heading: 0 },
+    { page: 1, text: "Q1", x: 220, y: 700, fontSize: 12, heading: 0 },
+    { page: 1, text: "Alpha", x: 72, y: 680, fontSize: 12, heading: 0 },
+    { page: 1, text: "10", x: 220, y: 680, fontSize: 12, heading: 0 },
+    { page: 1, text: "• first", x: 72, y: 640, fontSize: 12, heading: 0 },
+    { page: 1, text: "• second", x: 72, y: 624, fontSize: 12, heading: 0 },
+  ];
+  async function countStruct(bytes) {
+    const doc = await PDFDocument.load(bytes, { throwOnInvalidObject: false });
+    let structRoots = 0;
+    let structElems = 0;
+    for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+      if (!obj || typeof obj.get !== "function") continue;
+      const t = obj.get(PDFName.of("Type"));
+      const s = t ? t.toString() : "";
+      if (s === "/StructTreeRoot") structRoots += 1;
+      if (s === "/StructElem") structElems += 1;
+    }
+    return { structRoots, structElems };
+  }
+
+  const pass1 = await a11y.remediatePdfAccessibility(await makeLinkPdf(), { lang: "en-US", title: "Doc", textBlocks: blocks, figures: [] });
+  const c1 = await countStruct(pass1.bytes);
+  const pass2 = await a11y.remediatePdfAccessibility(pass1.bytes, { lang: "en-US", title: "Doc", textBlocks: blocks, figures: [] });
+  const c2 = await countStruct(pass2.bytes);
+
+  assert.equal(c1.structRoots, 1, "one StructTreeRoot after the first pass");
+  assert.equal(c2.structRoots, 1, "still one StructTreeRoot after re-running the richer tree");
+  assert.ok(c1.structElems > 8, "the richer tree has document + heading + table + list + link elements");
+  assert.equal(c2.structElems, c1.structElems, "StructElem count does not grow on a re-run (no orphaned first-pass elements)");
+
+  const after = await a11y.auditPdfAccessibility(pass2.bytes, { textLayer: { characters: 60, pageCount: 1 } });
+  const checks = a11yById(after);
+  assert.equal(checks.tagged.status, "pass", "still tagged after two passes");
+  assert.equal(checks["lists-structured"].status, "pass", "list structure survives a re-run");
+  assert.equal(checks["table-headers"].status, "pass", "table headers survive a re-run");
+  assert.equal(checks["links-tagged"].status, "pass", "tagged links survive a re-run");
+});
+
 // --- Extract: decompression-bomb guard on inflated streams -------------------
 async function buildBombImagePdf() {
   const { PDFDocument, PDFName } = window.PDFLib;

@@ -21,6 +21,11 @@
 // for the text layout + character counts that only a renderer can produce.
 
 import { getPdfLib } from "./pdf.service.js";
+// Reuse pdf-reflow's layout analysis rather than re-deriving it: detectColumnLayout
+// flags table-like / multi-column pages, parseParagraphs turns raw pdf.js items
+// into paragraph/heading/list-item blocks (with the list marker split out), and
+// LIST_MARKER is the exact marker regex used to group /L > /LI > /Lbl + /LBody.
+import { detectColumnLayout, parseParagraphs, LIST_MARKER } from "./pdf-reflow.service.js";
 
 // Language choices for the remediation dropdown. Codes are BCP-47 / RFC 3066
 // tags written verbatim into the catalog /Lang and XMP dc:language (ASCII).
@@ -48,6 +53,15 @@ export const LANGUAGE_OPTIONS = [
 ];
 
 const HEADING_TAGS = ["H1", "H2", "H3", "H4", "H5", "H6"];
+
+// Every structure type this tagger emits. All are standard PDF 1.7 structure
+// types (§14.8.4), so the /RoleMap we write maps each to itself — a harmless,
+// spec-valid identity map that satisfies validators expecting custom types to be
+// mapped, and gives the checker a concrete /RoleMap to verify.
+const EMITTED_ROLES = [
+  "Document", "H1", "H2", "H3", "H4", "H5", "H6", "P",
+  "L", "LI", "Lbl", "LBody", "Table", "TR", "TH", "TD", "Figure", "Link",
+];
 
 // A BCP-47-ish language tag: a 2–8 letter primary subtag plus optional
 // alphanumeric subtags (script/region/variant). Deliberately strict — it rejects
@@ -152,11 +166,19 @@ function readTagging(lib, pdf) {
   return { marked, hasStructRoot, structRoot };
 }
 
-// Walks the structure tree from the root, counting element types and whether
-// figures carry /Alt. Bounded by a visited-ref set and a node cap so a malformed
-// or cyclic tree can never turn this into a super-linear / infinite walk.
+// Walks the structure tree from the root, counting element types and gathering
+// the conformance-oriented facts the checker reports: figures carrying /Alt,
+// list structure (/L>/LI>/Lbl+/LBody), table structure (/Table>/TR>/TH|/TD with
+// /Scope), tagged links (/Link carrying an /OBJR), and the heading-level sequence
+// (for skipped-level detection). Bounded by a visited-ref set and a node cap so a
+// malformed or cyclic tree can never turn this into a super-linear / infinite walk.
 function walkStructTree(lib, pdf, structRoot) {
-  const counts = { total: 0, paragraphs: 0, headings: 0, figures: 0, figuresWithAlt: 0, hasKids: false };
+  const counts = {
+    total: 0, paragraphs: 0, headings: 0, figures: 0, figuresWithAlt: 0, hasKids: false,
+    lists: 0, listItems: 0, listItemsWithBody: 0,
+    tables: 0, tableRows: 0, th: 0, td: 0, thWithScope: 0, tablesWithHeader: 0,
+    links: 0, linksWithObjr: 0, headingLevels: [],
+  };
   if (!structRoot) return counts;
   const visited = new Set();
   const MAX_NODES = 100000;
@@ -164,6 +186,30 @@ function walkStructTree(lib, pdf, structRoot) {
   const S = nameKey(lib, "S");
   const K = nameKey(lib, "K");
   const Alt = nameKey(lib, "Alt");
+  const Scope = nameKey(lib, "Scope");
+  const Type = nameKey(lib, "Type");
+
+  // True if a node's /K contains a direct object-reference dict (/Type /OBJR).
+  const hasObjrChild = (node) => {
+    const kids = node.get(K);
+    const resolved = kids ? ctx.lookup(kids) : undefined;
+    const check = (dict) => dict && typeof dict.get === "function" && decodeName(dict.get(Type)) === "OBJR";
+    if (resolved instanceof lib.PDFArray) {
+      for (let i = 0; i < resolved.size(); i += 1) {
+        const item = ctx.lookup(resolved.get(i));
+        if (check(item)) return true;
+      }
+      return false;
+    }
+    return check(resolved);
+  };
+  // True if a node has a child structure element of type /LBody.
+  const hasBodyChild = (node) => {
+    for (const child of collectKidDicts(lib, ctx, node.get(K))) {
+      if (decodeName(child.get(S)) === "LBody") return true;
+    }
+    return false;
+  };
 
   const rootKids = structRoot.get(K);
   const stack = collectKidDicts(lib, ctx, rootKids);
@@ -181,19 +227,121 @@ function walkStructTree(lib, pdf, structRoot) {
     const role = decodeName(node.get(S));
     if (!role) {
       // A grouping node without /S (e.g. StructTreeRoot-like) — descend only.
-      for (const child of collectKidDicts(lib, ctx, node.get(K))) stack.push(child);
+      // Push kids reversed so the LIFO stack pops them in document order (which
+      // the heading-level sequence relies on for skip detection).
+      for (const child of collectKidDicts(lib, ctx, node.get(K)).reverse()) stack.push(child);
       continue;
     }
     counts.total += 1;
     if (role === "P") counts.paragraphs += 1;
-    else if (role === "H" || HEADING_TAGS.includes(role)) counts.headings += 1;
-    else if (role === "Figure") {
+    else if (role === "H" || HEADING_TAGS.includes(role)) {
+      counts.headings += 1;
+      counts.headingLevels.push(role === "H" ? null : Number(role.slice(1)));
+    } else if (role === "Figure") {
       counts.figures += 1;
       if (decodePdfText(node.get(Alt)).trim()) counts.figuresWithAlt += 1;
+    } else if (role === "L") counts.lists += 1;
+    else if (role === "LI") {
+      counts.listItems += 1;
+      if (hasBodyChild(node)) counts.listItemsWithBody += 1;
+    } else if (role === "Table") {
+      counts.tables += 1;
+      if (tableHasHeaderCell(lib, ctx, node)) counts.tablesWithHeader += 1;
+    } else if (role === "TR") counts.tableRows += 1;
+    else if (role === "TH") {
+      counts.th += 1;
+      if (node.get(Scope)) counts.thWithScope += 1;
+    } else if (role === "TD") counts.td += 1;
+    else if (role === "Link") {
+      counts.links += 1;
+      if (hasObjrChild(node)) counts.linksWithObjr += 1;
     }
-    for (const child of collectKidDicts(lib, ctx, node.get(K))) stack.push(child);
+    for (const child of collectKidDicts(lib, ctx, node.get(K)).reverse()) stack.push(child);
   }
   return counts;
+}
+
+// True if a /Table element has at least one /TH descendant (bounded local walk).
+function tableHasHeaderCell(lib, ctx, tableNode) {
+  const S = nameKey(lib, "S");
+  const K = nameKey(lib, "K");
+  const stack = collectKidDicts(lib, ctx, tableNode.get(K));
+  let seen = 0;
+  while (stack.length && seen < 5000) {
+    const node = stack.pop();
+    seen += 1;
+    if (!node || typeof node.get !== "function") continue;
+    if (decodeName(node.get(S)) === "TH") return true;
+    for (const child of collectKidDicts(lib, ctx, node.get(K))) stack.push(child);
+  }
+  return false;
+}
+
+// Detects the first skipped heading level in encounter order (e.g. H1 -> H3).
+// Returns { skipped:true, from, to } or { skipped:false }. Untyped /H entries
+// (level unknown) break the run without being treated as a skip.
+function findHeadingSkip(levels) {
+  let prev = 0;
+  for (const level of levels) {
+    if (!Number.isFinite(level)) { prev = 0; continue; }
+    if (prev && level > prev + 1) return { skipped: true, from: prev, to: level };
+    prev = level;
+  }
+  return { skipped: false };
+}
+
+// Counts /Link annotations across pages (dedup by object reference), so the
+// checker can tell whether links exist that ought to be tagged. Bounded per page.
+function countLinkAnnots(lib, pdf) {
+  const ctx = pdf.context;
+  const Annots = nameKey(lib, "Annots");
+  const Subtype = nameKey(lib, "Subtype");
+  const seen = new Set();
+  let count = 0;
+  for (const page of pdf.getPages()) {
+    const annots = ctx.lookup(page.node.get(Annots));
+    if (!(annots instanceof lib.PDFArray)) continue;
+    for (let i = 0; i < annots.size(); i += 1) {
+      const ref = annots.get(i);
+      const tag = ref && typeof ref.tag === "function" ? ref.tag() : String(ref);
+      if (seen.has(tag)) continue;
+      seen.add(tag);
+      const annot = ctx.lookup(ref);
+      if (annot && typeof annot.get === "function" && decodeName(annot.get(Subtype)) === "Link") count += 1;
+    }
+  }
+  return count;
+}
+
+// Scans page content streams for an /Artifact marked-content operator, so the
+// checker can report whether running content (headers/footers/page numbers) is
+// artifacted. Bounded: at most FIRST_PAGES pages and MAX_BYTES decoded, so a huge
+// document can never make this super-linear. Returns true on the first hit.
+function hasArtifactMarks(lib, pdf) {
+  const ctx = pdf.context;
+  const Contents = nameKey(lib, "Contents");
+  const decode = lib.decodePDFRawStream;
+  if (typeof decode !== "function") return false;
+  const FIRST_PAGES = 50;
+  const MAX_BYTES = 5_000_000;
+  let budget = MAX_BYTES;
+  const pages = pdf.getPages();
+  const limit = Math.min(pages.length, FIRST_PAGES);
+  for (let pi = 0; pi < limit && budget > 0; pi += 1) {
+    const contents = pages[pi].node.get(Contents);
+    const resolved = contents ? ctx.lookup(contents) : undefined;
+    const refs = resolved instanceof lib.PDFArray ? resolved.asArray() : contents ? [contents] : [];
+    for (const ref of refs) {
+      if (budget <= 0) break;
+      const stream = ctx.lookup(ref);
+      if (!stream) continue;
+      let text = "";
+      try { text = new TextDecoder().decode(decode(stream).decode()); } catch { continue; }
+      budget -= text.length;
+      if (/\/Artifact\b/.test(text)) return true;
+    }
+  }
+  return false;
 }
 
 let identityCounter = 0;
@@ -320,6 +468,10 @@ export async function auditPdfAccessibility(bytes, options = {}) {
   const imageCount = countImageXObjects(lib, pdf);
   const encryptionPerms = readEncryptionPermissions(lib, pdf);
   const textLayer = options.textLayer && Number.isFinite(options.textLayer.characters) ? options.textLayer : null;
+  const hasRoleMap = !!(structRoot && typeof structRoot.get === "function" && structRoot.get(nameKey(lib, "RoleMap")));
+  const linkAnnots = countLinkAnnots(lib, pdf);
+  const artifacted = tagged ? hasArtifactMarks(lib, pdf) : false;
+  const headingSkip = findHeadingSkip(structCounts.headingLevels);
 
   const checks = [];
   const add = (check) => checks.push(check);
@@ -463,14 +615,119 @@ export async function auditPdfAccessibility(bytes, options = {}) {
     fix: structCounts.headings > 0 ? "" : "Auto-Tag detects large/bold text runs as headings, but confirm the levels by hand.",
   });
 
+  // 10. Heading levels do not skip (H1 -> H3 with no H2)
+  add({
+    id: "heading-nesting",
+    label: "Heading levels are not skipped",
+    status: !tagged ? "fail" : structCounts.headings === 0 ? "info" : headingSkip.skipped ? "fail" : "pass",
+    detail: !tagged
+      ? "The document is not tagged, so there is no heading hierarchy to check."
+      : structCounts.headings === 0
+        ? "No heading elements, so there is no hierarchy to check."
+        : headingSkip.skipped
+          ? `The outline jumps from H${headingSkip.from} straight to H${headingSkip.to}, skipping H${headingSkip.from + 1}. PDF/UA requires headings to descend one level at a time.`
+          : "Heading levels descend without skipping — the outline is well nested.",
+    fix: headingSkip.skipped ? `Insert an H${headingSkip.from + 1} or lower the H${headingSkip.to} so no level is skipped.` : "",
+  });
+
+  // 11. Lists use L / LI / Lbl / LBody structure
+  add({
+    id: "lists-structured",
+    label: "Lists use list structure",
+    status: !tagged ? "fail" : structCounts.lists === 0 ? "pass" : structCounts.listItemsWithBody === structCounts.listItems ? "pass" : "fail",
+    detail: !tagged
+      ? "The document is not tagged, so list content cannot use /L > /LI structure."
+      : structCounts.lists === 0
+        ? "No /L list structures were found. If the document has bulleted or numbered lists, tag them so screen readers announce list position."
+        : structCounts.listItemsWithBody === structCounts.listItems
+          ? `${structCounts.lists} list(s) with ${structCounts.listItems} item(s); every /LI carries an /LBody.`
+          : `${structCounts.listItems - structCounts.listItemsWithBody} of ${structCounts.listItems} list item(s) have no /LBody — screen readers cannot read the item text.`,
+    fix: tagged && structCounts.lists > 0 && structCounts.listItemsWithBody !== structCounts.listItems
+      ? "Re-run Auto-Tag so each list item has an /Lbl (marker) and /LBody (text)."
+      : "",
+  });
+
+  // 12. Tables have header cells with scope
+  const tableHeadersOk = structCounts.tables > 0 && structCounts.tablesWithHeader === structCounts.tables && structCounts.thWithScope === structCounts.th && structCounts.th > 0;
+  add({
+    id: "table-headers",
+    label: "Tables have header cells",
+    status: !tagged ? "fail" : structCounts.tables === 0 ? "pass" : tableHeadersOk ? "pass" : "fail",
+    detail: !tagged
+      ? "The document is not tagged, so tables cannot use /Table > /TR > /TH|/TD structure."
+      : structCounts.tables === 0
+        ? "No /Table structures were found. If the document has data tables, tag them with header cells so screen readers can associate cells with headers."
+        : tableHeadersOk
+          ? `${structCounts.tables} table(s) with ${structCounts.th} header cell(s), each carrying /Scope.`
+          : `${structCounts.tables} table(s) found, but ${structCounts.th === 0 ? "no /TH header cells" : `${structCounts.th - structCounts.thWithScope} header cell(s) lack /Scope`}. Header cells and their scope let screen readers announce which header a cell belongs to.`,
+    fix: tagged && structCounts.tables > 0 && !tableHeadersOk ? "Mark the header row cells as /TH with /Scope Row or Column." : "",
+    note: "Table structure inferred from a flat text layer is heuristic — confirm the header cells and reading order by hand.",
+  });
+
+  // 13. Links are tagged
+  add({
+    id: "links-tagged",
+    label: "Links are tagged",
+    status: !tagged ? (linkAnnots > 0 ? "fail" : "pass") : linkAnnots === 0 ? "pass" : structCounts.linksWithObjr >= 1 ? "pass" : "fail",
+    detail: !tagged
+      ? linkAnnots > 0
+        ? `${linkAnnots} link annotation(s) found, but the document is not tagged, so none are wired into the structure tree with /Link + /OBJR.`
+        : "No link annotations, so there is nothing to tag."
+      : linkAnnots === 0
+        ? "No link annotations were found."
+        : structCounts.linksWithObjr >= 1
+          ? `${structCounts.links} /Link element(s) reference their annotation via /OBJR, so screen readers announce them as links.`
+          : `${linkAnnots} link annotation(s) are not represented by /Link structure elements with /OBJR — screen readers may not announce them as links.`,
+    fix: tagged && linkAnnots > 0 && structCounts.linksWithObjr < 1 ? "Re-run Auto-Tag to add a /Link element with an /OBJR for each link annotation." : "",
+  });
+
+  // 14. Running content (headers/footers/page numbers) is artifacted
+  add({
+    id: "running-content",
+    label: "Running content is artifacted",
+    status: !tagged ? "fail" : artifacted ? "pass" : pageCount > 1 ? "warn" : "pass",
+    detail: !tagged
+      ? "The document is not tagged, so repeated headers, footers, and page numbers cannot be marked as artifacts."
+      : artifacted
+        ? "Running content is marked with /Artifact, so assistive technology skips repeated headers, footers, and page numbers."
+        : pageCount > 1
+          ? "No /Artifact-marked content was found. If this document repeats headers, footers, or page numbers across pages, they should be tagged as artifacts so they are not read on every page."
+          : "Single-page document — no running headers/footers to artifact.",
+    fix: tagged && !artifacted && pageCount > 1 ? "Auto-Tag marks repeated top/bottom-margin text as /Artifact (pagination)." : "",
+  });
+
+  // 15. Role map present
+  add({
+    id: "role-map",
+    label: "Structure has a role map",
+    status: !tagged ? "fail" : hasRoleMap ? "pass" : "warn",
+    detail: !tagged
+      ? "The document is not tagged, so there is no /StructTreeRoot to carry a /RoleMap."
+      : hasRoleMap
+        ? "/StructTreeRoot carries a /RoleMap, so any custom structure types map to standard PDF/UA types."
+        : "/StructTreeRoot has no /RoleMap. A role map is recommended so custom structure types resolve to standard ones.",
+    fix: tagged && !hasRoleMap ? "Auto-Tag writes a /RoleMap on the structure tree root." : "",
+  });
+
   const summary = { pass: 0, warn: 0, fail: 0, info: 0 };
   for (const check of checks) summary[check.status] += 1;
+
+  // Conformance-style tally over the machine-verifiable (non-info) checks.
+  const applicable = summary.pass + summary.warn + summary.fail;
+  const conformance = {
+    passed: summary.pass,
+    applicable,
+    summary: `${summary.pass} of ${applicable} automated PDF/UA checks pass`,
+    caveat:
+      "This tallies only machine-verifiable criteria. It is NOT a veraPDF or certified PDF/UA conformance pass: meaningful alt text, correct reading order for complex layouts, and colour contrast still need human review.",
+  };
 
   const verdict = buildVerdict({ tagged, summary, title, lang });
 
   return {
     checks,
     summary,
+    conformance,
     verdict,
     stats: {
       pageCount,
@@ -482,6 +739,15 @@ export async function auditPdfAccessibility(bytes, options = {}) {
       figuresWithAlt: structCounts.figuresWithAlt,
       headings: structCounts.headings,
       paragraphs: structCounts.paragraphs,
+      lists: structCounts.lists,
+      listItems: structCounts.listItems,
+      tables: structCounts.tables,
+      tableHeaderCells: structCounts.th,
+      links: structCounts.links,
+      linkAnnots,
+      artifacted,
+      hasRoleMap,
+      headingSkipped: headingSkip.skipped,
       structElements: structCounts.total,
       title,
       infoTitle,
@@ -531,6 +797,7 @@ export function buildAccessibilityReportText(report, { fileName = "document.pdf"
   lines.push(`VERDICT: ${report.verdict.headline}`);
   lines.push(wrapIndent(report.verdict.summary, ""));
   lines.push("");
+  if (report.conformance) lines.push(`CONFORMANCE: ${report.conformance.summary}`);
   lines.push(`Summary: ${report.summary.pass} pass, ${report.summary.warn} warn, ${report.summary.fail} fail, ${report.summary.info} info`);
   lines.push("");
   lines.push("CHECKS");
@@ -545,7 +812,7 @@ export function buildAccessibilityReportText(report, { fileName = "document.pdf"
   lines.push("LIMITS OF THIS AUTOMATED CHECK");
   lines.push("------------------------------");
   lines.push(wrapIndent(
-    "This is an automated check of machine-verifiable criteria (tagging, title, language, alt-text presence, encryption permissions, structure/reading-order presence, headings). It does NOT replace a manual audit. Colour contrast of rendered content, whether alt text is actually meaningful, and whether the reading order is logically correct all require human judgement. Passing every automated check is necessary but not sufficient for PDF/UA or WCAG conformance.",
+    "This is an automated check of machine-verifiable criteria (tagging, title, language, alt-text presence, encryption permissions, structure/reading-order presence, headings and their nesting, list structure, table header cells, tagged links, artifacted running content, and a role map). It is NOT a veraPDF or certified PDF/UA conformance pass. It does NOT replace a manual audit. Colour contrast of rendered content, whether alt text is actually meaningful, whether table/list detection matched the real layout, and whether the reading order is logically correct all require human judgement. Passing every automated check is necessary but not sufficient for PDF/UA or WCAG conformance.",
     "",
   ));
   return lines.join("\n");
@@ -704,19 +971,168 @@ function stripPriorAccessLayers(lib, ctx, page) {
   return removed;
 }
 
+// --- structure planning (pure) ------------------------------------------------
+//
+// Turns the flat, positioned text blocks ({page,text,x,y,fontSize,heading}) that
+// extraction hands us into an ordered list of richer structure nodes per page:
+// headings, paragraphs, lists (/L>/LI>/Lbl+/LBody), and tables (/Table>/TR>cells).
+// These are pure, Node-testable, and bounded (single pass over pre-clustered rows).
+
+// The position triple a leaf needs to draw its invisible text.
+function posOf(block) {
+  return {
+    x: Number(block.x) || 0,
+    y: Number(block.y) || 0,
+    size: Number(block.fontSize) > 0 ? Number(block.fontSize) : 12,
+  };
+}
+
+// Detects running content — text repeated in the top/bottom margin band across
+// two or more pages (headers, footers, page numbers). Digits are normalised so
+// "Page 1"/"Page 2" match. Returns a Set of the exact block objects to artifact.
+function detectRunningContent(blocksByPage, pageHeights) {
+  const running = new Set();
+  const pageCount = blocksByPage.length;
+  if (pageCount < 2) return running;
+  const norm = (s) => String(s ?? "").trim().replace(/\s+/g, " ").replace(/\d+/g, "#").toLowerCase();
+  const byText = new Map(); // normalised text -> Map(pageIndex -> [blocks])
+  for (let pi = 0; pi < pageCount; pi += 1) {
+    const height = Number(pageHeights[pi]) > 0 ? Number(pageHeights[pi]) : 792;
+    for (const block of blocksByPage[pi]) {
+      const text = String(block?.text ?? "").trim();
+      if (!text) continue;
+      const y = Number(block.y) || 0;
+      if (y < height * 0.9 && y > height * 0.1) continue; // not in a margin band
+      const key = norm(text);
+      if (!key) continue;
+      if (!byText.has(key)) byText.set(key, new Map());
+      const pages = byText.get(key);
+      if (!pages.has(pi)) pages.set(pi, []);
+      pages.get(pi).push(block);
+    }
+  }
+  for (const [, pages] of byText) {
+    if (pages.size >= 2) for (const [, arr] of pages) for (const block of arr) running.add(block);
+  }
+  return running;
+}
+
+// Clusters blocks into visual rows (top-to-bottom), each row's cells sorted L→R.
+function clusterRows(blocks) {
+  const sorted = blocks.slice().sort((a, b) => (Math.abs((Number(a.y) || 0) - (Number(b.y) || 0)) > 2 ? (Number(b.y) || 0) - (Number(a.y) || 0) : (Number(a.x) || 0) - (Number(b.x) || 0)));
+  const rows = [];
+  let current = null;
+  for (const block of sorted) {
+    const y = Number(block.y) || 0;
+    const size = Number(block.fontSize) > 0 ? Number(block.fontSize) : 12;
+    if (current && Math.abs(current.y - y) <= Math.max(2, size * 0.6)) current.cells.push(block);
+    else { current = { y, cells: [block] }; rows.push(current); }
+  }
+  for (const row of rows) row.cells.sort((a, b) => (Number(a.x) || 0) - (Number(b.x) || 0));
+  return rows;
+}
+
+// True if two rows have cells at the same x positions (within a font-scaled tol).
+function columnsAlign(rowA, rowB) {
+  if (rowA.cells.length !== rowB.cells.length) return false;
+  for (let i = 0; i < rowA.cells.length; i += 1) {
+    const tol = Math.max(6, (Number(rowA.cells[i].fontSize) || 12) * 3);
+    if (Math.abs((Number(rowA.cells[i].x) || 0) - (Number(rowB.cells[i].x) || 0)) > tol) return false;
+  }
+  return true;
+}
+
+// Given clustered rows, returns the exclusive end index of a qualifying table run
+// starting at `start` (≥2 rows, each with the same ≥2 aligned columns), or `start`
+// itself when there is no table. Conservative: a mis-detected table is worse than
+// none, so only clearly grid-shaped runs qualify; single-column blocks never do.
+function tableRunEnd(rows, start) {
+  const first = rows[start];
+  if (!first || first.cells.length < 2) return start;
+  let end = start + 1;
+  while (end < rows.length && columnsAlign(first, rows[end])) end += 1;
+  return end - start >= 2 ? end : start;
+}
+
+// Plans one page's non-running blocks into ordered structure nodes. Pure.
+export function planPageNodes(blocks) {
+  const rows = clusterRows(blocks);
+  const nodes = [];
+  let pendingList = null;
+  const flushList = () => {
+    if (!pendingList) return;
+    if (pendingList.length >= 2) nodes.push({ kind: "list", items: pendingList });
+    else for (const item of pendingList) nodes.push({ kind: "para", text: `${item.marker} ${item.body}`.trim(), pos: item.pos });
+    pendingList = null;
+  };
+
+  let i = 0;
+  while (i < rows.length) {
+    const end = tableRunEnd(rows, i);
+    if (end > i) {
+      flushList();
+      const tableRows = rows.slice(i, end).map((row) => ({ cells: row.cells.map((c) => ({ text: String(c.text ?? ""), pos: posOf(c) })) }));
+      nodes.push({ kind: "table", rows: tableRows });
+      i = end;
+      continue;
+    }
+    for (const block of rows[i].cells) {
+      const text = String(block.text ?? "");
+      const marker = LIST_MARKER.exec(text);
+      if (marker) {
+        if (!pendingList) pendingList = [];
+        pendingList.push({ marker: (marker[1] || marker[0]).trim(), body: text.slice(marker[0].length).trim(), pos: posOf(block) });
+      } else {
+        flushList();
+        const level = Math.floor(Number(block.heading) || 0);
+        if (level >= 1 && level <= 6) nodes.push({ kind: "heading", level, text, pos: posOf(block) });
+        else nodes.push({ kind: "para", text, pos: posOf(block) });
+      }
+    }
+    i += 1;
+  }
+  flushList();
+  return nodes;
+}
+
+// A figure's /BBox [llx lly urx ury] in default user space, when derivable.
+function figureBBox(figure) {
+  const x = Number(figure.x);
+  const y = Number(figure.y);
+  const w = Number(figure.width);
+  const h = Number(figure.height);
+  if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return null;
+  return [x, y, x + w, y + h];
+}
+
+// Derives link alt text (/Contents) from an annotation's /A /URI, when present.
+function deriveLinkContents(lib, ctx, annot) {
+  const action = ctx.lookup(annot.get(lib.PDFName.of("A")));
+  if (!action || typeof action.get !== "function") return "";
+  const uri = decodePdfText(action.get(lib.PDFName.of("URI"))).trim();
+  return uri ? `Link to ${uri}` : "";
+}
+
 /**
  * Remediates raw PDF bytes toward PDF/UA as far as is reliably automatable.
  *
  * Sets catalog /Lang, Info /Title + XMP dc:title (UTF-16BE so non-Latin titles
  * survive), /ViewerPreferences /DisplayDocTitle true, /MarkInfo /Marked true,
- * and builds a basic real tagged structure tree: a /Document root whose ordered
- * /K kids are /P and /H heading elements (one per text block, in reading order)
- * plus /Figure elements carrying /Alt. Text blocks are additionally re-drawn as
- * an INVISIBLE (text-render-mode 3) marked-content layer wired to the structure
- * elements' MCIDs, so the tags genuinely cover screen-reader-readable content.
- * Decorative images are wrapped as /Artifact marked content and left out of the
- * structure tree. Non-Latin text that the standard font cannot draw still gets a
- * structure element with /ActualText (UTF-16BE) so the text remains available.
+ * and builds a conformance-oriented tagged structure tree under a /Document root:
+ *   - /H1../H6 headings and /P paragraphs in reading order;
+ *   - /L > /LI > (/Lbl + /LBody) for consecutive list-marker lines;
+ *   - /Table > /TR > /TH (first row, /Scope Column) | /TD for grid-shaped regions;
+ *   - /Link > /OBJR wiring each link annotation into the tree (and /Contents alt
+ *     text on the annotation when missing);
+ *   - /Figure carrying /Alt (and a /BBox layout attribute when derivable);
+ *   - a /RoleMap on the /StructTreeRoot mapping the emitted types to standard ones.
+ * Repeated top/bottom-margin text (running headers/footers/page numbers) is drawn
+ * as /Artifact (pagination) so it is excluded from the reading order. Every text
+ * leaf is re-drawn as an INVISIBLE (render-mode 3) marked-content run wired to its
+ * MCID, so the tags cover real screen-reader-readable content; /ActualText
+ * (UTF-16BE) preserves text the Latin-1 standard font cannot draw. Table and list
+ * detection from a flat text layer is heuristic — only clearly grid/list-shaped
+ * regions are tagged; ambiguous ones stay paragraphs. NOT certified PDF/UA.
  *
  * @param {Uint8Array} bytes
  * @param {object} params
@@ -772,6 +1188,13 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
   // skipped and the untagged path is unchanged.
   const priorStructRef = catalog.get(N("StructTreeRoot"));
   if (priorStructRef) {
+    // Delete the old /RoleMap too — it hangs off the root, not off /K, so
+    // removeOldStructGraph would otherwise leave it orphaned on a re-run.
+    const priorRoot = ctx.lookup(priorStructRef);
+    if (priorRoot && typeof priorRoot.get === "function") {
+      const priorRoleMap = priorRoot.get(N("RoleMap"));
+      if (priorRoleMap instanceof PDFRef) { try { ctx.delete(priorRoleMap); } catch { /* gone */ } }
+    }
     removeOldStructGraph(lib, ctx, priorStructRef);
     catalog.delete(N("StructTreeRoot"));
     const priorMarkInfo = catalog.get(N("MarkInfo"));
@@ -844,6 +1267,10 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
   // Per page: MCID counter + parent-array (index = MCID) for the ParentTree.
   const mcidCounters = new Array(pageCount).fill(0);
   const parentArrays = Array.from({ length: pageCount }, () => []);
+  // Link annotations enter the ParentTree by a single StructParent key each,
+  // allocated AFTER the page StructParents block (0..pageCount-1).
+  let nextParentKey = pageCount;
+  const annotParents = []; // [key, linkStructElemRef]
 
   const clampPage = (p) => {
     const idx = Math.floor(Number(p) || 1) - 1;
@@ -862,60 +1289,129 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
     figuresByPage[clampPage(figure.page)].push(figure);
   }
 
+  const pageHeights = pages.map((p) => { try { return p.getSize().height; } catch { return 792; } });
+  // Running content (repeated headers/footers/page numbers) → /Artifact, so it is
+  // excluded from the reading order (a PDF/UA requirement).
+  const runningBlocks = detectRunningContent(blocksByPage, pageHeights);
+
   let paragraphs = 0;
   let headings = 0;
+  let lists = 0;
+  let listItems = 0;
+  let tables = 0;
+  let tableCells = 0;
+  let links = 0;
   let taggedFigures = 0;
   let artifacts = 0;
+  let runningArtifacts = 0;
   let undrawable = 0;
+  const headingLevelsSeen = [];
+
+  // Draws one invisible (render-mode-3) marked-content run. `mcid === null` emits
+  // an /Artifact (pagination) region with no MCID; otherwise a tagged MCID run.
+  const drawMc = (pi, page, mcTag, mcid, text, x, y, size) => {
+    let encoded = null;
+    if (text) { try { encoded = font.encodeText(text); } catch { encoded = null; undrawable += 1; } }
+    const props = mcid === null ? ctx.obj({ Type: N("Pagination") }) : ctx.obj({ MCID: mcid });
+    const ops = [PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [N(mcTag), props])];
+    if (encoded) {
+      ops.push(
+        beginText(),
+        setTextRenderingMode(3),
+        setFontAndSize(fontKeyFor(pi), Number(size) > 0 ? Number(size) : 12),
+        setTextMatrix(1, 0, 0, 1, Number(x) || 0, Number(y) || 0),
+        showText(encoded),
+        endText(),
+      );
+    }
+    ops.push(endMarkedContent());
+    page.pushOperators(...ops);
+  };
+
+  // Creates a leaf StructElem carrying a single MCID of invisible text. Its MC tag
+  // is the structure type; /ActualText preserves the exact string (UTF-16BE) even
+  // when the Latin-1 standard font cannot draw a glyph layer for it.
+  const emitLeaf = (pi, page, pageRef, parentRef, sType, text, pos, attrs) => {
+    const mcid = mcidCounters[pi];
+    mcidCounters[pi] += 1;
+    const el = ctx.obj({ Type: N("StructElem"), S: N(sType), P: parentRef, Pg: pageRef });
+    if (text) el.set(N("ActualText"), PDFHexString.fromText(String(text)));
+    el.set(N("K"), PDFNumber.of(mcid));
+    if (attrs) for (const [k, v] of attrs) el.set(N(k), v);
+    const elRef = ctx.register(el);
+    parentArrays[pi][mcid] = elRef;
+    drawMc(pi, page, sType, mcid, String(text ?? ""), pos.x, pos.y, pos.size);
+    return elRef;
+  };
 
   for (let pi = 0; pi < pageCount; pi += 1) {
     const page = pages[pi];
     const pageRef = page.ref;
 
-    for (const block of blocksByPage[pi]) {
-      const text = String(block.text ?? "");
-      if (!text.trim()) continue;
-      const level = Math.floor(Number(block.heading) || 0);
-      const tag = level >= 1 && level <= 6 ? `H${level}` : "P";
-      if (tag === "P") paragraphs += 1; else headings += 1;
+    const pageBlocks = blocksByPage[pi].filter((b) => String(b?.text ?? "").trim());
+    const contentBlocks = pageBlocks.filter((b) => !runningBlocks.has(b));
+    const runningOnPage = pageBlocks.filter((b) => runningBlocks.has(b));
 
-      const mcid = mcidCounters[pi];
-      const el = ctx.obj({ Type: N("StructElem"), S: N(tag), P: documentRef, Pg: pageRef });
-      // /ActualText carries the text (UTF-16BE) so it survives even if the glyph
-      // layer cannot be drawn (non-Latin) and helps AT extract the exact string.
-      el.set(N("ActualText"), PDFHexString.fromText(text));
-      el.set(N("K"), PDFNumber.of(mcid));
-      const elRef = ctx.register(el);
-      documentKids.push(elRef);
-      parentArrays[pi][mcid] = elRef;
-      mcidCounters[pi] += 1;
-
-      // Invisible marked-content text layer wired to this MCID. Guarded: the
-      // standard font is Latin-1 only, so non-Latin text is left to /ActualText.
-      const size = Number(block.fontSize) > 0 ? Number(block.fontSize) : 12;
-      const x = Number.isFinite(Number(block.x)) ? Number(block.x) : 0;
-      const y = Number.isFinite(Number(block.y)) ? Number(block.y) : 0;
-      let encoded;
-      try {
-        encoded = font.encodeText(text);
-      } catch {
-        encoded = null;
-        undrawable += 1;
+    // Plan this page's content into headings / paragraphs / lists / tables, then
+    // emit the corresponding structure elements in reading order.
+    for (const node of planPageNodes(contentBlocks)) {
+      if (node.kind === "heading") {
+        documentKids.push(emitLeaf(pi, page, pageRef, documentRef, `H${node.level}`, node.text, node.pos));
+        headings += 1;
+        headingLevelsSeen.push(node.level);
+      } else if (node.kind === "para") {
+        documentKids.push(emitLeaf(pi, page, pageRef, documentRef, "P", node.text, node.pos));
+        paragraphs += 1;
+      } else if (node.kind === "list") {
+        // /L > /LI > (/Lbl + /LBody). Register the list first so its items can
+        // reference it as their /P, then fill /K bottom-up.
+        const listEl = ctx.obj({ Type: N("StructElem"), S: N("L"), P: documentRef, Pg: pageRef });
+        const listRef = ctx.register(listEl);
+        const liRefs = [];
+        for (const item of node.items) {
+          const liEl = ctx.obj({ Type: N("StructElem"), S: N("LI"), P: listRef, Pg: pageRef });
+          const liRef = ctx.register(liEl);
+          const lblRef = emitLeaf(pi, page, pageRef, liRef, "Lbl", item.marker, item.pos);
+          const bodyRef = emitLeaf(pi, page, pageRef, liRef, "LBody", item.body, item.pos);
+          const liKids = PDFArray.withContext(ctx);
+          liKids.push(lblRef);
+          liKids.push(bodyRef);
+          liEl.set(N("K"), liKids);
+          liRefs.push(liRef);
+          listItems += 1;
+        }
+        const listKids = PDFArray.withContext(ctx);
+        for (const ref of liRefs) listKids.push(ref);
+        listEl.set(N("K"), listKids);
+        documentKids.push(listRef);
+        lists += 1;
+      } else if (node.kind === "table") {
+        // /Table > /TR > /TH (first row, /Scope Column) | /TD.
+        const tableEl = ctx.obj({ Type: N("StructElem"), S: N("Table"), P: documentRef, Pg: pageRef });
+        const tableRef = ctx.register(tableEl);
+        const trRefs = [];
+        node.rows.forEach((row, ri) => {
+          const trEl = ctx.obj({ Type: N("StructElem"), S: N("TR"), P: tableRef, Pg: pageRef });
+          const trRef = ctx.register(trEl);
+          const cellRefs = [];
+          for (const cell of row.cells) {
+            const header = ri === 0;
+            const cellType = header ? "TH" : "TD";
+            const attrs = header ? [["Scope", N("Column")]] : null;
+            cellRefs.push(emitLeaf(pi, page, pageRef, trRef, cellType, cell.text, cell.pos, attrs));
+            tableCells += 1;
+          }
+          const trKids = PDFArray.withContext(ctx);
+          for (const ref of cellRefs) trKids.push(ref);
+          trEl.set(N("K"), trKids);
+          trRefs.push(trRef);
+        });
+        const tableKids = PDFArray.withContext(ctx);
+        for (const ref of trRefs) tableKids.push(ref);
+        tableEl.set(N("K"), tableKids);
+        documentKids.push(tableRef);
+        tables += 1;
       }
-      const mcDict = ctx.obj({ MCID: mcid });
-      const ops = [PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [N(tag), mcDict])];
-      if (encoded) {
-        ops.push(
-          beginText(),
-          setTextRenderingMode(3),
-          setFontAndSize(fontKeyFor(pi), size),
-          setTextMatrix(1, 0, 0, 1, x, y),
-          showText(encoded),
-          endText(),
-        );
-      }
-      ops.push(endMarkedContent());
-      page.pushOperators(...ops);
     }
 
     for (const figure of figuresByPage[pi]) {
@@ -936,6 +1432,9 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
       const figEl = ctx.obj({ Type: N("StructElem"), S: N("Figure"), P: documentRef, Pg: pageRef });
       figEl.set(N("Alt"), PDFHexString.fromText(alt));
       figEl.set(N("K"), PDFNumber.of(mcid));
+      // /BBox layout attribute when the figure's geometry is known.
+      const bbox = figureBBox(figure);
+      if (bbox) figEl.set(N("A"), ctx.obj({ O: N("Layout"), BBox: bbox }));
       const figRef = ctx.register(figEl);
       documentKids.push(figRef);
       parentArrays[pi][mcid] = figRef;
@@ -944,6 +1443,43 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
         PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [N("Figure"), ctx.obj({ MCID: mcid })]),
         endMarkedContent(),
       );
+    }
+
+    // Links: wire each /Link annotation into the tree as /Link > /OBJR so screen
+    // readers announce it, and give it /Contents alt text when missing.
+    const annotsVal = ctx.lookup(page.node.get(N("Annots")));
+    if (annotsVal instanceof PDFArray) {
+      for (let ai = 0; ai < annotsVal.size(); ai += 1) {
+        const aref = annotsVal.get(ai);
+        if (!(aref instanceof PDFRef)) continue;
+        const annot = ctx.lookup(aref);
+        if (!annot || typeof annot.get !== "function") continue;
+        if (decodeName(annot.get(N("Subtype"))) !== "Link") continue;
+        if (!decodePdfText(annot.get(N("Contents"))).trim()) {
+          const derived = deriveLinkContents(lib, ctx, annot);
+          if (derived) annot.set(N("Contents"), PDFHexString.fromText(derived));
+          else review.push("A link annotation has no /Contents description — add link alt text so its purpose is announced.");
+        }
+        const linkEl = ctx.obj({ Type: N("StructElem"), S: N("Link"), P: documentRef, Pg: pageRef });
+        const linkRef = ctx.register(linkEl);
+        const objr = ctx.obj({ Type: N("OBJR"), Pg: pageRef, Obj: aref });
+        const linkKids = PDFArray.withContext(ctx);
+        linkKids.push(objr);
+        linkEl.set(N("K"), linkKids);
+        const key = nextParentKey;
+        nextParentKey += 1;
+        annot.set(N("StructParent"), PDFNumber.of(key));
+        annotParents.push([key, linkRef]);
+        documentKids.push(linkRef);
+        links += 1;
+      }
+    }
+
+    // Running content: draw as invisible /Artifact (pagination) so the repeated
+    // header/footer text is excluded from the reading order.
+    for (const block of runningOnPage) {
+      runningArtifacts += 1;
+      drawMc(pi, page, "Artifact", null, String(block.text ?? ""), Number(block.x) || 0, Number(block.y) || 0, Number(block.fontSize) > 0 ? Number(block.fontSize) : 12);
     }
 
     // Tag the marked-content stream we injected above so a later re-run can find
@@ -958,14 +1494,20 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
     page.node.set(N("Tabs"), N("S"));
   }
 
-  // Document /K = ordered array of all block/figure elements.
+  // Document /K = ordered array of all top-level structure elements.
   const kidsArray = PDFArray.withContext(ctx);
   for (const ref of documentKids) kidsArray.push(ref);
   documentEl.set(N("K"), kidsArray);
   structTreeRoot.set(N("K"), documentRef);
 
-  // ParentTree: number tree mapping each page's /StructParents index to the
-  // array of parent structure elements ordered by MCID.
+  // RoleMap: map every structure type we emit to its standard equivalent, so
+  // validators that require custom types to be mapped are satisfied.
+  const roleMap = ctx.obj({});
+  for (const role of EMITTED_ROLES) roleMap.set(N(role), N(role));
+  structTreeRoot.set(N("RoleMap"), ctx.register(roleMap));
+
+  // ParentTree: page MCID arrays (keys 0..pageCount-1), then one entry per link
+  // annotation (key -> its /Link element). Keys stay in ascending order.
   const nums = PDFArray.withContext(ctx);
   for (let pi = 0; pi < pageCount; pi += 1) {
     const arr = PDFArray.withContext(ctx);
@@ -973,18 +1515,27 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
     nums.push(PDFNumber.of(pi));
     nums.push(ctx.register(arr));
   }
+  for (const [key, ref] of annotParents) {
+    nums.push(PDFNumber.of(key));
+    nums.push(ref);
+  }
   const parentTree = ctx.obj({});
   parentTree.set(N("Nums"), nums);
   structTreeRoot.set(N("ParentTree"), ctx.register(parentTree));
-  structTreeRoot.set(N("ParentTreeNextKey"), PDFNumber.of(pageCount));
+  structTreeRoot.set(N("ParentTreeNextKey"), PDFNumber.of(nextParentKey));
   catalog.set(N("StructTreeRoot"), structTreeRef);
 
-  applied.push(`tagged structure tree (/Document root with ${paragraphs} paragraph, ${headings} heading, ${taggedFigures} figure element(s))`);
-  if (artifacts) applied.push(`${artifacts} decorative image(s) marked as /Artifact`);
+  applied.push(`tagged structure tree (/Document root with ${paragraphs} paragraph, ${headings} heading, ${lists} list, ${tables} table, ${links} link, ${taggedFigures} figure element(s))`);
+  if (artifacts || runningArtifacts) applied.push(`${artifacts} decorative image(s) and ${runningArtifacts} running-content run(s) marked as /Artifact`);
+  applied.push("/RoleMap mapping structure types to standard PDF/UA roles");
   if (undrawable) review.push(`${undrawable} text block(s) use characters the standard font cannot draw; their text is preserved as /ActualText but not as a visible glyph layer.`);
 
+  const skip = findHeadingSkip(headingLevelsSeen);
+  if (skip.skipped) review.push(`Heading levels skip from H${skip.from} to H${skip.to}; insert the missing H${skip.from + 1} or adjust the outline.`);
   review.push("Reading order was inferred from text position (top-to-bottom, left-to-right). Confirm it is logically correct for multi-column, table, or form layouts.");
   review.push("Heading levels were guessed from text size/weight. Confirm the H1–H6 outline by hand.");
+  if (tables) review.push("Table structure was inferred from text positions and is heuristic — confirm the /TH header cells and cell reading order by hand.");
+  if (links) review.push("Confirm each link's /Contents description conveys its purpose.");
   if (taggedFigures) review.push("Confirm each image's alt text actually describes the image's meaning.");
 
   const outBytes = await pdf.save({ updateMetadata: false });
@@ -993,7 +1544,7 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
     report: {
       applied,
       review,
-      structSummary: { paragraphs, headings, figures: taggedFigures, artifacts, pageCount },
+      structSummary: { paragraphs, headings, lists, listItems, tables, tableCells, links, figures: taggedFigures, artifacts, runningArtifacts, pageCount },
       lang,
       title,
     },
@@ -1019,50 +1570,54 @@ export async function extractAccessibilityContent(source, onProgress) {
   const pageCount = doc.numPages;
   const textBlocks = [];
   const figures = [];
+  const links = [];
   let characters = 0;
 
   for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
     onProgress?.(pageNumber, pageCount);
     const page = await doc.getPage(pageNumber);
     const viewport = page.getViewport({ scale: 1 });
-    const pageHeight = viewport.height;
+    const geom = { width: viewport.width, height: viewport.height };
 
-    // Text items with positions. pdf.js transform is [a,b,c,d,e,f]; e,f are the
-    // text origin in a top-left-ish device space at scale 1 — convert f to a
-    // PDF bottom-left baseline y.
+    // pdf.js text items already carry {str, transform:[a,b,c,d,e,f], width,
+    // height, fontName} — the exact shape pdf-reflow's layout analysis consumes,
+    // where transform's e,f are the baseline origin in PDF user space (bottom-left).
     const content = await page.getTextContent();
-    const rawItems = [];
     for (const item of content.items) {
-      const str = typeof item.str === "string" ? item.str : "";
-      if (!str) continue;
-      characters += str.length;
-      const tr = item.transform || [1, 0, 0, 1, 0, 0];
-      const x = tr[4];
-      const yTop = tr[5];
-      const fontSize = Math.hypot(tr[2], tr[3]) || Math.abs(tr[3]) || 12;
-      rawItems.push({
-        str,
-        x,
-        y: yTop, // pdf.js text transform f is already in PDF user space (bottom-left)
-        fontSize,
-        width: item.width || 0,
-        hasEOL: item.hasEOL === true,
-      });
+      if (typeof item.str === "string") characters += item.str.length;
     }
 
-    const blocks = groupTextItemsIntoBlocks(rawItems);
-    // Heading heuristic: a block whose font size is clearly above the page's
-    // median body size becomes a heading; the two largest tiers map to H1/H2.
-    assignHeadingLevels(blocks);
-    for (const block of blocks) {
-      textBlocks.push({
-        page: pageNumber,
-        text: block.text,
-        x: block.x,
-        y: block.y,
-        fontSize: block.fontSize,
-        heading: block.heading,
-      });
+    // Reuse detectColumnLayout to decide whether this page is tabular. On a
+    // table-like page, split the raw runs into positioned cells so the tagger
+    // rebuilds a real /Table; otherwise reuse parseParagraphs, which merges prose
+    // into paragraphs, flags headings, and keeps each list item as its own block
+    // (marker intact) so the tagger can group them into an /L.
+    const layout = detectColumnLayout(content.items, geom);
+    if (layout.tableLike && layout.lineCount >= 3) {
+      for (const cell of extractTableCells(content.items, pageNumber)) textBlocks.push(cell);
+    } else {
+      const blocks = parseParagraphs(content.items, geom);
+      const levelOf = paragraphHeadingLevel(blocks);
+      for (const block of blocks) {
+        textBlocks.push({
+          page: pageNumber,
+          text: block.text,
+          x: block.left,
+          y: block.top - block.fontSize, // baseline ≈ top-of-slot minus one em
+          fontSize: block.fontSize,
+          heading: block.isHeading ? levelOf(block) : 0,
+        });
+      }
+    }
+
+    // Link annotations, for the UI to surface (the tagger re-reads them from the
+    // page object model to wire /Link + /OBJR, so this list is informational).
+    try {
+      for (const annot of await page.getAnnotations()) {
+        if (annot && annot.subtype === "Link") links.push({ page: pageNumber, url: annot.url || "", rect: annot.rect || null });
+      }
+    } catch {
+      /* annotations unavailable — links simply not listed for this page */
     }
 
     // Image operators → figure regions.
@@ -1083,45 +1638,52 @@ export async function extractAccessibilityContent(source, onProgress) {
     page.cleanup();
   }
 
-  return { textBlocks, figures, textLayer: { characters, pageCount }, pageCount };
+  return { textBlocks, figures, links, textLayer: { characters, pageCount }, pageCount };
 }
 
-// Groups positioned text items into paragraph-ish blocks by line proximity.
-// A new block starts when the vertical gap to the previous line exceeds ~1.6×
-// the running font size (a paragraph break) or the font size changes sharply
-// (a heading). Bounded single pass over pre-sorted items — no super-linear work.
-function groupTextItemsIntoBlocks(items) {
-  if (!items.length) return [];
-  // Reading order: top-to-bottom (descending y), then left-to-right.
-  const sorted = items.slice().sort((a, b) => (Math.abs(a.y - b.y) > 2 ? b.y - a.y : a.x - b.x));
-  const blocks = [];
-  let current = null;
-  let prevY = null;
-  for (const item of sorted) {
-    const size = item.fontSize || 12;
-    const bigGap = prevY !== null && Math.abs(prevY - item.y) > size * 1.6;
-    const sizeShift = current && Math.abs((current.fontSize || 12) - size) > Math.max(1.5, size * 0.25);
-    if (!current || bigGap || sizeShift) {
-      current = { text: item.str, x: item.x, y: item.y, fontSize: size, maxSize: size };
-      blocks.push(current);
-    } else {
-      current.text += (current.text.endsWith(" ") || item.str.startsWith(" ") ? "" : " ") + item.str;
-      current.maxSize = Math.max(current.maxSize, size);
+// Maps parseParagraphs heading blocks to H1..H6 by distinct font-size tier
+// (largest = H1). Returns a lookup closure over the page's blocks.
+function paragraphHeadingLevel(blocks) {
+  const headingSizes = [...new Set(blocks.filter((b) => b.isHeading).map((b) => Math.round(b.fontSize)))].sort((a, b) => b - a);
+  return (block) => {
+    const tier = headingSizes.indexOf(Math.round(block.fontSize));
+    return tier >= 0 && tier < 6 ? tier + 1 : 1;
+  };
+}
+
+// Splits a table-like page's raw pdf.js runs into positioned cells: runs are
+// clustered into rows by baseline, then each row is split into cells wherever a
+// horizontal gap exceeds the run's own size (a real column gap, not word spacing).
+// Bounded single pass over sorted runs. Browser-only.
+function extractTableCells(items, pageNumber) {
+  const runs = [];
+  for (const item of items) {
+    const str = typeof item.str === "string" ? item.str : "";
+    if (!str.trim()) continue;
+    const t = item.transform || [1, 0, 0, 1, 0, 0];
+    const size = Math.hypot(Number(t[1]), Number(t[3])) || Math.abs(Number(t[3])) || 12;
+    runs.push({ str, x: Number(t[4]) || 0, y: Number(t[5]) || 0, size, width: Math.abs(Number(item.width)) || 0 });
+  }
+  runs.sort((a, b) => (Math.abs(a.y - b.y) > 2 ? b.y - a.y : a.x - b.x));
+  const rows = [];
+  let currentRow = null;
+  for (const run of runs) {
+    if (currentRow && Math.abs(currentRow.y - run.y) <= Math.max(2, run.size * 0.5)) currentRow.runs.push(run);
+    else { currentRow = { y: run.y, runs: [run] }; rows.push(currentRow); }
+  }
+  const cells = [];
+  for (const row of rows) {
+    row.runs.sort((a, b) => a.x - b.x);
+    let cell = null;
+    for (const run of row.runs) {
+      if (cell && run.x - cell.endX <= cell.size * 1.8) {
+        cell.text += (cell.text.endsWith(" ") ? "" : " ") + run.str;
+        cell.endX = run.x + run.width;
+      } else {
+        cell = { text: run.str, x: run.x, endX: run.x + run.width, y: run.y, size: run.size };
+        cells.push(cell);
+      }
     }
-    prevY = item.y;
   }
-  return blocks;
-}
-
-function assignHeadingLevels(blocks) {
-  if (!blocks.length) return;
-  const sizes = blocks.map((b) => b.fontSize).slice().sort((a, b) => a - b);
-  const median = sizes[Math.floor(sizes.length / 2)] || 12;
-  // Distinct sizes clearly above the body median, largest first, map to H1..H3.
-  const bigSizes = [...new Set(blocks.map((b) => Math.round(b.fontSize)).filter((s) => s > median * 1.15))].sort((a, b) => b - a);
-  for (const block of blocks) {
-    const rounded = Math.round(block.fontSize);
-    const tier = bigSizes.indexOf(rounded);
-    block.heading = tier >= 0 && tier < 6 ? tier + 1 : 0;
-  }
+  return cells.map((c) => ({ page: pageNumber, text: c.text.trim(), x: c.x, y: c.y, fontSize: c.size, heading: 0 }));
 }

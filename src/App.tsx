@@ -5028,11 +5028,12 @@ type A11yCheck = { id: string; label: string; status: A11yStatus; detail: string
 type A11yReport = {
   checks: A11yCheck[];
   summary: { pass: number; warn: number; fail: number; info: number };
+  conformance?: { passed: number; applicable: number; summary: string; caveat: string };
   verdict: { level: "pass" | "warn" | "fail"; headline: string; summary: string };
   stats: Record<string, any>;
 };
 type A11yFigure = { page: number; id: string; alt: string; decorative: boolean };
-type A11yAnalysis = { textBlocks: any[]; figures: A11yFigure[]; textLayer: { characters: number; pageCount: number }; pageCount: number };
+type A11yAnalysis = { textBlocks: any[]; figures: A11yFigure[]; links?: any[]; textLayer: { characters: number; pageCount: number }; pageCount: number };
 
 function a11yStatusTone(status: A11yStatus) {
   if (status === "fail") return "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger-fg)]";
@@ -5094,7 +5095,7 @@ function AccessibilityCheckTool({ tool }: { tool: Tool }) {
   return (
     <ToolForm status={status} onReset={reset}>
       <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-        Audits a PDF against PDF/UA and WCAG basics that a machine can verify — tagging, title, language, image alt text, extractable text, encryption permissions, reading order, and headings. Everything runs locally in this browser. This does <strong>not</strong> replace a manual audit: colour contrast, whether alt text is meaningful, and whether the reading order is logically correct all need human judgement.
+        Audits a PDF against the machine-verifiable PDF/UA and WCAG criteria — tagging, title, language, image alt text, extractable text, encryption permissions, reading order, heading structure and nesting, list structure, table header cells with scope, tagged links, artifacted running content, and a role map. Everything runs locally in this browser. It reports how many automated checks pass, but is <strong>not</strong> a veraPDF or certified PDF/UA conformance pass: colour contrast, whether alt text is meaningful, whether table/list detection matched the real layout, and whether the reading order is logically correct all still need a human.
       </div>
       <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
 
@@ -5103,7 +5104,9 @@ function AccessibilityCheckTool({ tool }: { tool: Tool }) {
           <div className={`wabi-card-edge grid gap-2 rounded-2xl border p-4 ${verdictTone(report.verdict.level)}`}>
             <p className="text-xs font-black uppercase tracking-wide">Accessibility verdict</p>
             <p className="text-lg font-black">{report.verdict.headline}</p>
+            {report.conformance ? <p className="text-sm font-black">{report.conformance.summary}</p> : null}
             <p className="text-sm font-semibold leading-6">{report.verdict.summary}</p>
+            {report.conformance ? <p className="text-xs font-semibold leading-5 opacity-80">{report.conformance.caveat}</p> : null}
           </div>
 
           <div className="surface-card wabi-card-edge grid gap-3 p-4">
@@ -5205,7 +5208,7 @@ function TagPdfTool({ tool }: { tool: Tool }) {
     <div className="tool-form-grid">
       <div className="tool-form-actions">
         <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-          Remediates a PDF toward PDF/UA as far as is reliably automatable: sets the document language, title, and window-bar title, marks it tagged, and builds a basic <strong>real</strong> structure tree (headings and paragraphs in reading order, in an invisible tagged text layer) plus alt text for images. Automated tagging gets structure, language, title, and alt-text scaffolding right, but a perfect reading order and correct semantic tags for complex layouts (multi-column, tables, forms) still need a manual pass in a full authoring tool. This does <strong>not</strong> claim certified PDF/UA conformance.
+          Remediates a PDF toward PDF/UA as far as is reliably automatable: sets the document language, title, and window-bar title, marks it tagged, and builds a <strong>real</strong> structure tree in an invisible tagged text layer — headings (with level nesting), paragraphs, lists (/L·/LI·/Lbl·/LBody), data tables (/Table·/TR·/TH·/TD with header scope), links wired to their annotations (/Link·/OBJR), alt text for images, and a role map. Repeated headers, footers, and page numbers are marked as artifacts so they are skipped. Table and list detection from a flat text layer is heuristic, and a perfect reading order and semantics for complex layouts still need a manual pass in a full authoring tool. This does <strong>not</strong> claim certified PDF/UA conformance.
         </div>
         <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
 

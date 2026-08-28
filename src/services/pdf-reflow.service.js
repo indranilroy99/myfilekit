@@ -55,8 +55,10 @@ const HEADING_LINE_HEIGHT = 1.2;
 const ASCENT_RATIO = 0.8;
 // Space inserted BEFORE a block (as a multiple of its font size), per kind.
 const SPACE_BEFORE = { heading: 0.8, "list-item": 0.2, paragraph: 0.45 };
-// Common list markers at the very start of a line.
-const LIST_MARKER = /^\s*([•‣◦⁃∙*\-–]|\d{1,3}[.)]|[a-zA-Z][.)])\s+/;
+// Common list markers at the very start of a line. Exported so the accessibility
+// tagger reuses the exact same marker detection (rather than re-deriving it) when
+// grouping list items into an /L > /LI > /Lbl + /LBody structure.
+export const LIST_MARKER = /^\s*([•‣◦⁃∙*\-–]|\d{1,3}[.)]|[a-zA-Z][.)])\s+/;
 
 // ---------------------------------------------------------------------------
 // parseParagraphs — pure. pdf.js text items -> ordered flowable blocks.
