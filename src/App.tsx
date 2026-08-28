@@ -144,7 +144,10 @@ const categoryDetails: Record<string, { description: string; accent: string }> =
 const quickSearches = ["Edit PDF text", "Annotate PDF", "Sign PDF", "Compare PDFs", "Make PDF accessible", "Remove JavaScript", "Redact PII", "Check for malware", "Encrypt PDF", "Merge PDF", "Compress Image", "Invoice"];
 const recentToolsStorageKey = "myfilekit:recentTools";
 const themeStorageKey = "myfilekit:theme";
-const popularToolIds = ["auto-redact-pii-tool", "edit-pdf-text-tool", "pdf-analyzer-tool", "sign-pdf-tool", "merge-pdf-tool", "compress-image-tool", "invoice-generator-tool", "file-hash-tool"];
+// Popular = established staples only. New tools live in the New & Notable shelf
+// below; the runtime !isNew guard in Dashboard keeps the two shelves disjoint even
+// if a tool here is later flagged isNew.
+const popularToolIds = ["auto-redact-pii-tool", "compress-pdf-tool", "pdf-analyzer-tool", "pdf-to-word-tool", "merge-pdf-tool", "compress-image-tool", "invoice-generator-tool", "file-hash-tool"];
 // The newest flagship tools, surfaced in a "New & Notable" shelf on the dashboard.
 const newAndNotableIds = ["sanitize-pdf-tool", "accessibility-check-tool", "tag-pdf-tool", "translate-pdf-tool", "batch-workflow-tool", "extract-images-tool"];
 const browseToolsPageSize = 10;
@@ -408,7 +411,7 @@ function Dashboard() {
   const [recentTools, setRecentTools] = useState<Tool[]>(() => loadRecentTools());
   const matches = useMemo(() => filterTools(query), [query]);
   const isSearching = Boolean(query.trim());
-  const popularTools = popularToolIds.map(findToolById).filter(Boolean) as Tool[];
+  const popularTools = (popularToolIds.map(findToolById).filter(Boolean) as Tool[]).filter((tool) => !tool.isNew);
   const newTools = newAndNotableIds.map(findToolById).filter(Boolean) as Tool[];
   const distinctRecentTools = recentTools.filter((tool) => !popularToolIds.includes(tool.id)).slice(0, 4);
   const updateQuery = (value: string) => {
