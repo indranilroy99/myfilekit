@@ -26,6 +26,10 @@ import { getPdfLib } from "./pdf.service.js";
 // into paragraph/heading/list-item blocks (with the list marker split out), and
 // LIST_MARKER is the exact marker regex used to group /L > /LI > /Lbl + /LBody.
 import { detectColumnLayout, parseParagraphs, LIST_MARKER } from "./pdf-reflow.service.js";
+// Shared BCP-47 validation — the single source of truth also used by the PDF/A
+// archival prep (pdf-review.service.js), so both services reject the same unsafe
+// /Lang values identically.
+import { safeLangTag as safeLangTagShared } from "../utils/bcp47.js";
 
 // Language choices for the remediation dropdown. Codes are BCP-47 / RFC 3066
 // tags written verbatim into the catalog /Lang and XMP dc:language (ASCII).
@@ -63,10 +67,6 @@ const EMITTED_ROLES = [
   "L", "LI", "Lbl", "LBody", "Table", "TR", "TH", "TD", "Figure", "Link",
 ];
 
-// A BCP-47-ish language tag: a 2–8 letter primary subtag plus optional
-// alphanumeric subtags (script/region/variant). Deliberately strict — it rejects
-// anything carrying PDF dictionary syntax such as ')', '<<', '/', or whitespace.
-const LANG_TAG = /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/;
 const LANGUAGE_CODES = new Set(LANGUAGE_OPTIONS.map((option) => option.code));
 
 // Validates a caller-supplied language tag. The UI dropdown only offers
@@ -76,11 +76,10 @@ const LANGUAGE_CODES = new Set(LANGUAGE_OPTIONS.map((option) => option.code));
 // must never reach the catalog as literal syntax. Accepts a known option or a
 // BCP-47-shaped tag; falls back to a safe default otherwise. (Belt-and-suspenders:
 // the value is additionally written as a hex string, so even a slipped value can
-// not break the dictionary.)
+// not break the dictionary.) Delegates the shape check to the shared validator so
+// this service and the PDF/A archival prep stay in lock-step.
 function safeLangTag(raw, fallback = "en") {
-  const value = String(raw ?? "").trim();
-  if (LANGUAGE_CODES.has(value) || LANG_TAG.test(value)) return value;
-  return fallback;
+  return safeLangTagShared(raw, fallback, LANGUAGE_CODES);
 }
 
 // --- small object-model read helpers -----------------------------------------
@@ -987,9 +986,29 @@ function posOf(block) {
   };
 }
 
+// The planner's heading test, shared so running-content detection never diverges
+// from how planPageNodes actually classifies a block: a block whose `heading`
+// field is an integer level 1..6 is emitted as an /H1../H6 structure element.
+// Everything else (level 0, or an out-of-range value) is body text.
+function headingLevelOf(block) {
+  return Math.floor(Number(block?.heading) || 0);
+}
+function isHeadingBlock(block) {
+  const level = headingLevelOf(block);
+  return level >= 1 && level <= 6;
+}
+
 // Detects running content — text repeated in the top/bottom margin band across
 // two or more pages (headers, footers, page numbers). Digits are normalised so
 // "Page 1"/"Page 2" match. Returns a Set of the exact block objects to artifact.
+//
+// A block the planner treats as a heading (heading level 1..6) is never treated
+// as running content, even when it repeats near a margin: a recurring section
+// heading ("Executive Summary" on two pages, "Chapter 1"/"Chapter 2" which
+// digit-normalise to the same key) must stay in the reading order as an /H1. A
+// false /Artifact is permanent content loss — worse than a heading redundantly
+// repeated — so genuine headings are kept. True running headers/footers/page
+// numbers carry heading level 0 and are still artifacted.
 function detectRunningContent(blocksByPage, pageHeights) {
   const running = new Set();
   const pageCount = blocksByPage.length;
@@ -1001,6 +1020,7 @@ function detectRunningContent(blocksByPage, pageHeights) {
     for (const block of blocksByPage[pi]) {
       const text = String(block?.text ?? "").trim();
       if (!text) continue;
+      if (isHeadingBlock(block)) continue; // a detected heading stays in the reading order
       const y = Number(block.y) || 0;
       if (y < height * 0.9 && y > height * 0.1) continue; // not in a margin band
       const key = norm(text);
@@ -1084,7 +1104,7 @@ export function planPageNodes(blocks) {
         pendingList.push({ marker: (marker[1] || marker[0]).trim(), body: text.slice(marker[0].length).trim(), pos: posOf(block) });
       } else {
         flushList();
-        const level = Math.floor(Number(block.heading) || 0);
+        const level = headingLevelOf(block);
         if (level >= 1 && level <= 6) nodes.push({ kind: "heading", level, text, pos: posOf(block) });
         else nodes.push({ kind: "para", text, pos: posOf(block) });
       }

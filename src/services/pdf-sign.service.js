@@ -1463,6 +1463,42 @@ function readAuditTrail(doc, sigObject) {
   };
 }
 
+// The embedded /MFKAuditTrail is only trustworthy when it lived INSIDE the bytes
+// the CMS signature covers. An attacker can append an incremental update that
+// REDEFINES the signature object (same object number) with a forged audit trail
+// while keeping the ORIGINAL /ByteRange + /Contents, so the CMS still verifies —
+// yet a naive "latest definition wins" reader (scanIndirectObjects) would surface
+// the attacker's /Signer as authentic. This locates the signature dict definition
+// whose object header sits inside the signed byte range (the one actually signed)
+// and reports whether a LATER definition outside that range overrode it. A legit
+// counter-signature appends a NEW object number and never triggers this: only a
+// re-definition of an already-signed object number, landing outside the signed
+// range, is flagged.
+function readSignedSigObject(pdfBytes, objNum, range) {
+  const [s1, l1, s2, l2] = range;
+  const end1 = s1 + l1;
+  const end2 = s2 + l2;
+  const inSignedRange = (offset) => (offset >= s1 && offset < end1) || (offset >= s2 && offset < end2);
+  let signedObj = null;      // dict parsed from a definition inside the signed range
+  let latestOffset = -1;     // highest-offset definition (what "latest wins" shows)
+  let latestInSigned = false;
+  let position = 0;
+  let guard = 0;
+  while (position < pdfBytes.length) {
+    if (++guard > 500000) break; // cycle / runaway guard
+    const header = findObjectHeader(pdfBytes, position);
+    if (!header) break;
+    position = header.bodyStart + 1;
+    if (header.num !== objNum) continue;
+    const covered = inSignedRange(header.bodyStart);
+    if (header.bodyStart > latestOffset) { latestOffset = header.bodyStart; latestInSigned = covered; }
+    if (covered && !signedObj) {
+      try { signedObj = new Lexer(pdfBytes, header.bodyStart).readObject(); } catch { /* skip a damaged definition */ }
+    }
+  }
+  return { signedObj, redefinedOutsideSignedRange: latestOffset >= 0 && !latestInSigned };
+}
+
 // Find every signature dictionary in the file and, for each, recompute the
 // digest over its /ByteRange and check the CMS. All maths is done locally; no
 // trust chain to a root and no revocation check is attempted (see module note).
@@ -1490,8 +1526,17 @@ export async function verifyPdfSignatures(pdfSource) {
     if (!isSig || byteRange.k !== "array" || !contents || contents.k !== "str") continue;
 
     const range = byteRange.v.map((item) => numberValue(resolve(doc, item)));
-    const audit = readAuditTrail(doc, object);
-    const report = await verifyOneSignature(pdfBytes, range, contents.v, audit).catch((error) => ({
+    // Read the /MFKAuditTrail from the bytes the signature ACTUALLY covered, not
+    // from the latest-wins object graph (which an appended incremental update can
+    // redefine), and learn whether the sig object was redefined outside that range.
+    let audit = readAuditTrail(doc, object);
+    let redefinedOutsideSignedRange = false;
+    if (Array.isArray(range) && range.length >= 4 && range.every((n) => Number.isInteger(n) && n >= 0)) {
+      const signedSig = readSignedSigObject(pdfBytes, entry.num, range);
+      redefinedOutsideSignedRange = signedSig.redefinedOutsideSignedRange;
+      if (signedSig.signedObj && signedSig.signedObj.k === "dict") audit = readAuditTrail(doc, signedSig.signedObj);
+    }
+    const report = await verifyOneSignature(pdfBytes, range, contents.v, audit, redefinedOutsideSignedRange).catch((error) => ({
       fieldName: fieldNameByObj.get(entry.num) || "(unnamed)",
       subFilter: nameValue(dictGet(doc, object, "SubFilter")) || "",
       error: error?.message || "Could not verify this signature.",
@@ -1502,6 +1547,7 @@ export async function verifyPdfSignatures(pdfSource) {
       coversWholeDoc: false,
       auditTrailPresent: audit.present,
       auditHashMatches: null,
+      auditTrailTrusted: false,
       auditTrail: audit.present ? audit : null,
       tamperFindings: [error?.message || "Could not parse this signature."],
       identityCaveat: IDENTITY_CAVEAT,
@@ -1520,7 +1566,7 @@ export async function verifyPdfSignatures(pdfSource) {
   return { count: signatures.length, signatures, fileBytes: pdfBytes.length };
 }
 
-async function verifyOneSignature(pdfBytes, range, contentsBytes, audit = { present: false }) {
+async function verifyOneSignature(pdfBytes, range, contentsBytes, audit = { present: false }, redefinedOutsideSignedRange = false) {
   if (!Array.isArray(range) || range.length < 4 || range.some((n) => !Number.isInteger(n) || n < 0)) {
     throw new Error("This signature has an unreadable /ByteRange.");
   }
@@ -1652,6 +1698,28 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes, audit = { pres
     tamperFindings.push("The audit trail's recorded /Covered range does not match the signature's /ByteRange.");
   }
 
+  // --- Audit-trail identity trust (forgery via incremental redefinition) -----
+  // The embedded /MFKAuditTrail is only authoritative when it lived inside the
+  // CMS-signed byte range. It is NOT trustworthy if (1) the signature object was
+  // redefined by a later incremental update outside that range (so a "latest
+  // wins" reader would surface an attacker's copy), or (2) the recorded /Signer
+  // disagrees with the signing certificate's common name (the audit identity was
+  // swapped after signing). Either way the audit signer must not be presented as
+  // authoritative, and we raise a tamper finding.
+  let auditTrailTrusted = auditTrailPresent;
+  if (auditTrailPresent) {
+    const certCN = certCommonName(signerCert, "subject");
+    if (redefinedOutsideSignedRange) {
+      auditTrailTrusted = false;
+      tamperFindings.push("The signature object was redefined by a later incremental update outside the signed byte range, so its audit trail is not covered by the signature and cannot be trusted.");
+    }
+    const auditSigner = (audit.signer || "").trim();
+    if (auditSigner && certCN && auditSigner !== certCN) {
+      auditTrailTrusted = false;
+      tamperFindings.push(`The audit-trail signer "${auditSigner}" does not match the signing certificate "${certCN}" — the audit trail may have been redefined after signing.`);
+    }
+  }
+
   let verdict;
   let detail;
   if (unsupported) {
@@ -1692,6 +1760,7 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes, audit = { pres
     computedSha256: computedDigest ? hexOf(computedDigest) : null,
     auditTrailPresent,
     auditHashMatches,
+    auditTrailTrusted,
     auditTrail: auditTrailPresent ? audit : null,
     tamperFindings,
     identityCaveat: IDENTITY_CAVEAT,

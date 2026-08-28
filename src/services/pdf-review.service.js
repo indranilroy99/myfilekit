@@ -1,5 +1,8 @@
 import { getPdfLib } from "./pdf.service.js";
 import { lineDiff } from "./text-tools.service.js";
+// Shared BCP-47 validation (single source of truth, also used by the a11y service)
+// so a free-text /Lang can never break out of the catalog literal.
+import { safeLangTag } from "../utils/bcp47.js";
 
 // =============================================================================
 // Phase 2 PDF review tooling — pure, Node-testable logic.
@@ -447,13 +450,105 @@ function stripEntry(pdf, dict, keyName) {
   return true;
 }
 
-/** Reads the /S action-type sub-key of an action dict, as a plain name string. */
-function actionType(pdf, actionDict) {
-  const { PDFDict, PDFName } = getPdfLib();
-  const dict = pdf.context.lookup(actionDict);
-  if (!(dict instanceof PDFDict)) return null;
-  const s = dict.get(PDFName.of("S"));
+/** Reads the /S action-type sub-key of a resolved action dict, as a plain name string. */
+function actionTypeOf(actionDict) {
+  const { PDFName } = getPdfLib();
+  const s = actionDict.get(PDFName.of("S"));
   return s && typeof s.decodeText === "function" ? s.decodeText() : s ? String(s).replace(/^\//, "") : null;
+}
+
+// Depth cap for an /A → /Next → … action chain (a /Next can be cyclic or deep).
+const MAX_ACTION_CHAIN = 64;
+
+/** True when a resolved action dict's /S is a PDF/A-forbidden auto-run type. */
+function isForbiddenAction(actionDict) {
+  const t = actionTypeOf(actionDict);
+  return t === "JavaScript" || t === "Launch";
+}
+
+/** Stable "<obj> <gen>" tag for an indirect reference, else null (direct value). */
+function actionRefTag(value) {
+  return value && typeof value === "object" && "objectNumber" in value
+    ? `${value.objectNumber} ${value.generationNumber}`
+    : null;
+}
+
+/**
+ * Walks an action value — the action dict itself PLUS its /Next chain (a single
+ * action dict or an array of them) — collecting whether any link is a forbidden
+ * JavaScript or Launch action. Mirrors the sanitizer's /Next recursion so a
+ * dangerous action hidden behind a benign head (e.g. /GoTo → /Next → /JavaScript)
+ * is still detected. Cycle-guarded by an object-ref set and bounded by a depth cap.
+ */
+function collectChainForbidden(pdf, value, out = { javascript: false, launch: false }, seen = new Set(), depth = 0) {
+  const { PDFDict, PDFArray, PDFName } = getPdfLib();
+  if (value === undefined || value === null || depth > MAX_ACTION_CHAIN) return out;
+  const resolved = pdf.context.lookup(value);
+  if (resolved instanceof PDFArray) {
+    for (let i = 0; i < resolved.size(); i += 1) {
+      collectChainForbidden(pdf, resolved.get(i), out, seen, depth + 1);
+    }
+    return out;
+  }
+  if (!(resolved instanceof PDFDict)) return out;
+  const tag = actionRefTag(value);
+  if (tag) { if (seen.has(tag)) return out; seen.add(tag); }
+  const t = actionTypeOf(resolved);
+  if (t === "JavaScript") out.javascript = true;
+  else if (t === "Launch") out.launch = true;
+  collectChainForbidden(pdf, resolved.get(PDFName.of("Next")), out, seen, depth + 1);
+  return out;
+}
+
+/**
+ * Strips JavaScript / Launch actions from the action held at parent[keyName] and
+ * its /Next chain. A forbidden HEAD removes the whole entry; a benign head is kept
+ * and its /Next chain (a single action or an array) is walked, dropping only the
+ * forbidden links. Mirrors the sanitizer's /Next recursion. Cycle-guarded by an
+ * object-ref set and bounded by a depth cap. Returns the count of actions removed.
+ */
+function stripChainForbidden(pdf, parent, keyName, seen, depth) {
+  const { PDFDict, PDFArray, PDFName } = getPdfLib();
+  const ctx = pdf.context;
+  const key = PDFName.of(keyName);
+  const value = parent.get(key);
+  if (value === undefined) return 0;
+  if (depth > MAX_ACTION_CHAIN) { stripEntry(pdf, parent, keyName); return 0; }
+  const action = ctx.lookup(value);
+
+  if (action instanceof PDFArray) {
+    let removed = 0;
+    const keep = [];
+    for (let i = 0; i < action.size(); i += 1) {
+      const entry = action.get(i);
+      const el = ctx.lookup(entry);
+      if (!(el instanceof PDFDict)) { keep.push(entry); continue; }
+      const tag = actionRefTag(entry);
+      if (tag) { if (seen.has(tag)) continue; seen.add(tag); }
+      if (isForbiddenAction(el)) {
+        if (actionRefTag(entry)) { try { ctx.delete(entry); } catch { /* already gone */ } }
+        removed += 1;
+        continue; // drop this link from the rebuilt array
+      }
+      removed += stripChainForbidden(pdf, el, "Next", seen, depth + 1);
+      keep.push(entry);
+    }
+    if (keep.length !== action.size()) {
+      const rebuilt = PDFArray.withContext(ctx);
+      for (const ref of keep) rebuilt.push(ref);
+      parent.set(key, rebuilt);
+    }
+    return removed;
+  }
+
+  if (!(action instanceof PDFDict)) return 0;
+  const tag = actionRefTag(value);
+  if (tag) { if (seen.has(tag)) { stripEntry(pdf, parent, keyName); return 0; } seen.add(tag); }
+  if (isForbiddenAction(action)) {
+    stripEntry(pdf, parent, keyName); // deletes the referenced action object too
+    return 1;
+  }
+  return stripChainForbidden(pdf, action, "Next", seen, depth + 1); // benign head kept
 }
 
 /**
@@ -570,7 +665,9 @@ export async function archivalPrepPdf(sourceBytes, options = {}) {
   // rasterising produces (PDF/A-1 does not). Callers can still pass part "1".
   const part = String(options.part || "2");
   const conformance = String(options.conformance || "B");
-  const lang = String(options.lang || "en").trim() || "en";
+  // Validate the caller-supplied language against BCP-47 (an invalid tag falls
+  // back to "en", matching the a11y service) so it cannot inject catalog syntax.
+  const lang = safeLangTag(options.lang || "en", "en");
 
   let pdf;
   try {
@@ -636,11 +733,10 @@ export async function archivalPrepPdf(sourceBytes, options = {}) {
     for (let i = 0; i < annots.size(); i += 1) {
       const annot = ctx.lookup(annots.get(i));
       if (!annot || typeof annot.get !== "function") continue;
-      const type = actionType(pdf, annot.get(PDFName.of("A")));
-      if (type === "JavaScript" || type === "Launch") {
-        stripEntry(pdf, annot, "A");
-        strippedAnnotActions += 1;
-      }
+      // Walk the whole /A → /Next chain, not just the top-level /S, so a
+      // dangerous action hidden behind a benign head (/GoTo → /Next → /JavaScript)
+      // is stripped too.
+      strippedAnnotActions += stripChainForbidden(pdf, annot, "A", new Set(), 0);
       stripEntry(pdf, annot, "AA");
     }
   }
@@ -664,7 +760,9 @@ export async function archivalPrepPdf(sourceBytes, options = {}) {
   applied.push("document Info metadata (Title/Author/Producer/dates)");
 
   // --- document language (/Lang) — required by PDF/UA, recommended by PDF/A --
-  catalog.set(PDFName.of("Lang"), PDFString.of(lang));
+  // Written as a hex string (like the a11y service) so even a slipped value can
+  // never break out of the catalog dictionary as literal syntax.
+  catalog.set(PDFName.of("Lang"), PDFHexString.fromText(lang));
   applied.push(`document language /Lang (${lang})`);
 
   // --- /MarkInfo (honest: not tagged, so Marked = false for level B) --------
@@ -727,16 +825,22 @@ const NOT_CHECKED_RULES = [
   "Absence of every forbidden operator/filter across all content streams (e.g. LZW, certain transfer functions).",
 ];
 
-/** Reads the XMP packet text from the catalog /Metadata stream, or "". */
+// The pdfaid / title / date probes only need the packet header, so decoding the
+// whole stream is wasted work and a DoS vector on a multi-MB /Metadata. Cap the
+// slice we decode; a well-formed XMP packet is a few KB.
+const MAX_XMP_BYTES = 256 * 1024;
+
+/** Reads the XMP packet text (capped) from the catalog /Metadata stream, or "". */
 function readXmpText(pdf) {
   const { PDFName } = getPdfLib();
   const meta = pdf.context.lookup(pdf.catalog.get(PDFName.of("Metadata")));
   if (!meta || !meta.contents) return "";
+  const raw = meta.contents.length > MAX_XMP_BYTES ? meta.contents.slice(0, MAX_XMP_BYTES) : meta.contents;
   try {
-    return new TextDecoder("utf-8").decode(meta.contents);
+    return new TextDecoder("utf-8").decode(raw);
   } catch {
     let out = "";
-    for (const b of meta.contents) out += String.fromCharCode(b);
+    for (const b of raw) out += String.fromCharCode(b);
     return out;
   }
 }
@@ -748,9 +852,13 @@ function detectForbidden(pdf) {
   const catalog = pdf.catalog;
   const result = { javascript: false, launch: false, openAction: false, additionalActions: false, embeddedFiles: false };
 
-  const oaType = actionType(pdf, catalog.get(PDFName.of("OpenAction")));
-  if (catalog.get(PDFName.of("OpenAction")) !== undefined) result.openAction = true;
-  if (oaType === "JavaScript" || oaType === "Launch") result.javascript = result.javascript || oaType === "JavaScript";
+  const openAction = catalog.get(PDFName.of("OpenAction"));
+  if (openAction !== undefined) result.openAction = true;
+  // Walk the OpenAction's full /Next chain and flag JavaScript OR Launch (a
+  // /Launch OpenAction launches a program on open, so it must fail the check too).
+  const oa = collectChainForbidden(pdf, openAction);
+  if (oa.javascript) result.javascript = true;
+  if (oa.launch) result.launch = true;
   if (catalog.get(PDFName.of("AA")) !== undefined) result.additionalActions = true;
 
   const names = ctx.lookup(catalog.get(PDFName.of("Names")));
@@ -768,9 +876,10 @@ function detectForbidden(pdf) {
     for (let i = 0; i < annots.size(); i += 1) {
       const annot = ctx.lookup(annots.get(i));
       if (!annot || typeof annot.get !== "function") continue;
-      const t = actionType(pdf, annot.get(PDFName.of("A")));
-      if (t === "JavaScript") result.javascript = true;
-      if (t === "Launch") result.launch = true;
+      // Walk the whole /A → /Next chain, not just the top-level /S.
+      const chain = collectChainForbidden(pdf, annot.get(PDFName.of("A")));
+      if (chain.javascript) result.javascript = true;
+      if (chain.launch) result.launch = true;
       if (annot.get(PDFName.of("AA")) !== undefined) result.additionalActions = true;
     }
   }
@@ -866,7 +975,9 @@ export async function checkPdfACompliance(bytes, options = {}) {
   // 6. XMP dc:title agrees with DocInfo /Title (PDF/A requires them consistent).
   const infoTitle = (() => { try { return pdf.getTitle() || ""; } catch { return ""; } })();
   const xmpTitle = (() => {
-    const m = xmp.match(/<dc:title>[\s\S]*?<rdf:li[^>]*>([\s\S]*?)<\/rdf:li>/);
+    // Inner capture bounded to [^<]* (a title has no '<') so this cannot become a
+    // polynomial-backtracking regex on metadata stuffed with unclosed <rdf:li.
+    const m = xmp.match(/<dc:title>[\s\S]*?<rdf:li[^>]*>([^<]*)<\/rdf:li>/);
     return m ? m[1] : null;
   })();
   const titlesAgree = xmpTitle !== null && xmpTitle === xmlEscape(infoTitle) && infoTitle !== "";

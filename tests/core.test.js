@@ -5900,8 +5900,9 @@ test("archivalPrepPdf defaults to PDF/A-2b, sets /Lang + Title, and keeps a rast
   assert.ok(out.context.lookup(out.catalog.get(PDFName.of("OutputIntents"))), "OutputIntent present");
   assert.ok(out.context.trailerInfo.ID, "document /ID present");
 
-  // Document language (/Lang) and Title are set.
-  assert.match(String(out.catalog.get(PDFName.of("Lang"))), /en/, "/Lang set");
+  // Document language (/Lang) and Title are set. /Lang is now a hex string
+  // (hardened against injection), so decode it rather than stringifying.
+  assert.equal(out.catalog.get(PDFName.of("Lang")).decodeText(), "en", "/Lang set");
   assert.equal(out.getTitle(), "Scanned archive", "Title set");
 
   // The raster page has an image XObject and NO font (no unembedded font).
@@ -6535,6 +6536,127 @@ test("auto-tag marks repeated header/footer text as /Artifact and excludes it fr
   assert.ok(!paraText.some((t) => /Confidential/.test(t)), "the footer is not in the reading order");
 });
 
+// Regression: a recurring section HEADING at the top/bottom margin must NOT be
+// re-classified as running content and drawn as /Artifact. Before the fix,
+// detectRunningContent artifacted any digit-normalised text that repeated on >=2
+// pages inside the margin band — so "Executive Summary" (p1+p2) and "Chapter 1"/
+// "Chapter 2" (same digit-normalised key) were dropped from the reading order and
+// a screen-reader user never heard them. A false /Artifact is permanent content
+// loss, so a detected heading (planner heading level 1..6) stays an /H1.
+test("auto-tag keeps a recurring top-margin heading in the reading order as /H1 (not /Artifact)", async () => {
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const bytes = await makeTextPdf(2, "Doc");
+  // Two pages, each with a heading in the top margin band that repeats across
+  // pages: "Executive Summary" is identical; "Chapter 1"/"Chapter 2" collapse to
+  // the same digit-normalised key. Both would previously be artifacted.
+  const { bytes: out, report } = await a11y.remediatePdfAccessibility(bytes, {
+    lang: "en-US", title: "Doc",
+    textBlocks: [
+      { page: 1, text: "Executive Summary", x: 72, y: 740, fontSize: 18, heading: 1 },
+      { page: 1, text: "Chapter 1", x: 72, y: 715, fontSize: 16, heading: 2 },
+      { page: 1, text: "Body of page one.", x: 72, y: 600, fontSize: 12, heading: 0 },
+      { page: 2, text: "Executive Summary", x: 72, y: 740, fontSize: 18, heading: 1 },
+      { page: 2, text: "Chapter 2", x: 72, y: 715, fontSize: 16, heading: 2 },
+      { page: 2, text: "Body of page two.", x: 72, y: 600, fontSize: 12, heading: 0 },
+    ],
+    figures: [],
+  });
+  // The four heading blocks stay in the reading order and none are artifacted.
+  assert.equal(report.structSummary.headings, 4, "all four recurring headings are tagged, not dropped");
+  assert.equal(report.structSummary.runningArtifacts, 0, "no heading was re-classified as running content");
+
+  // They are real /H1../H2 StructElems whose text is preserved, in the tree.
+  const doc = await PDFDocument.load(out, { throwOnInvalidObject: false });
+  const ctx = doc.context;
+  const { docEl } = a11yDocEl(ctx, PDFName, doc.catalog);
+  const headingEls = a11yKidsOf(ctx, PDFName, docEl).filter((el) => /^H[1-6]$/.test(a11yRole(ctx, PDFName, el)));
+  assert.equal(headingEls.length, 4, "four heading StructElems in the reading order");
+  const headingText = headingEls
+    .map((el) => (el.get(PDFName.of("ActualText")) ? el.get(PDFName.of("ActualText")).decodeText() : ""));
+  assert.ok(headingText.some((t) => /Executive Summary/.test(t)), "the recurring heading is in the reading order");
+  assert.ok(headingText.some((t) => /Chapter 1/.test(t)) && headingText.some((t) => /Chapter 2/.test(t)),
+    "both digit-variant headings survive despite sharing a digit-normalised key");
+
+  // The audit agrees: the tree carries a navigable heading outline.
+  const audit = await a11y.auditPdfAccessibility(out, { textLayer: { characters: 40, pageCount: 2 } });
+  assert.ok(audit.stats.headings >= 2, "audit sees the recurring headings in the structure tree");
+});
+
+// Regression guard for the fix above: a GENUINE repeated running footer (a small
+// page-number folio, heading level 0) must still be artifacted and excluded from
+// the reading order — the fix only spares headings, not real running content.
+test("auto-tag still artifacts a repeated page-number footer (heading-exclusion does not regress the feature)", async () => {
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const bytes = await makeTextPdf(2, "Doc");
+  const { bytes: out, report } = await a11y.remediatePdfAccessibility(bytes, {
+    lang: "en-US", title: "Doc",
+    textBlocks: [
+      { page: 1, text: "Real body content one.", x: 72, y: 600, fontSize: 12, heading: 0 },
+      { page: 1, text: "Page 1 of 10", x: 72, y: 30, fontSize: 9, heading: 0 },
+      { page: 2, text: "Real body content two.", x: 72, y: 600, fontSize: 12, heading: 0 },
+      { page: 2, text: "Page 2 of 10", x: 72, y: 30, fontSize: 9, heading: 0 },
+    ],
+    figures: [],
+  });
+  assert.equal(report.structSummary.runningArtifacts, 2, "both folio footers are still artifacted");
+  assert.equal(report.structSummary.headings, 0, "no headings in this document");
+  assert.equal(report.structSummary.paragraphs, 2, "only the two body paragraphs are in the reading order");
+
+  // The folio text is not present as any StructElem in the reading order.
+  const doc = await PDFDocument.load(out, { throwOnInvalidObject: false });
+  const ctx = doc.context;
+  const { docEl } = a11yDocEl(ctx, PDFName, doc.catalog);
+  const allText = a11yKidsOf(ctx, PDFName, docEl)
+    .map((el) => (el.get(PDFName.of("ActualText")) ? el.get(PDFName.of("ActualText")).decodeText() : ""));
+  assert.ok(!allText.some((t) => /Page \d+ of 10/.test(t)), "the folio footer is excluded from the reading order");
+});
+
+// Regression: idempotency still holds when a document mixes a recurring heading
+// (kept in the reading order) with a recurring footer (artifacted). Re-tagging
+// twice must still leave exactly one StructTreeRoot, no orphaned StructElems, and
+// the heading must survive both passes.
+test("auto-tag is idempotent on a doc with both a repeated heading and a repeated footer", async () => {
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const blocks = [
+    { page: 1, text: "Executive Summary", x: 72, y: 740, fontSize: 18, heading: 1 },
+    { page: 1, text: "Body of page one.", x: 72, y: 600, fontSize: 12, heading: 0 },
+    { page: 1, text: "Page 1 of 2", x: 72, y: 30, fontSize: 9, heading: 0 },
+    { page: 2, text: "Executive Summary", x: 72, y: 740, fontSize: 18, heading: 1 },
+    { page: 2, text: "Body of page two.", x: 72, y: 600, fontSize: 12, heading: 0 },
+    { page: 2, text: "Page 2 of 2", x: 72, y: 30, fontSize: 9, heading: 0 },
+  ];
+
+  async function measure(bytes) {
+    const doc = await PDFDocument.load(bytes, { throwOnInvalidObject: false });
+    const ctx = doc.context;
+    let structElems = 0;
+    let structRoots = 0;
+    for (const [, obj] of ctx.enumerateIndirectObjects()) {
+      if (!obj || typeof obj.get !== "function") continue;
+      const t = obj.get(PDFName.of("Type"));
+      const type = t ? t.toString() : "";
+      if (type === "/StructElem") structElems += 1;
+      if (type === "/StructTreeRoot") structRoots += 1;
+    }
+    return { structElems, structRoots };
+  }
+
+  const src = await makeTextPdf(2, "Report");
+  const pass1 = await a11y.remediatePdfAccessibility(src, { lang: "en-US", title: "Report", textBlocks: blocks, figures: [] });
+  const m1 = await measure(pass1.bytes);
+  const pass2 = await a11y.remediatePdfAccessibility(pass1.bytes, { lang: "en-US", title: "Report", textBlocks: blocks, figures: [] });
+  const m2 = await measure(pass2.bytes);
+
+  assert.equal(m1.structRoots, 1, "one StructTreeRoot after the first pass");
+  assert.equal(m2.structRoots, 1, "still exactly one StructTreeRoot after re-running (old root not orphaned)");
+  assert.equal(m2.structElems, m1.structElems, "StructElem count does not grow on a re-run (no orphans)");
+  // The recurring heading survives both passes; the recurring footer is artifacted both times.
+  assert.equal(pass1.report.structSummary.headings, 2, "two headings after the first pass");
+  assert.equal(pass2.report.structSummary.headings, 2, "two headings still after the second pass");
+  assert.equal(pass1.report.structSummary.runningArtifacts, 2, "both footers artifacted on the first pass");
+  assert.equal(pass2.report.structSummary.runningArtifacts, 2, "both footers artifacted on the second pass");
+});
+
 test("upgraded checker reports the new PDF/UA criteria, an N-of-M summary, and the not-certified caveat", async () => {
   // A rich remediation output: heading + table + list + a tagged link.
   const linkBytes = await makeLinkPdf();
@@ -7122,4 +7244,235 @@ test("C2: counter-signing adds a second signature (incremental) without invalida
   assert.equal(alice.coversWholeDoc, false, "signature 1 does not cover the appended counter-signature");
   assert.equal(alice.byteRangeValid, true, "signature 1 is still valid for the range it covers");
   assert.equal(bob.coversWholeDoc, true, "signature 2 covers the whole current document");
+});
+
+// =============================================================================
+// PHASE C3 — pdf-review.service.js hardening regressions (4 defects)
+// =============================================================================
+
+// DEFECT 1: a malicious free-text /Lang must not break out of the catalog literal
+// and inject an /OpenAction JavaScript action; it must be BCP-47-validated and
+// written as a hex string (an invalid tag falls back to a safe default).
+test("C3: archivalPrepPdf validates + hex-encodes /Lang, so a malicious tag cannot inject catalog objects", async () => {
+  const { archivalPrepPdf } = await import("../src/services/pdf-review.service.js");
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  doc.addPage([300, 300]); // fontless, so the embedding gate passes
+  const src = await doc.save({ useObjectStreams: false });
+
+  const evil = "en) /OpenAction << /Type /Action /S /JavaScript /JS (app.alert\\(1\\)) >> /Marked (";
+  const { bytes } = await archivalPrepPdf(src, { title: "T", lang: evil });
+  const text = Buffer.from(bytes).toString("latin1");
+
+  // No injected active content, and /Lang serialised as a hex string, not a literal.
+  assert.equal(/\/OpenAction\s*<<[^>]*\/S\s*\/JavaScript/.test(text), false, "no injected /OpenAction JavaScript");
+  assert.match(text, /\/Lang\s*<[0-9A-Fa-f]+>/, "/Lang is a hex string");
+  assert.equal(/\/Lang\s*\(/.test(text), false, "/Lang is never a literal ( ) string");
+
+  // The invalid tag defaults to "en" (= hex "656E"), matching the a11y path.
+  const out = await PDFDocument.load(bytes);
+  const langVal = out.catalog.get(PDFName.of("Lang"));
+  assert.equal(typeof langVal.decodeText === "function" ? langVal.decodeText() : String(langVal), "en", "invalid tag falls back to en");
+
+  // A valid tag is preserved verbatim (and still hex-encoded).
+  const { bytes: okBytes } = await archivalPrepPdf(src, { title: "T", lang: "fr-FR" });
+  const out2 = await PDFDocument.load(okBytes);
+  const lang2 = out2.catalog.get(PDFName.of("Lang"));
+  assert.equal(lang2.decodeText(), "fr-FR", "valid BCP-47 tag preserved");
+});
+
+// DEFECT 2: JavaScript hidden in an action /A → /Next chain (behind a benign
+// /GoTo head) must be DETECTED by checkPdfACompliance pre-strip AND removed by
+// archivalPrepPdf.
+test("C3: /A /Next chain JavaScript is flagged pre-strip and removed by archivalPrepPdf", async () => {
+  const { checkPdfACompliance, archivalPrepPdf } = await import("../src/services/pdf-review.service.js");
+  const { PDFDocument, PDFName, PDFArray, PDFString } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]); // fontless
+  const ctx = doc.context;
+
+  const jsAction = ctx.obj({});
+  jsAction.set(PDFName.of("S"), PDFName.of("JavaScript"));
+  jsAction.set(PDFName.of("JS"), PDFString.of("app.alert('pwned: survived PDF/A prep');"));
+  const gotoAction = ctx.obj({});
+  gotoAction.set(PDFName.of("S"), PDFName.of("GoTo"));
+  gotoAction.set(PDFName.of("Next"), ctx.register(jsAction)); // JS hidden in the chain
+  const annot = ctx.obj({});
+  annot.set(PDFName.of("Type"), PDFName.of("Annot"));
+  annot.set(PDFName.of("Subtype"), PDFName.of("Link"));
+  annot.set(PDFName.of("Rect"), ctx.obj([0, 0, 100, 100]));
+  annot.set(PDFName.of("A"), ctx.register(gotoAction));
+  const annots = PDFArray.withContext(ctx);
+  annots.push(ctx.register(annot));
+  page.node.set(PDFName.of("Annots"), annots);
+  const src = await doc.save({ useObjectStreams: false });
+
+  // 1. The checker must FAIL noJavaScript pre-strip (not report a clean 14/14).
+  const check = await checkPdfACompliance(src, { part: "2", conformance: "B" });
+  const noJs = check.criteria.find((c) => c.id === "noJavaScript");
+  assert.equal(noJs.pass, false, "chain-buried JavaScript is detected pre-strip");
+  assert.ok(check.passed < check.total, "not a clean N-of-N tally");
+
+  // 2. archivalPrepPdf strips it and the JS code no longer survives in the bytes.
+  const { bytes: out, report } = await archivalPrepPdf(src, { title: "T", part: "2" });
+  assert.equal(Buffer.from(out).toString("latin1").includes("app.alert('pwned"), false, "JS removed from output");
+  assert.ok(report.removed.some((item) => /JavaScript\/Launch action/i.test(item)), "removal reported");
+
+  // 3. The cleaned output now passes noJavaScript.
+  const check2 = await checkPdfACompliance(out, { part: "2" });
+  assert.equal(check2.criteria.find((c) => c.id === "noJavaScript").pass, true, "cleaned file passes");
+});
+
+// DEFECT 3: a document /OpenAction of type /Launch (launch a program on open)
+// must FAIL the noJavaScript criterion, not slip through unflagged.
+test("C3: a /Launch document OpenAction fails checkPdfACompliance noJavaScript", async () => {
+  const { checkPdfACompliance } = await import("../src/services/pdf-review.service.js");
+  const { PDFDocument, PDFName, PDFString } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  doc.addPage([612, 792]); // fontless
+  const ctx = doc.context;
+  const launch = ctx.obj({});
+  launch.set(PDFName.of("S"), PDFName.of("Launch"));
+  launch.set(PDFName.of("F"), PDFString.of("calc.exe"));
+  doc.catalog.set(PDFName.of("OpenAction"), ctx.register(launch));
+  const src = await doc.save({ useObjectStreams: false });
+
+  const check = await checkPdfACompliance(src, { part: "2" });
+  const noJs = check.criteria.find((c) => c.id === "noJavaScript");
+  assert.equal(noJs.pass, false, "a /Launch OpenAction is flagged");
+  assert.match(noJs.detail, /Launch/, "the detail names /Launch");
+});
+
+// DEFECT 4: the XMP read is capped and the dc:title regex is bounded, so a large
+// junk /Metadata stream full of unclosed <rdf:li cannot cause a polynomial-time
+// blow-up. checkPdfACompliance must return quickly and stay correct.
+test("C3: checkPdfACompliance stays fast + bounded on a 1MB junk /Metadata stream", async () => {
+  const { checkPdfACompliance } = await import("../src/services/pdf-review.service.js");
+  const { PDFDocument, PDFName } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  doc.addPage([200, 200]);
+  const ctx = doc.context;
+  // ~1MB of <dc:title> followed by unclosed <rdf:li — the polynomial trigger.
+  const junk = "<dc:title>" + "<rdf:li x>".repeat(120000);
+  const metaStream = ctx.stream(junk, { Type: PDFName.of("Metadata"), Subtype: PDFName.of("XML") });
+  doc.catalog.set(PDFName.of("Metadata"), ctx.register(metaStream));
+  const src = await doc.save({ useObjectStreams: false });
+
+  const start = Date.now();
+  const check = await checkPdfACompliance(src, { part: "2" });
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed < 2000, `check completes quickly (took ${elapsed}ms)`);
+  // XMP is present but carries no pdfaid identifier, so that criterion fails cleanly.
+  assert.equal(check.criteria.find((c) => c.id === "xmp").pass, true, "XMP stream is seen");
+  assert.equal(check.criteria.find((c) => c.id === "pdfaid").pass, false, "no pdfaid id in junk XMP");
+
+  // A normal XMP title still round-trips (the bounded regex stays correct).
+  const doc2 = await PDFDocument.create();
+  doc2.addPage([200, 200]);
+  const ctx2 = doc2.context;
+  const goodXmp = `<?xpacket?><dc:title><rdf:Alt><rdf:li xml:lang="x-default">Hello Title</rdf:li></rdf:Alt></dc:title>`;
+  doc2.catalog.set(PDFName.of("Metadata"), ctx2.register(ctx2.stream(goodXmp, { Type: PDFName.of("Metadata"), Subtype: PDFName.of("XML") })));
+  doc2.setTitle("Hello Title");
+  const src2 = await doc2.save({ useObjectStreams: false });
+  const check2 = await checkPdfACompliance(src2, { part: "2" });
+  assert.equal(check2.criteria.find((c) => c.id === "titleSync").pass, true, "normal dc:title still extracted + matched");
+});
+
+// C2 security: audit-trail identity forgery via incremental redefinition.
+// An attacker takes a validly signed PDF and appends an incremental update that
+// REDEFINES the signature object (same object number) with an attacker-chosen
+// /Signer, keeping the ORIGINAL /ByteRange + /Contents so the CMS still verifies.
+// A "latest definition wins" reader would present the forged signer as authentic.
+// Verification must read the audit trail from the SIGNED bytes and flag the
+// redefinition — never surface the attacker's identity as authoritative.
+test("C2 security: an incremental redefinition of the sig object with a forged /Signer is caught, not trusted", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("Alice", "Alice", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const pdf = await buildSamplePdf(false);
+
+  const signed = await signPdf(pdf, { p12, password: "pw", name: "Alice", reason: "approve" });
+
+  // Reproduce the exact attack: reuse the original object number + /ByteRange +
+  // /Contents, but swap in an attacker-chosen audit trail (/Signer "Mallory").
+  const str = Buffer.from(signed.bytes).toString("latin1");
+  const sigNum = Number(str.match(/(\d+) 0 obj\s*<<\/Type \/Sig/)[1]);
+  const [, l1, s2, l2] = str.match(/\/ByteRange \[0 (\d+)\s+(\d+)\s+(\d+)\s*\]/).map(Number);
+  const contentsHex = str.match(/\/Contents <([0-9a-fA-F]+)>/)[1];
+  const forgedSig =
+    `\n${sigNum} 0 obj\n<</Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached` +
+    ` /M (D:20260101000000Z) /Name (Mallory)` +
+    ` /MFKAuditTrail << /Producer (MyFileKit Local e-Sign) /Version 1 /Event /Signed` +
+    ` /Signer (Mallory the Attacker) /ClientTime (D:20260101000000Z) /ClientTimeAsserted true` +
+    ` /HashAlg /SHA-256 /Covered [0 ${l1} ${s2} ${l2}] /Summary (Signed by Mallory) >>` +
+    ` /ByteRange [0 ${l1} ${s2} ${l2}] /Contents <${contentsHex}>>>\nendobj\n`;
+  const forged = Buffer.concat([
+    Buffer.from(signed.bytes), Buffer.from(forgedSig, "latin1"), Buffer.from("startxref\n0\n%%EOF\n", "latin1"),
+  ]);
+
+  const sig = (await verifyPdfSignatures(forged)).signatures[0];
+  // The CMS still verifies over the untouched original span — that is the trap.
+  assert.equal(sig.signatureValid, true, "the original CMS still verifies over its untouched span");
+  // But the forged identity is NOT surfaced: the audit trail is read from the
+  // SIGNED bytes, so the displayed signer is the genuine cert holder, not Mallory.
+  assert.equal(/Mallory/.test(sig.auditTrail.signer || ""), false, "the forged signer is never displayed as authentic");
+  assert.equal(sig.auditTrail.signer, "Alice", "the displayed signer is the one that was actually signed");
+  // The redefinition is flagged and the audit trail is marked untrusted.
+  assert.equal(sig.auditTrailTrusted, false, "a redefined audit trail is not trusted");
+  assert.ok(
+    sig.tamperFindings.some((f) => /redefined|audit/i.test(f)),
+    "a tamper finding reports the post-signing redefinition",
+  );
+  // The one honest tell the crypto still gives us stays correct.
+  assert.equal(sig.coversWholeDoc, false, "the appended redefinition falls outside the signed range");
+  assert.equal(sig.signerCN, "Alice", "the real certificate identity is unchanged");
+});
+
+// A legitimately counter-signed document appends a NEW signature object (a new
+// object number); it never redefines an already-signed object. It must NOT be
+// mistaken for the redefinition forgery above.
+test("C2 security: a legit counter-signature is NOT flagged as a forged redefinition", async () => {
+  const aliceKey = await genRsaKeyPair();
+  const aliceCert = await makeSelfSignedCert("Alice", "Alice", aliceKey, aliceKey.privateKey);
+  const aliceP12 = await makePkcs12(aliceKey.privateKey, [aliceCert], "pw");
+  const bobKey = await genRsaKeyPair();
+  const bobCert = await makeSelfSignedCert("Bob", "Bob", bobKey, bobKey.privateKey);
+  const bobP12 = await makePkcs12(bobKey.privateKey, [bobCert], "pw");
+
+  const pdf = await buildSamplePdf(false);
+  const first = await signPdf(pdf, { p12: aliceP12, password: "pw", name: "Alice", reason: "Author" });
+  const second = await signPdf(first.bytes, { p12: bobP12, password: "pw", name: "Bob", reason: "Witness" });
+
+  const report = await verifyPdfSignatures(second.bytes);
+  assert.equal(report.count, 2);
+  const alice = report.signatures.find((s) => s.auditTrail && s.auditTrail.signer === "Alice");
+  const bob = report.signatures.find((s) => s.auditTrail && s.auditTrail.signer === "Bob");
+  assert.ok(alice && bob, "each signature keeps its own audit entry");
+
+  // BOTH signatures are valid, both audit trails are trusted, neither is flagged.
+  assert.equal(alice.signatureValid, true);
+  assert.equal(bob.signatureValid, true);
+  assert.equal(alice.auditTrailTrusted, true, "the first signer's audit trail is not falsely flagged");
+  assert.equal(bob.auditTrailTrusted, true, "the counter-signer's audit trail is trusted");
+  assert.equal(alice.tamperFindings.length, 0, "no false forgery finding on the first signature");
+  assert.equal(bob.tamperFindings.length, 0, "no false forgery finding on the counter-signature");
+  assert.equal(alice.auditTrail.event, "Signed");
+  assert.equal(bob.auditTrail.event, "CounterSigned");
+});
+
+// An untouched, single, valid signature: the audit trail is present, its hash
+// matches, it is trusted, and there are no tamper findings.
+test("C2 security: an untouched single signature has a present, matching, TRUSTED audit trail", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("Alice Signer", "Alice Signer", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const pdf = await buildSamplePdf(false);
+
+  const signed = await signPdf(pdf, { p12, password: "pw", name: "Alice Signer", reason: "I approve" });
+  const sig = (await verifyPdfSignatures(signed.bytes)).signatures[0];
+  assert.equal(sig.auditTrailPresent, true);
+  assert.equal(sig.auditHashMatches, true);
+  assert.equal(sig.auditTrailTrusted, true, "an untampered audit trail is trusted");
+  assert.equal(sig.auditTrail.signer, "Alice Signer");
+  assert.equal(sig.tamperFindings.length, 0, "no tamper findings on a clean signature");
 });
