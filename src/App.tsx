@@ -207,7 +207,8 @@ export default function App() {
       <div className="workbench">
         <SideBar hash={hash} />
         <main className="worksurface" id="app-main" tabIndex={-1}>
-          {(route.type === "dashboard" || route.type === "browse") && <ToolIndex />}
+          {route.type === "dashboard" && <WorkspaceHome />}
+          {route.type === "browse" && <ToolIndex />}
           {route.type === "category" && <ToolIndex category={route.category} />}
           {route.type === "tool" && <ToolPage tool={route.tool} />}
           {route.type === "missing" && <MissingPage />}
@@ -377,56 +378,72 @@ function GlobalSearch() {
   );
 }
 
-/** Fixed left rail: categories, then the tools of the active category. */
+/** Fixed left rail: high-level context only — never a second copy of the tool
+ * list shown in the canvas. Tool access is the menubar mega-menu (all 105) and,
+ * inside a tool, the inspector rail of siblings. */
 function SideBar({ hash }: { hash: string }) {
-  const [filter, setFilter] = useState("");
+  const [recent, setRecent] = useState<Tool[]>(() => loadRecentTools());
   const route = routeForHash(hash);
   const activeCategory = route.type === "category" ? route.category : route.type === "tool" ? route.tool.category : "";
   const activeToolId = route.type === "tool" ? route.tool.id : "";
-  const listed = useMemo(() => {
-    const term = filter.trim().toLowerCase();
-    if (term) return filterTools(filter).slice(0, 60);
-    return activeCategory ? tools.filter((tool: Tool) => tool.category === activeCategory) : [];
-  }, [filter, activeCategory]);
+
+  useEffect(() => {
+    const sync = () => setRecent(loadRecentTools());
+    window.addEventListener("myfilekit:recent-tools", sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener("myfilekit:recent-tools", sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
 
   return (
-    <nav className="sidebar" aria-label="Tool navigation">
-      <div className="sidebar-search">
-        <input type="search" name="tool-filter" autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Filter tools" placeholder="Filter…" value={filter} onChange={(event) => setFilter(event.target.value)} />
-      </div>
+    <nav className="sidebar" aria-label="Workspace navigation">
       <div className="sidebar-scroll">
         <p className="sidebar-group">Library</p>
-        <a className={`sidebar-link ${route.type === "dashboard" ? "sidebar-link-active" : ""}`} href="#dashboard" aria-current={route.type === "dashboard" ? "page" : undefined}><LayoutDashboard size={14} aria-hidden="true" />All tools</a>
+        <a className={`sidebar-link ${route.type === "dashboard" ? "sidebar-link-active" : ""}`} href="#dashboard" aria-current={route.type === "dashboard" ? "page" : undefined}>
+          <LayoutDashboard size={14} aria-hidden="true" />Workspace
+        </a>
+        <a className={`sidebar-link ${route.type === "browse" ? "sidebar-link-active" : ""}`} href="#browse-tools" aria-current={route.type === "browse" ? "page" : undefined}>
+          <FolderSearch size={14} aria-hidden="true" />All tools
+        </a>
+
         <p className="sidebar-group">Categories</p>
         {categories.map((category: string) => {
           const Icon = categoryIcons[category] || Sparkles;
+          const isActive = category === activeCategory;
           return (
             <a
               key={category}
-              className={`sidebar-link ${category === activeCategory && !filter ? "sidebar-link-active" : ""}`}
+              className={`sidebar-link ${isActive ? "sidebar-link-active" : ""}`}
               href={categoryRoute(category)}
-              aria-current={category === activeCategory ? (route.type === "category" ? "page" : "location") : undefined}
+              aria-current={isActive ? (route.type === "category" ? "page" : "location") : undefined}
             >
               <Icon size={14} aria-hidden="true" />{category.replace(" Tools", "")}
             </a>
           );
         })}
-        {listed.length ? (
+
+        {recent.length ? (
           <>
-            <p className="sidebar-group">{filter.trim() ? "Matches" : activeCategory.replace(" Tools", "")}</p>
-            {listed.map((tool: Tool) => (
-              <a
-                key={tool.id}
-                className={`sidebar-link sidebar-link-child ${tool.id === activeToolId ? "sidebar-link-active" : ""}`}
-                href={tool.route}
-                aria-current={tool.id === activeToolId ? "page" : undefined}
-              >
-                {tool.name}
-              </a>
-            ))}
+            <p className="sidebar-group">Recent</p>
+            {recent.map((tool: Tool) => {
+              const Icon = iconForTool(tool);
+              return (
+                <a
+                  key={tool.id}
+                  className={`sidebar-link ${tool.id === activeToolId ? "sidebar-link-active" : ""}`}
+                  href={tool.route}
+                  aria-current={tool.id === activeToolId ? "page" : undefined}
+                >
+                  <Icon size={14} aria-hidden="true" />{tool.name}
+                </a>
+              );
+            })}
           </>
         ) : null}
       </div>
+      <p className="sidebar-foot">Files are processed here, never uploaded.</p>
     </nav>
   );
 }
@@ -434,7 +451,8 @@ function SideBar({ hash }: { hash: string }) {
 function StatusBar({ route }: { route: ReturnType<typeof routeForHash> }) {
   const label = route.type === "tool" ? route.tool.name
     : route.type === "category" ? route.category
-    : route.type === "dashboard" || route.type === "browse" ? "All tools"
+    : route.type === "dashboard" ? "Workspace"
+    : route.type === "browse" ? "All tools"
     : "Not found";
   return (
     <footer className="statusbar">
@@ -446,6 +464,110 @@ function StatusBar({ route }: { route: ReturnType<typeof routeForHash> }) {
         <span>{tools.length} tools</span>
       </span>
     </footer>
+  );
+}
+
+
+/** Tools whose declared file support matches this filename's extension. */
+function toolsForFilename(name: string): Tool[] {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (!ext) return [];
+  return tools.filter((tool: Tool) => {
+    const file = tool.file as { extensions?: string[] } | undefined;
+    return Boolean(file?.extensions?.some((item: string) => item.toLowerCase() === ext));
+  });
+}
+
+/** The landing surface: a workspace, not a directory. Drop a file and the tools
+ * that can act on it are offered; nothing is uploaded and nothing is retained —
+ * only the name and size are read, to match tools and show what you picked. */
+function WorkspaceHome() {
+  const [dropped, setDropped] = useState<{ name: string; size: number } | null>(null);
+  const [isOver, setIsOver] = useState(false);
+  const matches = useMemo(() => (dropped ? toolsForFilename(dropped.name) : []), [dropped]);
+  const quick = popularToolIds.map(findToolById).filter(Boolean) as Tool[];
+
+  const take = (list: FileList | null) => {
+    const file = list && list[0];
+    if (file) setDropped({ name: file.name, size: file.size });
+  };
+
+  return (
+    <>
+      <div className="doc-bar">
+        <h1>Workspace</h1>
+        <span className="doc-bar-sep" aria-hidden="true" />
+        <span className="doc-bar-meta">{tools.length} tools · nothing leaves this device</span>
+        <span className="doc-bar-actions">
+          <a className="secondary-button" href="#browse-tools">Browse all tools</a>
+        </span>
+      </div>
+
+      <div className="workspace">
+        <section className="workspace-main">
+          <label
+            className={`workspace-drop ${isOver ? "dropzone-active" : ""}`}
+            onDragEnter={(event) => { event.preventDefault(); setIsOver(true); }}
+            onDragOver={(event) => { event.preventDefault(); setIsOver(true); }}
+            onDragLeave={(event) => { event.preventDefault(); setIsOver(false); }}
+            onDrop={(event) => { event.preventDefault(); setIsOver(false); take(event.dataTransfer.files); }}
+          >
+            <input className="sr-only" type="file" aria-label="Choose a file to work on" onChange={(event) => take(event.target.files)} />
+            <span className="dropzone-tile" aria-hidden="true"><Upload size={22} /></span>
+            <span className="workspace-drop-title">Drop a file to start</span>
+            <span className="dropzone-hint">PDF · images · office · text</span>
+            <span className="dropzone-cta">Choose a file</span>
+          </label>
+
+          {dropped ? (
+            <div className="workspace-file" role="status" aria-live="polite">
+              <div className="workspace-file-head">
+                <FileText size={15} aria-hidden="true" />
+                <span className="file-chip-name" title={dropped.name}>{dropped.name}</span>
+                <span className="file-chip-size">{formatBytes(dropped.size)}</span>
+                <button type="button" className="icon-button" aria-label="Clear selected file" onClick={() => setDropped(null)}><X size={15} /></button>
+              </div>
+              <p className="inspector-title">{matches.length ? `${matches.length} tool${matches.length === 1 ? "" : "s"} can work on this` : "No tool declares support for this file type"}</p>
+              <div className="index-grid">
+                {matches.slice(0, 12).map((tool: Tool) => {
+                  const Icon = iconForTool(tool);
+                  return (
+                    <a className="index-row" key={tool.id} href={tool.route}>
+                      <Icon size={14} aria-hidden="true" />
+                      <span className="index-row-name">{tool.name}</span>
+                      {tool.isNew ? <span className="index-new">NEW</span> : null}
+                      <span className="index-row-desc">{tool.description}</span>
+                    </a>
+                  );
+                })}
+              </div>
+              {matches.length > 12 ? <p className="workspace-more"><a href="#browse-tools">See all {matches.length} matching tools</a></p> : null}
+            </div>
+          ) : (
+            <p className="workspace-hint">Your file is read in this browser to match it with tools. It is never uploaded, and nothing about it is saved.</p>
+          )}
+
+          <div className="index-head" style={{ marginTop: 20 }}>
+            <h2>Common tasks</h2>
+            <span>{quick.length}</span>
+          </div>
+          <div className="index-grid">
+            {quick.map((tool: Tool) => {
+              const Icon = iconForTool(tool);
+              return (
+                <a className="index-row" key={tool.id} href={tool.route}>
+                  <Icon size={14} aria-hidden="true" />
+                  <span className="index-row-name">{tool.name}</span>
+                  {tool.isNew ? <span className="index-new">NEW</span> : null}
+                  <span className="index-row-desc">{tool.description}</span>
+                </a>
+              );
+            })}
+          </div>
+        </section>
+
+      </div>
+    </>
   );
 }
 
