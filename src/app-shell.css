@@ -44,6 +44,8 @@
   --c-hover: #eef0f3;
   --c-active: #e3e7ee;
   --c-ok: #15803d;
+  --c-drop: #ffffff;
+  --app-gutter: 14px;
 }
 
 /* The legacy sheet's tokens are not theme-aware (they were written for a
@@ -87,6 +89,7 @@ html.dark {
   --c-hover: #21252b;
   --c-active: #272c34;
   --c-ok: #4ade80;
+  --c-drop: #21252b;
 }
 
 html, body, #root {
@@ -357,7 +360,7 @@ body {
   align-items: center;
   gap: 10px;
   height: var(--app-docbar-h);
-  padding: 6px 14px;
+  padding: 6px var(--app-gutter);
   border-bottom: 1px solid var(--c-line);
   background: var(--c-chrome);
 }
@@ -393,7 +396,7 @@ body {
 
 /* ---------- Dense tool index (replaces the bento grid) ---------- */
 
-.tool-index { padding: 14px 16px 28px; }
+.tool-index { padding: var(--app-gutter) var(--app-gutter) 28px; }
 
 .index-section + .index-section { margin-top: 20px; }
 
@@ -408,7 +411,7 @@ body {
 
 .index-head h2 {
   margin: 0;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -425,7 +428,7 @@ body {
 
 .index-row {
   display: grid;
-  grid-template-columns: 14px minmax(0, 158px) auto minmax(0, 1fr);
+  grid-template-columns: 14px minmax(0, 158px) 36px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-height: var(--app-row);
@@ -441,9 +444,11 @@ body {
 .index-row > svg { flex: 0 0 auto; color: var(--c-text-faint); }
 .index-row:hover > svg { color: var(--c-accent); }
 .index-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.index-row-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--c-text-faint); }
+.index-row-desc { grid-column: 4; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--c-text-faint); }
 
 .index-new {
+  grid-column: 3;
+  justify-self: start;
   flex: 0 0 auto;
   padding: 1px 4px;
   border-radius: 2px;
@@ -464,7 +469,7 @@ body {
   min-height: calc(100svh - var(--app-menubar-h) - var(--app-status-h) - var(--app-docbar-h));
 }
 
-.tool-canvas { min-width: 0; padding: 16px; }
+.tool-canvas { min-width: 0; padding: var(--app-gutter); }
 
 .tool-inspector {
   grid-column: 3;
@@ -818,24 +823,17 @@ html.dark .tag-badge, html.dark .new-badge {
   min-height: calc(100svh - var(--app-menubar-h) - var(--app-status-h) - var(--app-docbar-h));
 }
 
-.workspace-main { min-width: 0; padding: 20px; max-width: 1100px; }
-
-.workspace-side {
-  align-self: stretch;
-  min-width: 0;
-  padding: 12px;
-  border-left: 1px solid var(--c-line);
-  background: var(--c-chrome);
-}
+.workspace-main { min-width: 0; padding: var(--app-gutter); }
 
 .workspace-drop {
   display: grid;
   justify-items: center;
   gap: 6px;
   padding: 44px 20px;
-  border: 1px dashed var(--c-line);
+  border: 1px solid var(--c-line);
+  border-top: 2px solid var(--c-accent);
   border-radius: var(--app-radius);
-  background: var(--c-panel);
+  background: var(--c-drop);
   text-align: center;
   cursor: pointer;
   transition: border-color .18s ease, background .18s ease;
@@ -843,7 +841,7 @@ html.dark .tag-badge, html.dark .new-badge {
 
 .workspace-drop:hover { border-color: var(--c-accent); background: var(--c-accent-soft); }
 .workspace-drop:focus-within { border-color: var(--c-accent); outline: 2px solid var(--c-accent); outline-offset: 3px; }
-.workspace-drop-title { font-size: 15px; font-weight: 650; color: var(--c-text); }
+.workspace-drop-title { font-size: 20px; font-weight: 600; letter-spacing: -.01em; color: var(--c-text); }
 
 .workspace-hint {
   margin-top: 10px;
@@ -879,11 +877,8 @@ html.dark .tag-badge, html.dark .new-badge {
   color: var(--c-text-faint);
 }
 
-html.dark .workspace-side { background-color: #16181c; }
-html.dark .workspace-drop, html.dark .workspace-file { background: #1b1e23 !important; border-color: #2a2e35 !important; }
-html.dark .workspace-drop:hover { background: #16233c !important; border-color: #3b82f6 !important; }
+html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-line); }
 
 @media (max-width: 1100px) {
   .workspace { grid-template-columns: minmax(0, 1fr); }
-  .workspace-side { border-left: 0; border-top: 1px solid var(--c-line); }
 }
