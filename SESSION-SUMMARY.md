@@ -113,11 +113,34 @@ Two reviewer recommendations were rejected on purpose:
     the bug it replaced. Fixed: below 640px the anchor leaves the positioning
     chain, panels span the menubar in one column. Measured at 375px — every menu
     359px wide, inside the viewport, zero clipped labels, screenshot confirms.
-  - Round 4 was verifying that. Its result is not in this document, so treat the
-    branch as "fixed and self-verified, awaiting final independent confirmation".
+  - Round 4: DO-NOT-SHIP — the mobile menu still hid 40 of 51 tools (my
+    `columns: 1` did not stop the spill), and dropping `!important` in that same
+    commit threw the search dropdown to x=-159 with its results off-screen.
+  - Round 5: DO-NOT-SHIP — all three of round 4's fixes survived on paths they
+    did not cover: the multicol spill returned at 641-975px and on short
+    viewports (24 of 51 PDF tools hidden at 768px, iPad portrait), the search
+    popup still rendered at x=-159 in the 641-715px band where the menubar
+    wraps, and hover-switching between menus reused the previous trigger's
+    geometry, pushing panels 261px off-screen with nothing to scroll.
+  - Fixed structurally rather than per-breakpoint: multicol removed entirely
+    (the panel is a grid, which can only grow downwards), panels anchored to the
+    full-width menubar instead of their trigger, and geometry measured whenever
+    a menu opens — any path — rather than in the click handler. Verified across
+    17 widths and 4 short viewports: zero links outside the panel, zero
+    off-viewport, zero spill; the search popup is inside the viewport at every
+    width.
+  - Round 6 was verifying that when the session ended. Its result is not in this
+    document, so treat the branch as "fixed and self-verified, awaiting final
+    independent confirmation".
 
-  Worth noting: three of the four rounds caught a bug I introduced *in the commit
-  that claimed to fix the previous one*. Self-review passed every time.
+  **The pattern worth knowing.** Five rounds, five DO-NOT-SHIPs, and every
+  blocker was mine — four of them introduced by the commit that claimed to fix
+  the previous one. My own verification passed every time, and twice my evidence
+  was actively wrong: I reported "51 links, zero clipped labels" while counting
+  links laid out *outside* the panel. The lesson is not that reviews are useful
+  in general; it is that self-review is blind to exactly the thing you just
+  changed, and that a measurement chosen by the person who wrote the fix tends to
+  confirm it.
 - **~900 lines of dead marketing components** remain in `App.tsx` (`Shell`,
   `Dashboard`, `BrowseToolsPage`, etc.). They are tree-shaken, so there is no
   runtime cost. I attempted a mechanical deletion, it broke on JSX braces, and I
