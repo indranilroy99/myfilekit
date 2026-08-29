@@ -39,7 +39,9 @@ export const loadPdfDocument = async (source: File | ArrayBuffer | Uint8Array) =
     bytes = new Uint8Array(source.slice(0));
   }
   ensurePdfWorker();
-  return pdfjs.getDocument({ data: bytes }).promise;
+  // isEvalSupported:false stops pdf.js using Function() for some font paths. The
+  // CSP already lacks 'unsafe-eval' so this is defense-in-depth, made explicit.
+  return pdfjs.getDocument({ data: bytes, isEvalSupported: false }).promise;
 };
 
 /**

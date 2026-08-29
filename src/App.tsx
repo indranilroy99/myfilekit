@@ -6374,7 +6374,9 @@ function HtmlToPdfTool() {
   const [html, setHtml] = useState("<h1>Hello from MyFileKit</h1>\n<p>Paste any HTML here. It renders locally in a sandboxed frame.</p>\n<ul><li>Scripts never run</li><li>Remote resources are blocked</li></ul>");
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [status, setStatus] = useState(initialStatus);
-  const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0}body{padding:24px;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#111;line-height:1.5}img,table{max-width:100%}</style></head><body>${html}</body></html>`;
+  // Strip scripts/handlers/remote refs before interpolation so safety does not
+  // rest solely on the scriptless sandbox attribute (matches the Word/PPTX paths).
+  const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0}body{padding:24px;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#111;line-height:1.5}img,table{max-width:100%}</style></head><body>${sanitizeHtmlForOffline(html)}</body></html>`;
   return <ToolForm status={status} onReset={() => { setHtml(""); setStatus(initialStatus); }}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
       HTML is rendered locally in a sandboxed frame with scripts disabled. Remote images, styles, and network requests are blocked, so no external content is fetched or executed.
