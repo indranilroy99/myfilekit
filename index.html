@@ -13,7 +13,8 @@
   <meta name="referrer" content="no-referrer">
   <title>MyFileKit — Local-first PDF, Image & File Tools</title>
   <meta name="description" content="Privacy-first, local-first PDF, image, and file tools that run entirely in your browser. Nothing is uploaded — your files never leave your device.">
-  <meta name="theme-color" content="#09090b">
+  <meta name="theme-color" content="#f1f2f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0d0e10" media="(prefers-color-scheme: dark)">
   <meta property="og:title" content="MyFileKit — Local-first PDF, Image & File Tools">
   <meta property="og:description" content="Privacy-first PDF, image, and file tools that run entirely in your browser. Nothing is uploaded.">
   <meta property="og:type" content="website">
@@ -25,7 +26,8 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
 <body>
-  <a class="skip-link" href="#root">Skip to app</a>
+  <button class="skip-link" type="button"
+    onclick="var m=document.getElementById('app-main'); if(m){m.focus();m.scrollIntoView();}">Skip to content</button>
   <div id="root"></div>
   <script vite-ignore defer src="/assets/vendor/pdf-lib.min.js" integrity="sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI"></script>
   <script vite-ignore defer src="/assets/vendor/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H"></script>

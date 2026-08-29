@@ -662,12 +662,12 @@ test("csvToPdf builds a paginated table from generated CSV data", async () => {
   await assert.rejects(() => csvToPdf(""), /Add CSV content/);
 });
 
-test("renderEquationToHtml renders LaTeX to KaTeX markup and rejects invalid input", () => {
-  const html = renderEquationToHtml("E = mc^2");
+test("renderEquationToHtml renders LaTeX to KaTeX markup and rejects invalid input", async () => {
+  const html = await renderEquationToHtml("E = mc^2");
   assert.match(html, /class="katex"/);
   assert.match(html, /<span/);
-  assert.throws(() => renderEquationToHtml(""), /Enter a LaTeX equation/);
-  assert.throws(() => renderEquationToHtml("\\frac{1}{"), /Invalid LaTeX/);
+  await assert.rejects(() => renderEquationToHtml(""), /Enter a LaTeX equation/);
+  await assert.rejects(() => renderEquationToHtml("\\frac{1}{"), /Invalid LaTeX/);
 });
 
 test("Phase 3 conversion tools are registered under sensible categories with renderers", () => {
@@ -5854,7 +5854,18 @@ test("MyFileKit API source makes no network calls (privacy differentiator)", () 
   assert.doesNotMatch(src, /new\s+XMLHttpRequest/, "no XMLHttpRequest");
   assert.doesNotMatch(src, /new\s+WebSocket/, "no WebSocket");
   assert.doesNotMatch(src, /sendBeacon/, "no sendBeacon");
-  assert.doesNotMatch(src, /import\s*\(/, "no dynamic/remote import");
+  // Dynamic import is allowed ONLY for a bundled relative module (these are
+  // resolved at build time and cannot reach the network). Anything else — a
+  // remote URL, a protocol-relative path, or a computed specifier — would let
+  // code be fetched at runtime, which is what this guard exists to prevent.
+  for (const match of src.matchAll(/import\s*\(([^)]*)\)/g)) {
+    const specifier = match[1].trim();
+    assert.match(
+      specifier,
+      /^["']\.{1,2}\/[^"']*["']$/,
+      `dynamic import must be a relative literal, got: ${specifier}`,
+    );
+  }
 });
 
 test("api-playground tool is registered, routed, wired, and documents the local API", () => {
