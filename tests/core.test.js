@@ -7558,3 +7558,43 @@ test("C2 security: an untouched single signature has a present, matching, TRUSTE
   assert.equal(sig.auditTrail.signer, "Alice Signer");
   assert.equal(sig.tamperFindings.length, 0, "no tamper findings on a clean signature");
 });
+
+// --- Workspace file matching --------------------------------------------------
+// A release review found the Workspace telling users the product could not open
+// files it ships tools for, and a filename with no extension matching every PDF
+// tool. Both are matcher bugs; these pin the behaviour.
+
+test("workspace matcher: extension parsing, any-type tools, and honest support claims", async () => {
+  const appSource = readAppSource();
+
+  // A name with no dot has no extension — it must not be treated as one.
+  // (Regression: "pdf" as a whole filename matched all 59 PDF tools.)
+  assert.match(appSource, /lastIndexOf\("\."\)/, "extension must be parsed from the last dot");
+  assert.equal(appSource.includes('name.split(".").pop()'), false, "split-pop parsing must not return");
+
+  // Tools whose file input accepts anything must declare it, so the matcher can
+  // always offer them — including for a file type no other tool handles.
+  const anyType = tools.filter((tool) => tool.file && tool.file.anyType === true).map((tool) => tool.id).sort();
+  assert.deepEqual(anyType, ["file-hash-tool", "hash-compare-tool"]);
+
+  // Every tool that declares extensions must declare them lower-case, or the
+  // case-insensitive match in the UI silently disagrees with the registry.
+  for (const tool of tools) {
+    for (const ext of tool.file?.extensions || []) {
+      assert.equal(ext, ext.toLowerCase(), `${tool.id} declares a non-lowercase extension: ${ext}`);
+      assert.equal(ext.startsWith("."), false, `${tool.id} extension must not include a dot: ${ext}`);
+    }
+  }
+
+  // The zero-match state must offer a way forward, not just a refusal.
+  assert.match(appSource, /Browse all \{tools\.length\} tools/, "no-match state must link to the full index");
+});
+
+test("browse route carries an optional extension filter", () => {
+  assert.deepEqual(routeForHash("#browse-tools"), { type: "browse" });
+  assert.deepEqual(routeForHash("#browse-tools?ext=pdf"), { type: "browse", ext: "pdf" });
+  assert.deepEqual(routeForHash("#browse-tools?ext=PDF"), { type: "browse", ext: "pdf" });
+  // A malformed or oversized filter degrades to the unfiltered index.
+  assert.deepEqual(routeForHash("#browse-tools?ext=" + "a".repeat(40)), { type: "browse" });
+  assert.deepEqual(routeForHash("#browse-tools?nope=1"), { type: "browse" });
+});

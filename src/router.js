@@ -9,9 +9,16 @@ export function categoryRoute(category) {
 }
 
 export function routeForHash(hash) {
-  const id = String(hash || "#dashboard").replace(/^#/, "") || "dashboard";
+  const raw = String(hash || "#dashboard").replace(/^#/, "") || "dashboard";
+  // Optional query on the hash, currently only `browse-tools?ext=pdf`.
+  const queryAt = raw.indexOf("?");
+  const id = queryAt === -1 ? raw : raw.slice(0, queryAt);
+  const query = queryAt === -1 ? "" : raw.slice(queryAt + 1);
   if (id === "dashboard") return { type: "dashboard" };
-  if (id === "browse-tools") return { type: "browse" };
+  if (id === "browse-tools") {
+    const match = /(?:^|&)ext=([a-z0-9]{1,12})(?:&|$)/i.exec(query);
+    return match ? { type: "browse", ext: match[1].toLowerCase() } : { type: "browse" };
+  }
   if (id.startsWith("category-")) {
     const category = [...new Set(tools.map((tool) => tool.category))].find((item) => categorySlug(item) === id.replace("category-", ""));
     return category ? { type: "category", category } : { type: "missing", hash };

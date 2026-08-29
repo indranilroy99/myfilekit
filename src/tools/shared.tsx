@@ -7,6 +7,7 @@ import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { tools } from "../registry/tools.registry.js";
 import { formatBytes } from "../utils/format.js";
 import { revokeDownloadUrl } from "../services/download.service.js";
+import { takeWorkspaceFiles } from "../lib/workspace-handoff";
 
 type Tool = (typeof tools)[number];
 type Status = { tone: "idle" | "success" | "error"; message: string; progress?: { value: number; total: number; label: string } };
@@ -194,6 +195,15 @@ function FileControl({ accept, multiple = false, files, setFiles, label }: { acc
     if (!acceptList.length || acceptList.includes("*/*")) return true;
     return acceptList.some((rule) => rule === file.type || (rule.endsWith("/*") && file.type.startsWith(rule.slice(0, -1))));
   };
+  // Adopt files the user dropped on the Workspace before choosing this tool, so
+  // "drop a file to start" actually starts. Taken once and cleared; only files
+  // this tool accepts are adopted.
+  useEffect(() => {
+    if (files.length) return;
+    const handed = takeWorkspaceFiles().filter(matchesAccept);
+    if (handed.length) setFiles(multiple ? handed : handed.slice(0, 1));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const removeAt = (index: number) => {
     setFiles(files.filter((_, i) => i !== index));
     // Keep keyboard focus inside the control after the removed row unmounts.

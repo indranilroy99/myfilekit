@@ -4,6 +4,7 @@ import { Icons } from "@/components/ui/icons";
 import { NumberedPagination } from "@/components/ui/pagination";
 import { SpotlightCard } from "@/components/ui/spotlight-card";
 import { categories, categoryGroups, tools } from "./registry/tools.registry.js";
+import { stashWorkspaceFiles, takeWorkspaceFiles } from "./lib/workspace-handoff";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { filterTools, searchableText } from "./lib/search.js";
 import { formatBytes } from "./utils/format.js";
@@ -99,7 +100,7 @@ export default function App() {
         <SideBar hash={hash} />
         <main className="worksurface" id="app-main" tabIndex={-1}>
           {route.type === "dashboard" && <WorkspaceHome />}
-          {route.type === "browse" && <ToolIndex />}
+          {route.type === "browse" && <ToolIndex ext={route.ext} />}
           {route.type === "category" && <ToolIndex category={route.category} />}
           {route.type === "tool" && <ToolPage tool={route.tool} />}
           {route.type === "missing" && <MissingPage />}
@@ -339,7 +340,12 @@ function SideBar({ hash }: { hash: string }) {
   );
 }
 
+// Tools that can reach a network the operator configures. The chrome must not
+// claim "nothing uploaded" while the tool body honestly says otherwise.
+const serverBackedToolIds = ["request-signature-tool", "translate-pdf-tool"];
+
 function StatusBar({ route }: { route: ReturnType<typeof routeForHash> }) {
+  const serverBacked = route.type === "tool" && serverBackedToolIds.includes(route.tool.id);
   const label = route.type === "tool" ? route.tool.name
     : route.type === "category" ? route.category
     : route.type === "dashboard" ? "Workspace"
@@ -348,7 +354,7 @@ function StatusBar({ route }: { route: ReturnType<typeof routeForHash> }) {
   return (
     <footer className="statusbar">
       <span className="statusbar-dot" aria-hidden="true" />
-      <span>Offline · nothing uploaded</span>
+      <span>{serverBacked ? "Server-backed · only when you configure it" : "Offline · nothing uploaded"}</span>
       <span className="doc-bar-sep" aria-hidden="true" />
       <span>{label}</span>
       <span className="statusbar-right">
@@ -359,28 +365,48 @@ function StatusBar({ route }: { route: ReturnType<typeof routeForHash> }) {
 }
 
 
+
 /** Tools whose declared file support matches this filename's extension. */
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
 function toolsForFilename(name: string): Tool[] {
-  const ext = (name.split(".").pop() || "").toLowerCase();
-  if (!ext) return [];
+  const ext = extensionOf(name);
   return tools.filter((tool: Tool) => {
-    const file = tool.file as { extensions?: string[] } | undefined;
+    const file = tool.file as { extensions?: string[]; anyType?: boolean } | undefined;
+    if (file?.anyType) return true; // works on any bytes (hashing, fingerprinting)
+    if (!ext) return false;
     return Boolean(file?.extensions?.some((item: string) => item.toLowerCase() === ext));
   });
+}
+
+/** Every extension any tool declares — used to tell the user what is accepted. */
+function supportedExtensions(): string[] {
+  const out = new Set<string>();
+  for (const tool of tools as Tool[]) {
+    for (const ext of ((tool.file as { extensions?: string[] })?.extensions || [])) out.add(ext.toLowerCase());
+  }
+  return [...out].sort();
 }
 
 /** The landing surface: a workspace, not a directory. Drop a file and the tools
  * that can act on it are offered; nothing is uploaded and nothing is retained —
  * only the name and size are read, to match tools and show what you picked. */
 function WorkspaceHome() {
-  const [dropped, setDropped] = useState<{ name: string; size: number } | null>(null);
+  const [dropped, setDropped] = useState<{ files: File[] } | null>(null);
   const [isOver, setIsOver] = useState(false);
-  const matches = useMemo(() => (dropped ? toolsForFilename(dropped.name) : []), [dropped]);
+  const primary = dropped?.files[0] || null;
+  const matches = useMemo(() => (primary ? toolsForFilename(primary.name) : []), [primary]);
   const quick = popularToolIds.map(findToolById).filter(Boolean) as Tool[];
 
   const take = (list: FileList | null) => {
-    const file = list && list[0];
-    if (file) setDropped({ name: file.name, size: file.size });
+    const files = Array.from(list || []);
+    if (!files.length) return;
+    setDropped({ files });
+    // Hand the actual files to the next tool so the user does not pick them twice.
+    stashWorkspaceFiles(files);
   };
 
   return (
@@ -410,15 +436,27 @@ function WorkspaceHome() {
             <span className="dropzone-cta">Choose a file</span>
           </label>
 
-          {dropped ? (
+          {dropped && primary ? (
             <div className="workspace-file" role="status" aria-live="polite">
               <div className="workspace-file-head">
                 <FileText size={15} aria-hidden="true" />
-                <span className="file-chip-name" title={dropped.name}>{dropped.name}</span>
-                <span className="file-chip-size">{formatBytes(dropped.size)}</span>
-                <button type="button" className="icon-button" aria-label="Clear selected file" onClick={() => setDropped(null)}><X size={15} /></button>
+                <span className="file-chip-name" title={primary.name}>{primary.name}</span>
+                <span className="file-chip-size">{formatBytes(primary.size)}</span>
+                {dropped.files.length > 1 ? <span className="file-chip-size">+{dropped.files.length - 1} more</span> : null}
+                <button type="button" className="icon-button" aria-label="Clear selected file" onClick={() => { setDropped(null); takeWorkspaceFiles(); }}><X size={15} /></button>
               </div>
-              <p className="inspector-title">{matches.length ? `${matches.length} tool${matches.length === 1 ? "" : "s"} can work on this` : "No tool declares support for this file type"}</p>
+              <p className="inspector-title">
+                {matches.length
+                  ? `${matches.length} tool${matches.length === 1 ? "" : "s"} can work on this`
+                  : `No tool here opens ${extensionOf(primary.name) ? "." + extensionOf(primary.name) : "this"} files`}
+              </p>
+              {matches.length ? null : (
+                <p className="workspace-hint">
+                  MyFileKit works with {supportedExtensions().map((ext) => "." + ext).join(", ")}.{" "}
+                  <a href="#browse-tools">Browse all {tools.length} tools</a> or choose a different file above.
+                </p>
+              )}
+              {matches.length ? (
               <div className="index-grid">
                 {matches.slice(0, 12).map((tool: Tool) => {
                   const Icon = iconForTool(tool);
@@ -432,7 +470,8 @@ function WorkspaceHome() {
                   );
                 })}
               </div>
-              {matches.length > 12 ? <p className="workspace-more"><a href="#browse-tools">See all {matches.length} matching tools</a></p> : null}
+              ) : null}
+              {matches.length > 12 ? <p className="workspace-more"><a href={`#browse-tools?ext=${extensionOf(primary.name)}`}>See all {matches.length} tools for .{extensionOf(primary.name)}</a></p> : null}
             </div>
           ) : (
             <p className="workspace-hint">Your file is read in this browser to match it with tools. It is never uploaded, and nothing about it is saved.</p>
@@ -463,9 +502,10 @@ function WorkspaceHome() {
 }
 
 /** Dense, scannable tool index — a text list, not a bento grid. */
-function ToolIndex({ category }: { category?: string } = {}) {
+function ToolIndex({ category, ext }: { category?: string; ext?: string } = {}) {
   const sections = useMemo(() => {
-    const scoped = category ? tools.filter((tool: Tool) => tool.category === category) : tools;
+    const base = category ? tools.filter((tool: Tool) => tool.category === category) : tools;
+    const scoped = ext ? base.filter((tool: Tool) => toolsForFilename(`f.${ext}`).includes(tool)) : base;
     if (category) {
       const groups = (categoryGroups as Record<string, string[]>)[category];
       if (!groups) return [{ title: category, items: scoped }];
@@ -477,9 +517,9 @@ function ToolIndex({ category }: { category?: string } = {}) {
       return out;
     }
     return categories
-      .map((name: string) => ({ title: name, items: tools.filter((tool: Tool) => tool.category === name) }))
+      .map((name: string) => ({ title: name, items: scoped.filter((tool: Tool) => tool.category === name) }))
       .filter((section) => section.items.length);
-  }, [category]);
+  }, [category, ext]);
 
   const toolCount = sections.reduce((sum, section) => sum + section.items.length, 0);
 
@@ -489,6 +529,11 @@ function ToolIndex({ category }: { category?: string } = {}) {
         <h1>{category || "All tools"}</h1>
         <span className="doc-bar-sep" aria-hidden="true" />
         <span className="doc-bar-meta">{toolCount} tools · every file stays on this device</span>
+        {ext ? (
+          <span className="doc-bar-actions">
+            <a className="secondary-button" href="#browse-tools">Filtered by .{ext} — clear</a>
+          </span>
+        ) : null}
       </div>
       <div className="tool-index">
         {sections.map((section) => (
@@ -1211,7 +1256,7 @@ function ToolPage({ tool }: { tool: Tool }) {
         <span className="doc-bar-sep" aria-hidden="true" />
         <span className="doc-bar-meta">{tool.category.replace(" Tools", "")}{fileTypeLabel(tool) ? ` · ${fileTypeLabel(tool)}` : ""}{multiFileLabel(tool) ? ` · ${multiFileLabel(tool)}` : ""}</span>
         <span className="doc-bar-actions">
-          <a className="secondary-button" href={categoryRoute(tool.category)}>Category</a>
+          <a className="secondary-button" href={categoryRoute(tool.category)}>{tool.category.replace(" Tools", "")}</a>
         </span>
       </div>
       <div className="tool-shell">
