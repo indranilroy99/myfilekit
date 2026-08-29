@@ -8,7 +8,9 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Combine,
   Download,
   GripVertical,
@@ -924,13 +926,13 @@ function ToolMetaPanel({ status, onReset, children }: { status: Status; onReset:
   return (
     <aside className="tool-form-status">
       {downloadReady ? (
-        <div className="result-card">
+        <div className="result-card" role="status" aria-live="polite">
           <div className="result-card-head">
             <span className="result-card-check" aria-hidden="true"><CheckCircle2 size={18} /></span>
             <span>Done — ready to save</span>
           </div>
           <div>
-            <p className="break-words font-black text-[var(--foreground)]">{downloadReady.filename}</p>
+            <p className="break-words font-semibold text-[var(--foreground)]">{downloadReady.filename}</p>
             <p className="mt-1 text-xs font-semibold text-neutral-500">{formatBytes(downloadReady.size)} · stayed on this device</p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -954,10 +956,12 @@ function ToolMetaPanel({ status, onReset, children }: { status: Status; onReset:
         </div>
       ) : null}
       {children}
-      <p className="trust-line">
-        <ShieldCheck size={14} aria-hidden="true" />
-        <span>Runs entirely in your browser — your files never leave this device.</span>
-      </p>
+      {downloadReady ? null : (
+        <p className="trust-line">
+          <ShieldCheck size={14} aria-hidden="true" />
+          <span>Runs entirely in your browser — your files never leave this device.</span>
+        </p>
+      )}
       {hasState && !downloadReady ? <SecondaryButton label="Reset" onClick={resetPanel} /> : null}
     </aside>
   );
@@ -1022,13 +1026,13 @@ function acceptHint(accept: string, multiple: boolean): string {
     else if (rule.includes("word") || rule.includes("document")) names.add("documents");
     else names.add(rule.split("/").pop() || rule);
   }
-  const label = [...names].join(", ");
-  return `${label}${multiple ? " · add several" : ""}`;
+  return [...names].join(", ");
 }
 
 function FileControl({ accept, multiple = false, files, setFiles, label }: { accept: string; multiple?: boolean; files: File[]; setFiles: (files: File[]) => void; label?: string }) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
   const heading = label || `Drag & drop ${multiple ? "files" : "a file"} here`;
   const ariaLabel = label || `Choose ${multiple ? "files" : "file"}`;
   const acceptList = accept.split(",").map((item) => item.trim()).filter(Boolean);
@@ -1036,18 +1040,24 @@ function FileControl({ accept, multiple = false, files, setFiles, label }: { acc
     if (!acceptList.length || acceptList.includes("*/*")) return true;
     return acceptList.some((rule) => rule === file.type || (rule.endsWith("/*") && file.type.startsWith(rule.slice(0, -1))));
   };
-  const removeAt = (index: number) => setFiles(files.filter((_, i) => i !== index));
-  // Reorder within the selected list (e.g. page order for Merge). Chips live
-  // outside the <label> so their drag never reaches the dropzone's file-drop.
+  const removeAt = (index: number) => {
+    setFiles(files.filter((_, i) => i !== index));
+    // Keep keyboard focus inside the control after the removed row unmounts.
+    requestAnimationFrame(() => wrapRef.current?.querySelector<HTMLElement>("input[type=file]")?.focus());
+  };
+  // Reorder within the selected list (e.g. page order for Merge). Exposed as
+  // keyboard/touch-operable up/down buttons; pointer drag is a progressive
+  // enhancement. Chips live outside the <label> so a drag never reaches the
+  // dropzone's file-drop.
   const reorder = (from: number, to: number) => {
-    if (from === to || from < 0 || to < 0) return;
+    if (from === to || from < 0 || to < 0 || to >= files.length) return;
     const next = files.slice();
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
     setFiles(next);
   };
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-3" ref={wrapRef}>
       <label
         className={`dropzone ${isDragging ? "dropzone-active" : ""}`}
         onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
@@ -1068,25 +1078,35 @@ function FileControl({ accept, multiple = false, files, setFiles, label }: { acc
         <span className="dropzone-hint">{acceptHint(accept, multiple)}</span>
         <span className="dropzone-cta">Browse files</span>
       </label>
+      <span className="sr-only" aria-live="polite">{files.length ? `${files.length} file${files.length === 1 ? "" : "s"} selected` : "No files selected"}</span>
       {files.length ? (
-        <ul className="file-list" aria-label="Selected files">
-          {files.map((file, index) => (
-            <li
-              key={`${file.name}-${index}`}
-              className={`file-chip ${dragIndex === index ? "file-chip-dragging" : ""}`}
-              draggable={multiple}
-              onDragStart={multiple ? (() => setDragIndex(index)) : undefined}
-              onDragOver={multiple ? ((event) => event.preventDefault()) : undefined}
-              onDrop={multiple ? ((event) => { event.preventDefault(); if (dragIndex !== null) reorder(dragIndex, index); setDragIndex(null); }) : undefined}
-              onDragEnd={multiple ? (() => setDragIndex(null)) : undefined}
-            >
-              {multiple ? <span className="file-chip-grip" aria-hidden="true"><GripVertical size={15} /></span> : null}
-              <span className="file-chip-name" title={file.name}>{file.name}</span>
-              <span className="file-chip-size tabular-nums">{formatBytes(file.size)}</span>
-              <button type="button" className="file-chip-remove" aria-label={`Remove ${file.name}`} onClick={() => removeAt(index)}><X size={15} /></button>
-            </li>
-          ))}
-        </ul>
+        <>
+          {multiple && files.length > 1 ? <p className="file-list-hint">Reorder with the arrows (or drag) — this is the output order.</p> : null}
+          <ul className="file-list" aria-label="Selected files">
+            {files.map((file, index) => (
+              <li
+                key={`${file.name}-${index}`}
+                className={`file-chip ${dragIndex === index ? "file-chip-dragging" : ""}`}
+                draggable={multiple}
+                onDragStart={multiple ? (() => setDragIndex(index)) : undefined}
+                onDragOver={multiple ? ((event) => event.preventDefault()) : undefined}
+                onDrop={multiple ? ((event) => { event.preventDefault(); if (dragIndex !== null) reorder(dragIndex, index); setDragIndex(null); }) : undefined}
+                onDragEnd={multiple ? (() => setDragIndex(null)) : undefined}
+              >
+                {multiple ? <span className="file-chip-grip" aria-hidden="true"><GripVertical size={15} /></span> : null}
+                <span className="file-chip-name" title={file.name}>{file.name}</span>
+                <span className="file-chip-size tabular-nums">{formatBytes(file.size)}</span>
+                {multiple ? (
+                  <span className="file-chip-move">
+                    <button type="button" className="icon-button" aria-label={`Move ${file.name} up`} disabled={index === 0} onClick={() => reorder(index, index - 1)}><ChevronUp size={16} /></button>
+                    <button type="button" className="icon-button" aria-label={`Move ${file.name} down`} disabled={index === files.length - 1} onClick={() => reorder(index, index + 1)}><ChevronDown size={16} /></button>
+                  </span>
+                ) : null}
+                <button type="button" className="icon-button file-chip-remove" aria-label={`Remove ${file.name}`} onClick={() => removeAt(index)}><X size={15} /></button>
+              </li>
+            ))}
+          </ul>
+        </>
       ) : null}
     </div>
   );
