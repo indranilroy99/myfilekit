@@ -204,18 +204,24 @@ body {
 /* Multi-column tool mega-menu, Sejda-style. */
 .menu-pop {
   position: absolute;
+  /* 100% of the menubar, so the panel always clears the whole bar even when it
+     wraps to two rows. */
   top: calc(100% + 2px);
-  left: 0;
+  left: var(--menu-left, 8px);
   right: auto;
   width: max-content;
   /* Never wider than the space left of the viewport edge from this trigger. */
   max-width: min(calc(100vw - 16px), 1060px, var(--menu-space, 1060px));
   z-index: 60;
-  /* Columns flow like a print index so groups pack tightly instead of leaving
-     a ragged grid; each group stays unbroken. */
-  display: block;
-  columns: 5 190px;
-  column-gap: 22px;
+  /* Grid, not multicol: with a definite max-height a multicol container
+     fragments into inline-axis overflow columns and hides links off the side of
+     the panel. A grid can only ever grow downwards, which the panel scrolls. */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  align-content: start;
+  gap: 0 22px;
+  overflow-x: hidden;
+  overflow-y: auto;
   max-height: min(70vh, 560px);
   overflow: auto;
   padding: 14px 16px 16px;
@@ -226,8 +232,8 @@ body {
 }
 
 .menu-pop { overscroll-behavior: contain; }
-.menu-col { min-width: 0; break-inside: avoid-column; margin-bottom: 10px; }
-.menu-pop[role="listbox"] { columns: 1; }
+.menu-col { min-width: 0; margin-bottom: 10px; }
+
 
 .menu-col-title {
   margin: 6px 0 4px;
@@ -814,12 +820,12 @@ html.dark .tag-badge, html.dark .new-badge {
 
 .tool-inspector .index-row { grid-template-columns: 13px minmax(0, 1fr) auto; }
 
-.menu-anchor { position: relative; display: inline-flex; }
-.search-anchor { position: relative; }
+.menu-anchor { position: static; display: inline-flex; }
+.search-anchor { position: static; }
 
 
 /* Search results: right-aligned under the field, single column. */
-.search-pop { left: auto; right: 0; width: 320px; max-width: min(320px, calc(100vw - 16px)); columns: auto; }
+.search-pop { left: auto; right: 8px; width: 320px; max-width: calc(100vw - 16px); grid-template-columns: minmax(0, 1fr); }
 
 /* ---------- Workspace home (canvas-first landing) ---------- */
 
@@ -895,16 +901,13 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
    them to their trigger, so a menu near the right edge is neither clipped nor
    squeezed into an unreadable sliver. .menu-anchor must leave the positioning
    chain or left/right resolve against the ~59px button instead. */
-@media (max-width: 640px) {
-  .menu-anchor, .search-anchor { position: static; }
+@media (max-width: 720px) {
+  /* Below the width where the menubar wraps, span the panels edge to edge. */
   .menu-pop, .search-pop {
     left: 8px;
     right: 8px;
     width: auto;
     max-width: none;
-    /* Not `columns: 1`: .menu-pop has a definite max-height, so it stays a
-       multicol container and spills into inline-axis overflow columns off the
-       side of the panel. `auto` stops it being multicol. */
-    columns: auto;
+    grid-template-columns: minmax(0, 1fr);
   }
 }

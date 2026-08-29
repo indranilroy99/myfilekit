@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { Accessibility, ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Combine, FileArchive, FileCheck, FileSignature, FileText, FolderSearch, Hash, EyeOff, Image, Languages, Layers3, LayoutDashboard, Moon, PenLine, Pencil, ReceiptText, RotateCw, ScanSearch, Scissors, Search, Share2, ShieldCheck, Sparkles, Tags, Menu, Sun, Upload, X, Zap } from "lucide-react";
 import { Icons } from "@/components/ui/icons";
 import { NumberedPagination } from "@/components/ui/pagination";
@@ -133,14 +133,34 @@ function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMod
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const barRef = useRef<HTMLElement | null>(null);
   const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  // Space from the open trigger to the right edge; the panel never exceeds it.
-  const [menuSpace, setMenuSpace] = useState(0);
+  // Panel geometry, measured from whichever trigger is open — click OR hover.
+  const [menuBox, setMenuBox] = useState<{ left: number; space: number } | null>(null);
   const activeCategory = useMemo(() => {
     const route = routeForHash(hash);
     return route.type === "category" ? route.category : route.type === "tool" ? route.tool.category : "";
   }, [hash]);
 
   useEffect(() => { setOpenMenu(null); }, [hash]);
+
+  // Measured on open (any path) and on resize, never only on the click handler:
+  // hover-switching used to inherit the previous trigger's numbers.
+  useLayoutEffect(() => {
+    if (!openMenu) { setMenuBox(null); return undefined; }
+    const measure = () => {
+      const trigger = triggerRefs.current[openMenu];
+      const bar = barRef.current;
+      if (!trigger || !bar) return;
+      const t = trigger.getBoundingClientRect();
+      const b = bar.getBoundingClientRect();
+      setMenuBox({
+        left: Math.max(8, Math.round(t.left - b.left)),
+        space: Math.max(240, Math.round(window.innerWidth - t.left - 8)),
+      });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [openMenu]);
 
   useEffect(() => {
     if (!openMenu) return;
@@ -176,8 +196,6 @@ function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMod
               onClick={(event) => {
                 // Anchor right when the trigger sits past the midpoint, so a wide
                 // panel cannot run off the edge with no way to scroll to it.
-                const rect = event.currentTarget.getBoundingClientRect();
-                setMenuSpace(Math.max(240, Math.round(window.innerWidth - rect.left - 8)));
                 setOpenMenu(isOpen ? null : menu.id);
                 window.dispatchEvent(new Event("myfilekit:close-search"));
               }}
@@ -193,7 +211,7 @@ function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMod
             >
               {menu.label}<ChevronDown size={12} aria-hidden="true" />
             </button>
-            {isOpen ? <ToolMegaMenu id={`menu-${menu.id}`} categories={menu.categories} label={menu.label} space={menuSpace} /> : null}
+            {isOpen ? <ToolMegaMenu id={`menu-${menu.id}`} categories={menu.categories} label={menu.label} box={menuBox} /> : null}
           </div>
         );
       })}
@@ -207,7 +225,7 @@ function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMod
 }
 
 /** Sejda-style multi-column tool menu: every tool listed as text, grouped. */
-function ToolMegaMenu({ id, categories, label, space = 0 }: { id: string; categories: string[]; label: string; space?: number }) {
+function ToolMegaMenu({ id, categories, label, box }: { id: string; categories: string[]; label: string; box: { left: number; space: number } | null }) {
   const columns = useMemo(() => {
     const out: { title: string; items: Tool[] }[] = [];
     for (const category of categories) {
@@ -228,7 +246,7 @@ function ToolMegaMenu({ id, categories, label, space = 0 }: { id: string; catego
   }, [categories]);
 
   return (
-    <nav className="menu-pop" id={id} aria-label={`${label} tools`} style={space ? ({ "--menu-space": `${space}px` } as React.CSSProperties) : undefined}>
+    <nav className="menu-pop" id={id} aria-label={`${label} tools`} style={box ? ({ "--menu-left": `${box.left}px`, "--menu-space": `${box.space}px` } as React.CSSProperties) : undefined}>
       {columns.map((column) => (
         <div className="menu-col" key={column.title}>
           <p className="menu-col-title">{column.title}</p>
