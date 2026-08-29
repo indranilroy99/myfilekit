@@ -347,10 +347,11 @@ function SideBar({ hash }: { hash: string }) {
   );
 }
 
-// The status bar must never contradict a tool's own copy. Three tools are not
-// plain-offline, in three different ways, so each gets its own honest label.
-// `networkStatusNote` is drift-guarded by a test: any tool whose source reaches
-// the network must appear here.
+// The status bar must never contradict a tool's own copy, so every tool that can
+// open a connection gets an accurate label instead of "Offline".
+// Maintained by hand. A test asserts these six are present and that the network
+// call sites still exist, but it CANNOT detect a seventh tool gaining a network
+// path — add the tool here when you add the path.
 const NETWORK_NOTES: Record<string, string> = {
   // Uploads the PDF, to a backend the operator deploys. Off by default.
   "request-signature-tool": "Server-backed · only when you configure it",
