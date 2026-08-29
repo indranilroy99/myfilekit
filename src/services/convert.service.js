@@ -1,4 +1,3 @@
-import katex from "katex";
 import { getPdfLib } from "./pdf.service.js";
 import { parseCsv } from "./csv.service.js";
 
@@ -147,9 +146,11 @@ export async function csvToPdf(csvText) {
 
 // --- Equation to markup (KaTeX, pure, unit-testable in Node) ------------------
 
-export function renderEquationToHtml(latex, options = {}) {
+// katex is ~256 kB and only this function needs it, so it loads on demand.
+export async function renderEquationToHtml(latex, options = {}) {
   const value = String(latex || "").trim();
   if (!value) throw new Error("Enter a LaTeX equation.");
+  const { default: katex } = await import("katex");
   try {
     return katex.renderToString(value, {
       displayMode: options.displayMode !== false,

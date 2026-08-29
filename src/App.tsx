@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-import katex from "katex";
-import "katex/dist/katex.min.css";
 import { zipSync } from "fflate";
 import {
   Accessibility,
@@ -70,7 +68,6 @@ import { archivalPrepPdf, assertPdfDecryptable, checkPdfACompliance, comparePdfT
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, fingerprintPdf, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "./services/pdf-edit.service.js";
 import { BATES_POSITION_IDS, NUP_COUNTS, batesNumberPdf, createFormPdf, imposePdf, parseOutlineInput, parseSplitPages, readOutline, setOutline, smartSplitPdf } from "./services/pdf-advanced.service.js";
 import { ALL_PERMISSIONS_ALLOWED, PDF_ENCRYPTION_ALGORITHMS, PDF_PERMISSION_LABELS, decryptPdf, encryptPdf, unlockPdf } from "./services/pdf-crypto.service.js";
-import { signPdf, verifyPdfSignatures } from "./services/pdf-sign.service.js";
 import { CONFIDENCE as PII_CONFIDENCE, PII_TYPE_LABELS, buildPrivacyReportText, confidenceLabel, extractPdfPiiHits, isPersonalType, scanPdfStructure } from "./services/pii.service.js";
 import { analyzePdfBytes, buildAnalyzerReportText } from "./services/pdf-analyzer.service.js";
 import { sanitizePdf, buildSanitizeReportText, residualActiveContent } from "./services/pdf-sanitize.service.js";
@@ -161,7 +158,7 @@ const browseToolsPageSize = 10;
 let pendingSearchFocus = false;
 
 export default function App() {
-  const [hash, setHash] = useState(window.location.hash || "#dashboard");
+  const [hash, setHash] = useState(() => window.location.hash || "#dashboard");
   const [theme, setTheme] = useState<ThemeMode>(() => readThemePreference());
   const isInitialRoute = useRef(true);
 
@@ -209,13 +206,12 @@ export default function App() {
       <MenuBar hash={hash} theme={theme} onToggleTheme={() => setTheme((current) => current === "dark" ? "light" : "dark")} />
       <div className="workbench">
         <SideBar hash={hash} />
-        <div className="worksurface" id="app-main" tabIndex={-1}>
-          {route.type === "dashboard" && <ToolIndex />}
-          {route.type === "browse" && <ToolIndex />}
+        <main className="worksurface" id="app-main" tabIndex={-1}>
+          {(route.type === "dashboard" || route.type === "browse") && <ToolIndex />}
           {route.type === "category" && <ToolIndex category={route.category} />}
           {route.type === "tool" && <ToolPage tool={route.tool} />}
           {route.type === "missing" && <MissingPage />}
-        </div>
+        </main>
       </div>
       <StatusBar route={route} />
     </div>
@@ -223,9 +219,20 @@ export default function App() {
 }
 
 /** Application menu bar: brand, tool mega-menu, global search, theme. */
+// Menus mirror how the work is actually organised, not the registry's shape.
+// Module scope: a literal rebuilt per render would invalidate ToolMegaMenu's memo.
+const MENUS: { id: string; label: string; categories: string[] }[] = [
+  { id: "pdf", label: "PDF", categories: ["PDF Tools"] },
+  { id: "convert", label: "Convert & Data", categories: ["Text & Data Tools"] },
+  { id: "image", label: "Image", categories: ["Image Tools"] },
+  { id: "secure", label: "Security", categories: ["Security & Privacy"] },
+  { id: "more", label: "More", categories: ["Business Tools", "Signature Tools", "Developer Utilities", "Sharing & Collaboration"] },
+];
+
 function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMode; onToggleTheme: () => void }) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const barRef = useRef<HTMLElement | null>(null);
+  const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const activeCategory = useMemo(() => {
     const route = routeForHash(hash);
     return route.type === "category" ? route.category : route.type === "tool" ? route.tool.category : "";
@@ -235,7 +242,12 @@ function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMod
 
   useEffect(() => {
     if (!openMenu) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpenMenu(null); };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const trigger = triggerRefs.current[openMenu];
+      setOpenMenu(null);
+      trigger?.focus(); // never strand focus on <body>
+    };
     const onDown = (event: MouseEvent) => {
       if (barRef.current && !barRef.current.contains(event.target as Node)) setOpenMenu(null);
     };
@@ -244,34 +256,35 @@ function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMod
     return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("mousedown", onDown); };
   }, [openMenu]);
 
-  // Menus mirror how the work is actually organised, not the registry's shape.
-  const menus: { id: string; label: string; categories: string[] }[] = [
-    { id: "pdf", label: "PDF", categories: ["PDF Tools"] },
-    { id: "convert", label: "Convert & Data", categories: ["Text & Data Tools"] },
-    { id: "image", label: "Image", categories: ["Image Tools"] },
-    { id: "secure", label: "Security", categories: ["Security & Privacy"] },
-    { id: "more", label: "More", categories: ["Business Tools", "Signature Tools", "Developer Utilities", "Sharing & Collaboration"] },
-  ];
-
   return (
     <header className="menubar" ref={barRef as any}>
       <a className="menubar-brand" href="#dashboard">MyFileKit <span>local</span></a>
-      {menus.map((menu) => {
+      {MENUS.map((menu) => {
         const isOpen = openMenu === menu.id;
         const owns = menu.categories.includes(activeCategory);
         return (
-          <div key={menu.id} className="contents">
+          <div key={menu.id} className="menu-anchor">
             <button
               type="button"
+              ref={(node) => { triggerRefs.current[menu.id] = node; }}
               className={`menubar-item ${owns ? "menubar-item-active" : ""}`}
-              aria-haspopup="menu"
+              aria-haspopup="true"
               aria-expanded={isOpen}
+              aria-controls={`menu-${menu.id}`}
               onClick={() => setOpenMenu(isOpen ? null : menu.id)}
-              onMouseEnter={() => { if (openMenu && openMenu !== menu.id) setOpenMenu(menu.id); }}
+              // Hover only switches between menus for a real pointer, and never
+              // while focus is inside the open popup (it would unmount the
+              // focused link and drop focus to <body>).
+              onMouseEnter={() => {
+                if (!openMenu || openMenu === menu.id) return;
+                if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+                if (barRef.current?.querySelector(".menu-pop")?.contains(document.activeElement)) return;
+                setOpenMenu(menu.id);
+              }}
             >
               {menu.label}<ChevronDown size={12} aria-hidden="true" />
             </button>
-            {isOpen ? <ToolMegaMenu categories={menu.categories} label={menu.label} /> : null}
+            {isOpen ? <ToolMegaMenu id={`menu-${menu.id}`} categories={menu.categories} label={menu.label} /> : null}
           </div>
         );
       })}
@@ -285,7 +298,7 @@ function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMod
 }
 
 /** Sejda-style multi-column tool menu: every tool listed as text, grouped. */
-function ToolMegaMenu({ categories, label }: { categories: string[]; label: string }) {
+function ToolMegaMenu({ id, categories, label }: { id: string; categories: string[]; label: string }) {
   const columns = useMemo(() => {
     const out: { title: string; items: Tool[] }[] = [];
     for (const category of categories) {
@@ -306,21 +319,21 @@ function ToolMegaMenu({ categories, label }: { categories: string[]; label: stri
   }, [categories]);
 
   return (
-    <div className="menu-pop" role="menu" aria-label={`${label} tools`}>
+    <nav className="menu-pop" id={id} aria-label={`${label} tools`}>
       {columns.map((column) => (
         <div className="menu-col" key={column.title}>
           <p className="menu-col-title">{column.title}</p>
           {column.items.map((tool: Tool) => {
             const Icon = iconForTool(tool);
             return (
-              <a key={tool.id} role="menuitem" className={`menu-link ${tool.isNew ? "menu-link-new" : ""}`} href={tool.route}>
+              <a key={tool.id} className={`menu-link ${tool.isNew ? "menu-link-new" : ""}`} href={tool.route}>
                 <Icon size={13} aria-hidden="true" />{tool.name}
               </a>
             );
           })}
         </div>
       ))}
-    </div>
+    </nav>
   );
 }
 
@@ -328,19 +341,28 @@ function GlobalSearch() {
   const [query, setQuery] = useState("");
   const matches = useMemo(() => (query.trim() ? filterTools(query).slice(0, 8) : []), [query]);
   return (
-    <div className="relative">
+    <div className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setQuery(""); }}>
       <div className="sidebar-search" style={{ padding: 0, border: 0 }}>
         <input
+          type="search"
+          name="tool-search"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
           aria-label="Search all tools"
           placeholder="Search tools…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => { if (event.key === "Enter" && matches[0]) { window.location.hash = matches[0].route; setQuery(""); } }}
-          style={{ width: 210 }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && matches[0]) { window.location.hash = matches[0].route; setQuery(""); }
+            if (event.key === "Escape") { setQuery(""); event.currentTarget.blur(); }
+          }}
+          style={{ flex: "1 1 160px", minWidth: 0, maxWidth: 210 }}
         />
       </div>
       {matches.length ? (
-        <div className="menu-pop" role="listbox" aria-label="Search results" style={{ left: "auto", right: 0, width: 320, gridTemplateColumns: "1fr" }}>
+        <nav className="menu-pop" aria-label="Search results" style={{ left: "auto", right: 0, width: 320, columns: "auto" }}>
+          <span className="sr-only" aria-live="polite">{matches.length} tool{matches.length === 1 ? "" : "s"} match</span>
           {matches.map((tool: Tool) => {
             const Icon = iconForTool(tool);
             return (
@@ -349,7 +371,7 @@ function GlobalSearch() {
               </a>
             );
           })}
-        </div>
+        </nav>
       ) : null}
     </div>
   );
@@ -370,11 +392,11 @@ function SideBar({ hash }: { hash: string }) {
   return (
     <nav className="sidebar" aria-label="Tool navigation">
       <div className="sidebar-search">
-        <input aria-label="Filter tools" placeholder="Filter…" value={filter} onChange={(event) => setFilter(event.target.value)} />
+        <input type="search" name="tool-filter" autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Filter tools" placeholder="Filter…" value={filter} onChange={(event) => setFilter(event.target.value)} />
       </div>
       <div className="sidebar-scroll">
         <p className="sidebar-group">Library</p>
-        <a className={`sidebar-link ${route.type === "dashboard" ? "sidebar-link-active" : ""}`} href="#dashboard"><LayoutDashboard size={14} aria-hidden="true" />All tools</a>
+        <a className={`sidebar-link ${route.type === "dashboard" ? "sidebar-link-active" : ""}`} href="#dashboard" aria-current={route.type === "dashboard" ? "page" : undefined}><LayoutDashboard size={14} aria-hidden="true" />All tools</a>
         <p className="sidebar-group">Categories</p>
         {categories.map((category: string) => {
           const Icon = categoryIcons[category] || Sparkles;
@@ -383,7 +405,7 @@ function SideBar({ hash }: { hash: string }) {
               key={category}
               className={`sidebar-link ${category === activeCategory && !filter ? "sidebar-link-active" : ""}`}
               href={categoryRoute(category)}
-              aria-current={category === activeCategory ? "page" : undefined}
+              aria-current={category === activeCategory ? (route.type === "category" ? "page" : "location") : undefined}
             >
               <Icon size={14} aria-hidden="true" />{category.replace(" Tools", "")}
             </a>
@@ -395,7 +417,7 @@ function SideBar({ hash }: { hash: string }) {
             {listed.map((tool: Tool) => (
               <a
                 key={tool.id}
-                className={`sidebar-link ${tool.id === activeToolId ? "sidebar-link-active" : ""}`}
+                className={`sidebar-link sidebar-link-child ${tool.id === activeToolId ? "sidebar-link-active" : ""}`}
                 href={tool.route}
                 aria-current={tool.id === activeToolId ? "page" : undefined}
               >
@@ -429,8 +451,8 @@ function StatusBar({ route }: { route: ReturnType<typeof routeForHash> }) {
 
 /** Dense, scannable tool index — a text list, not a bento grid. */
 function ToolIndex({ category }: { category?: string } = {}) {
-  const scoped = category ? tools.filter((tool: Tool) => tool.category === category) : tools;
   const sections = useMemo(() => {
+    const scoped = category ? tools.filter((tool: Tool) => tool.category === category) : tools;
     if (category) {
       const groups = (categoryGroups as Record<string, string[]>)[category];
       if (!groups) return [{ title: category, items: scoped }];
@@ -444,14 +466,16 @@ function ToolIndex({ category }: { category?: string } = {}) {
     return categories
       .map((name: string) => ({ title: name, items: tools.filter((tool: Tool) => tool.category === name) }))
       .filter((section) => section.items.length);
-  }, [category, scoped]);
+  }, [category]);
+
+  const toolCount = sections.reduce((sum, section) => sum + section.items.length, 0);
 
   return (
     <>
       <div className="doc-bar">
         <h1>{category || "All tools"}</h1>
         <span className="doc-bar-sep" aria-hidden="true" />
-        <span className="doc-bar-meta">{scoped.length} tools · every file stays on this device</span>
+        <span className="doc-bar-meta">{toolCount} tools · every file stays on this device</span>
       </div>
       <div className="tool-index">
         {sections.map((section) => (
@@ -1180,7 +1204,11 @@ function ToolPage({ tool }: { tool: Tool }) {
       <div className="tool-shell">
         <div className="tool-canvas">
           <p className="doc-bar-meta" style={{ marginBottom: 12 }}>{tool.description}</p>
-          <ToolRenderer tool={tool} />
+          {/* Keyed by tool id: several tools share one renderer (Split/Delete Pages
+              both render PageRangeTool), and without a key React keeps the same
+              instance across the route change — the previous tool's files, page
+              ranges and result would carry over into the next tool. */}
+          <ToolRenderer key={tool.id} tool={tool} />
         </div>
         <aside className="tool-inspector" aria-label="Related tools">
           <p className="inspector-title">More in {tool.category.replace(" Tools", "")}</p>
@@ -5911,6 +5939,7 @@ function SignPdfTool({ tool }: { tool: Tool }) {
       if (!password) throw new Error("Enter the certificate password.");
       if (useTimestamp && !tsaUrl.trim()) throw new Error("Enter the TSA URL, or turn off the trusted timestamp.");
       const pageIndex = Math.max(1, parseInt(page, 10) || 1) - 1;
+      const { signPdf } = await import("./services/pdf-sign.service.js");
       const result = await signPdf(file, {
         p12: cert, password,
         name: signerName.trim(), reason: reason.trim(), location: location.trim(),
@@ -5990,6 +6019,7 @@ function VerifySignatureTool({ tool }: { tool: Tool }) {
     <PrimaryButton label="Verify signatures" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       setReport(null);
+      const { verifyPdfSignatures } = await import("./services/pdf-sign.service.js");
       const result = await verifyPdfSignatures(file);
       setReport(result);
       if (!result.count) return "No digital signatures found in this PDF.";
@@ -7264,12 +7294,22 @@ function EquationToImageTool() {
   useEffect(() => {
     const element = mathRef.current;
     if (!element) return;
-    try {
-      katex.render(latex.trim() || "\\,", element, { throwOnError: true, displayMode: true });
-      setError("");
-    } catch (renderError: any) {
-      setError(renderError?.message || "Invalid LaTeX.");
-    }
+    let cancelled = false;
+    // katex + its stylesheet load with this tool, not with the app.
+    (async () => {
+      try {
+        const [{ default: katex }] = await Promise.all([
+          import("katex"),
+          import("katex/dist/katex.min.css"),
+        ]);
+        if (cancelled) return;
+        katex.render(latex.trim() || "\\,", element, { throwOnError: true, displayMode: true });
+        setError("");
+      } catch (renderError: any) {
+        if (!cancelled) setError(renderError?.message || "Invalid LaTeX.");
+      }
+    })();
+    return () => { cancelled = true; };
   }, [latex]);
 
   return <ToolForm status={status} onReset={() => { setLatex(""); setError(""); setStatus(initialStatus); }}>

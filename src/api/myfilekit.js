@@ -54,7 +54,6 @@ import { archivalPrepPdf } from "../services/pdf-review.service.js";
 import { auditPdfAccessibility, remediatePdfAccessibility } from "../services/pdf-accessibility.service.js";
 import { batesNumberPdf, smartSplitPdf, imposePdf } from "../services/pdf-advanced.service.js";
 import { extractPdfAssets, buildExtractionZip } from "../services/pdf-extract.service.js";
-import { signPdf, verifyPdfSignatures } from "../services/pdf-sign.service.js";
 import { ocrPdf, ocrImages } from "../services/ocr.service.js";
 import { compressImage, resizeImage, exportCanvas } from "../services/image.service.js";
 import { runBatch, zipOutputs } from "../services/batch.service.js";
@@ -242,11 +241,14 @@ const pdf = {
     return archivalPrepPdf(await asBytes(input), options);
   },
   /** Cryptographically sign with a PKCS#12 certificate. @returns {Promise<object>} */
-  sign(file, options) {
+  async sign(file, options) {
+    // Loaded on demand: pkijs/asn1js are ~358 kB and only these two calls need them.
+    const { signPdf } = await import("../services/pdf-sign.service.js");
     return signPdf(asFile(file), options);
   },
   /** Verify every digital signature in a PDF (offline maths only). @returns {Promise<object>} */
-  verify(file) {
+  async verify(file) {
+    const { verifyPdfSignatures } = await import("../services/pdf-sign.service.js");
     return verifyPdfSignatures(asFile(file));
   },
 
