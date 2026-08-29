@@ -103,12 +103,21 @@ Two reviewer recommendations were rejected on purpose:
 
 ## Still open
 
-- **Two review rounds completed; a third was running when the session ended.**
-  Round one returned DO-NOT-SHIP (file matcher, discarded file, mobile header) —
-  all fixed. Round two returned DO-NOT-SHIP for the P2P hand-off leak above —
-  fixed and retested. Round three was verifying that fix adversarially. Its
-  result is not in this document, so treat the branch as "fixed and
-  self-verified, awaiting final independent confirmation".
+- **Three review rounds completed; a fourth was running when the session ended.**
+  - Round 1: DO-NOT-SHIP — file matcher, discarded file, mobile header overlay. Fixed.
+  - Round 2: DO-NOT-SHIP — the P2P hand-off leak above. Fixed, and round 3
+    independently confirmed both it and the double-pick fix.
+  - Round 3: DO-NOT-SHIP — my own mobile menu "fix" anchored the panels to the
+    trigger button instead of the viewport, collapsing them to 43-112px slivers
+    of unlabelled icons at 375px, where they are the only navigation. Worse than
+    the bug it replaced. Fixed: below 640px the anchor leaves the positioning
+    chain, panels span the menubar in one column. Measured at 375px — every menu
+    359px wide, inside the viewport, zero clipped labels, screenshot confirms.
+  - Round 4 was verifying that. Its result is not in this document, so treat the
+    branch as "fixed and self-verified, awaiting final independent confirmation".
+
+  Worth noting: three of the four rounds caught a bug I introduced *in the commit
+  that claimed to fix the previous one*. Self-review passed every time.
 - **~900 lines of dead marketing components** remain in `App.tsx` (`Shell`,
   `Dashboard`, `BrowseToolsPage`, etc.). They are tree-shaken, so there is no
   runtime cost. I attempted a mechanical deletion, it broke on JSX braces, and I
