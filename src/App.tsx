@@ -133,6 +133,8 @@ function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMod
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const barRef = useRef<HTMLElement | null>(null);
   const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // Space from the open trigger to the right edge; the panel never exceeds it.
+  const [menuSpace, setMenuSpace] = useState(0);
   const activeCategory = useMemo(() => {
     const route = routeForHash(hash);
     return route.type === "category" ? route.category : route.type === "tool" ? route.tool.category : "";
@@ -171,7 +173,14 @@ function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMod
               aria-haspopup="true"
               aria-expanded={isOpen}
               aria-controls={`menu-${menu.id}`}
-              onClick={() => setOpenMenu(isOpen ? null : menu.id)}
+              onClick={(event) => {
+                // Anchor right when the trigger sits past the midpoint, so a wide
+                // panel cannot run off the edge with no way to scroll to it.
+                const rect = event.currentTarget.getBoundingClientRect();
+                setMenuSpace(Math.max(240, Math.round(window.innerWidth - rect.left - 8)));
+                setOpenMenu(isOpen ? null : menu.id);
+                window.dispatchEvent(new Event("myfilekit:close-search"));
+              }}
               // Hover only switches between menus for a real pointer, and never
               // while focus is inside the open popup (it would unmount the
               // focused link and drop focus to <body>).
@@ -184,7 +193,7 @@ function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMod
             >
               {menu.label}<ChevronDown size={12} aria-hidden="true" />
             </button>
-            {isOpen ? <ToolMegaMenu id={`menu-${menu.id}`} categories={menu.categories} label={menu.label} /> : null}
+            {isOpen ? <ToolMegaMenu id={`menu-${menu.id}`} categories={menu.categories} label={menu.label} space={menuSpace} /> : null}
           </div>
         );
       })}
@@ -198,7 +207,7 @@ function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMod
 }
 
 /** Sejda-style multi-column tool menu: every tool listed as text, grouped. */
-function ToolMegaMenu({ id, categories, label }: { id: string; categories: string[]; label: string }) {
+function ToolMegaMenu({ id, categories, label, space = 0 }: { id: string; categories: string[]; label: string; space?: number }) {
   const columns = useMemo(() => {
     const out: { title: string; items: Tool[] }[] = [];
     for (const category of categories) {
@@ -219,7 +228,7 @@ function ToolMegaMenu({ id, categories, label }: { id: string; categories: strin
   }, [categories]);
 
   return (
-    <nav className="menu-pop" id={id} aria-label={`${label} tools`}>
+    <nav className="menu-pop" id={id} aria-label={`${label} tools`} style={space ? ({ "--menu-space": `${space}px` } as React.CSSProperties) : undefined}>
       {columns.map((column) => (
         <div className="menu-col" key={column.title}>
           <p className="menu-col-title">{column.title}</p>
@@ -240,8 +249,13 @@ function ToolMegaMenu({ id, categories, label }: { id: string; categories: strin
 function GlobalSearch() {
   const [query, setQuery] = useState("");
   const matches = useMemo(() => (query.trim() ? filterTools(query).slice(0, 8) : []), [query]);
+  useEffect(() => {
+    const close = () => setQuery("");
+    window.addEventListener("myfilekit:close-search", close);
+    return () => window.removeEventListener("myfilekit:close-search", close);
+  }, []);
   return (
-    <div className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setQuery(""); }}>
+    <div className="search-anchor" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setQuery(""); }}>
       <div className="sidebar-search" style={{ padding: 0, border: 0 }}>
         <input
           type="search"
@@ -261,7 +275,7 @@ function GlobalSearch() {
         />
       </div>
       {matches.length ? (
-        <nav className="menu-pop" aria-label="Search results" style={{ left: "auto", right: 0, width: 320, columns: "auto" }}>
+        <nav className="menu-pop search-pop" aria-label="Search results">
           <span className="sr-only" aria-live="polite">{matches.length} tool{matches.length === 1 ? "" : "s"} match</span>
           {matches.map((tool: Tool) => {
             const Icon = iconForTool(tool);

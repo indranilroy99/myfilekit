@@ -208,7 +208,8 @@ body {
   left: 0;
   right: auto;
   width: max-content;
-  max-width: min(calc(100vw - 16px), 1060px);
+  /* Never wider than the space left of the viewport edge from this trigger. */
+  max-width: min(calc(100vw - 16px), 1060px, var(--menu-space, 1060px));
   z-index: 60;
   /* Columns flow like a print index so groups pack tightly instead of leaving
      a ragged grid; each group stays unbroken. */
@@ -814,6 +815,11 @@ html.dark .tag-badge, html.dark .new-badge {
 .tool-inspector .index-row { grid-template-columns: 13px minmax(0, 1fr) auto; }
 
 .menu-anchor { position: relative; display: inline-flex; }
+.search-anchor { position: relative; }
+
+
+/* Search results: right-aligned under the field, single column. */
+.search-pop { left: auto; right: 0; width: 320px; max-width: min(320px, calc(100vw - 16px)); columns: auto; }
 
 /* ---------- Workspace home (canvas-first landing) ---------- */
 
@@ -890,12 +896,15 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
    squeezed into an unreadable sliver. .menu-anchor must leave the positioning
    chain or left/right resolve against the ~59px button instead. */
 @media (max-width: 640px) {
-  .menu-anchor { position: static; }
-  .menu-pop {
+  .menu-anchor, .search-anchor { position: static; }
+  .menu-pop, .search-pop {
     left: 8px;
     right: 8px;
     width: auto;
     max-width: none;
-    columns: 1;
+    /* Not `columns: 1`: .menu-pop has a definite max-height, so it stays a
+       multicol container and spills into inline-axis overflow columns off the
+       side of the panel. `auto` stops it being multicol. */
+    columns: auto;
   }
 }
