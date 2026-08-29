@@ -838,11 +838,11 @@ button {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 42px;
+  min-height: 44px;
   border-radius: 999px;
   padding: 10px 16px;
   font-size: 14px;
-  font-weight: 900;
+  font-weight: 700;
   text-decoration: none;
 }
 
@@ -950,6 +950,219 @@ button {
   border-radius: var(--radius);
   padding: 16px;
 }
+
+/* Redesigned upload dropzone — shared by every tool (replaces the thin strip). */
+.dropzone {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  padding: 32px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease;
+}
+
+.dropzone:hover,
+.dropzone-active {
+  border-color: var(--primary);
+  background: var(--paper-soft);
+}
+
+/* Keyboard focus lands on the sr-only <input>; give the label a distinct ring
+   (offset outline) so focus is clearly different from the hover border tint. */
+.dropzone:focus-within {
+  border-color: var(--primary);
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.dropzone-tile {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 4px;
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+}
+
+.dropzone-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--foreground);
+}
+
+.dropzone-hint {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--stone);
+}
+
+.dropzone-cta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  margin-top: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+/* Selected-file list: name + size + reorder + remove, keyboard-operable. */
+.file-list {
+  display: grid;
+  gap: 8px;
+}
+
+.file-list-hint {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--stone);
+}
+
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+
+.file-chip-dragging { opacity: .5; }
+.file-chip-grip { flex: 0 0 auto; color: var(--stone); cursor: grab; }
+
+.file-chip-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.file-chip-size {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--stone);
+}
+
+.file-chip-move { flex: 0 0 auto; display: inline-flex; }
+
+/* 44px keyboard/touch target, shared by move + remove controls. */
+.icon-button {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  color: var(--stone);
+  background: transparent;
+}
+
+.icon-button:hover { background: var(--paper-soft); }
+.icon-button:disabled { opacity: .35; cursor: not-allowed; }
+.file-chip-remove:hover { color: var(--danger-fg); }
+
+/* Result card — the moment of payoff. Single-accent: success reads through the
+   check + label, not a second colour. */
+.result-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.result-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  color: var(--foreground);
+}
+
+.result-card-check { display: grid; place-items: center; color: var(--primary); }
+
+/* Desktop "Tools" dropdown menu. */
+.tools-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  min-width: 220px;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: 0 18px 44px rgba(15, 23, 42, .12);
+  backdrop-filter: blur(18px);
+}
+
+.tools-menu-item {
+  display: block;
+  min-height: 44px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.tools-menu-item:hover,
+.tools-menu-item:focus-visible {
+  background: var(--paper-soft);
+}
+
+.tools-menu-item-active {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+html.dark .tools-menu {
+  /* Slate family like the other dark surfaces; near-opaque because it floats over text. */
+  background: rgba(15, 23, 42, .92);
+  border-color: rgba(148, 163, 184, .18);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .5);
+}
+
+/* Trust line — our differentiator, stated plainly on every tool. */
+.trust-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--stone);
+}
+
+/* Dark parity — reuse the established slate surface/border rgba, not new hex. */
+html.dark .dropzone { background: rgba(15, 23, 42, .72); border-color: rgba(148, 163, 184, .16); }
+html.dark .dropzone:hover,
+html.dark .dropzone-active { background: rgba(15, 23, 42, .8); }
+html.dark .file-chip { background: rgba(15, 23, 42, .72); border-color: rgba(148, 163, 184, .18); }
+html.dark .icon-button:hover { background: rgba(148, 163, 184, .14); }
+html.dark .result-card { background: rgba(15, 23, 42, .72); border-color: rgba(148, 163, 184, .18); }
 
 .pdf-result-panel {
   display: grid;
@@ -1984,6 +2197,14 @@ html.dark .hero-empty-result {
   backdrop-filter: none !important;
 }
 
+/* One elevation step (dark): a card/muted surface nested INSIDE a panel sits a
+   hair lighter than the panel, so depth reads without shadows or glow. */
+html.dark .surface-panel .surface-card,
+html.dark .surface-panel .surface-muted {
+  background: #17171a !important;
+  border-color: #26262b !important;
+}
+
 .category-overview-grid,
 .why-grid {
   gap: 16px !important;
@@ -2052,12 +2273,16 @@ html.dark .category-filter {
 
 .primary-button,
 html.dark .primary-button {
-  border: 1px solid #3b82f6 !important;
+  border: 1px solid #2563eb !important;
   border-radius: 8px !important;
-  background: #3b82f6 !important;
+  background: #2563eb !important;
   color: #fafafa !important;
   box-shadow: none !important;
 }
+
+/* Same darker accent for the dropzone CTA so white text clears AA in dark mode
+   (blue-500 #3b82f6 on #fafafa was 3.52:1; blue-600 #2563eb ≈ 4.95:1). */
+html.dark .dropzone-cta { background: #2563eb; }
 
 .site-footer {
   border-top-color: #1f1f23 !important;
