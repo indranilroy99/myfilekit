@@ -7,7 +7,8 @@ import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { tools } from "../registry/tools.registry.js";
 import { formatBytes } from "../utils/format.js";
 import { revokeDownloadUrl } from "../services/download.service.js";
-import { takeWorkspaceFiles } from "../lib/workspace-handoff";
+import { takeWorkspaceFilesFor } from "../lib/workspace-handoff";
+import { routeForHash } from "../lib/routing";
 
 type Tool = (typeof tools)[number];
 type Status = { tone: "idle" | "success" | "error"; message: string; progress?: { value: number; total: number; label: string } };
@@ -195,12 +196,15 @@ function FileControl({ accept, multiple = false, files, setFiles, label }: { acc
     if (!acceptList.length || acceptList.includes("*/*")) return true;
     return acceptList.some((rule) => rule === file.type || (rule.endsWith("/*") && file.type.startsWith(rule.slice(0, -1))));
   };
-  // Adopt files the user dropped on the Workspace before choosing this tool, so
-  // "drop a file to start" actually starts. Taken once and cleared; only files
-  // this tool accepts are adopted.
+  // Adopt files the user staged on the Workspace *for this tool*, so "drop a
+  // file to start" actually starts. Scoped to the tool the user clicked: a
+  // hand-off must never load itself into a tool that was merely opened next —
+  // several tools accept any file type, including the P2P sender.
   useEffect(() => {
     if (files.length) return;
-    const handed = takeWorkspaceFiles().filter(matchesAccept);
+    const route = routeForHash(window.location.hash);
+    if (route.type !== "tool") return;
+    const handed = takeWorkspaceFilesFor(route.tool.id).filter(matchesAccept);
     if (handed.length) setFiles(multiple ? handed : handed.slice(0, 1));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

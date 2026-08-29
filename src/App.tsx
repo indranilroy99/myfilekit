@@ -4,7 +4,8 @@ import { Icons } from "@/components/ui/icons";
 import { NumberedPagination } from "@/components/ui/pagination";
 import { SpotlightCard } from "@/components/ui/spotlight-card";
 import { categories, categoryGroups, tools } from "./registry/tools.registry.js";
-import { stashWorkspaceFiles, takeWorkspaceFiles } from "./lib/workspace-handoff";
+import { stashWorkspaceFiles, clearWorkspaceFilesUnless } from "./lib/workspace-handoff";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { filterTools, searchableText } from "./lib/search.js";
 import { formatBytes } from "./utils/format.js";
@@ -55,7 +56,13 @@ export default function App() {
   const isInitialRoute = useRef(true);
 
   useEffect(() => {
-    const syncHash = () => setHash(window.location.hash || "#dashboard");
+    const syncHash = () => {
+      const next = window.location.hash || "#dashboard";
+      // A staged hand-off survives exactly one navigation: into its own tool.
+      const route = routeForHash(next);
+      clearWorkspaceFilesUnless(route.type === "tool" ? route.tool.id : "");
+      setHash(next);
+    };
     window.addEventListener("hashchange", syncHash);
     return () => window.removeEventListener("hashchange", syncHash);
   }, []);
@@ -340,12 +347,24 @@ function SideBar({ hash }: { hash: string }) {
   );
 }
 
-// Tools that can reach a network the operator configures. The chrome must not
-// claim "nothing uploaded" while the tool body honestly says otherwise.
-const serverBackedToolIds = ["request-signature-tool", "translate-pdf-tool"];
+// The status bar must never contradict a tool's own copy. Three tools are not
+// plain-offline, in three different ways, so each gets its own honest label.
+// `networkStatusNote` is drift-guarded by a test: any tool whose source reaches
+// the network must appear here.
+const NETWORK_NOTES: Record<string, string> = {
+  // Uploads the PDF, to a backend the operator deploys. Off by default.
+  "request-signature-tool": "Server-backed · only when you configure it",
+  // Bring-your-own AI endpoint: fully local until the user configures one.
+  "translate-pdf-tool": "Local · optional AI endpoint, off by default",
+  "summarize-pdf-tool": "Local · optional AI endpoint, off by default",
+  "chat-with-pdf-tool": "Local · optional AI endpoint, off by default",
+  // Direct browser-to-browser: no server, but not "offline" either.
+  "p2p-share-tool": "Direct connection · no server",
+  "collab-whiteboard-tool": "Direct connection · no server",
+};
 
 function StatusBar({ route }: { route: ReturnType<typeof routeForHash> }) {
-  const serverBacked = route.type === "tool" && serverBackedToolIds.includes(route.tool.id);
+  const networkNote = route.type === "tool" ? NETWORK_NOTES[route.tool.id] : undefined;
   const label = route.type === "tool" ? route.tool.name
     : route.type === "category" ? route.category
     : route.type === "dashboard" ? "Workspace"
@@ -354,7 +373,7 @@ function StatusBar({ route }: { route: ReturnType<typeof routeForHash> }) {
   return (
     <footer className="statusbar">
       <span className="statusbar-dot" aria-hidden="true" />
-      <span>{serverBacked ? "Server-backed · only when you configure it" : "Offline · nothing uploaded"}</span>
+      <span>{networkNote || "Offline · nothing uploaded"}</span>
       <span className="doc-bar-sep" aria-hidden="true" />
       <span>{label}</span>
       <span className="statusbar-right">
@@ -405,9 +424,10 @@ function WorkspaceHome() {
     const files = Array.from(list || []);
     if (!files.length) return;
     setDropped({ files });
-    // Hand the actual files to the next tool so the user does not pick them twice.
-    stashWorkspaceFiles(files);
   };
+  // Stage the files only for the tool the user actually clicks. Staging at drop
+  // time let an unrelated tool adopt them — including the P2P sender.
+  const openWith = (tool: Tool) => { if (dropped) stashWorkspaceFiles(dropped.files, tool.id); };
 
   return (
     <>
@@ -443,7 +463,7 @@ function WorkspaceHome() {
                 <span className="file-chip-name" title={primary.name}>{primary.name}</span>
                 <span className="file-chip-size">{formatBytes(primary.size)}</span>
                 {dropped.files.length > 1 ? <span className="file-chip-size">+{dropped.files.length - 1} more</span> : null}
-                <button type="button" className="icon-button" aria-label="Clear selected file" onClick={() => { setDropped(null); takeWorkspaceFiles(); }}><X size={15} /></button>
+                <button type="button" className="icon-button" aria-label="Clear selected file" onClick={() => { setDropped(null); clearWorkspaceFilesUnless(""); }}><X size={15} /></button>
               </div>
               <p className="inspector-title">
                 {matches.length
@@ -461,7 +481,7 @@ function WorkspaceHome() {
                 {matches.slice(0, 12).map((tool: Tool) => {
                   const Icon = iconForTool(tool);
                   return (
-                    <a className="index-row" key={tool.id} href={tool.route}>
+                    <a className="index-row" key={tool.id} href={tool.route} onClick={() => openWith(tool)}>
                       <Icon size={14} aria-hidden="true" />
                       <span className="index-row-name">{tool.name}</span>
                       {tool.isNew ? <span className="index-new">NEW</span> : null}
@@ -1470,9 +1490,23 @@ function ToolRenderer({ tool }: { tool: Tool }) {
   if (!moduleId) return <StatusBox status={{ tone: "error", message: "This tool renderer is missing." }} />;
   const ToolModule = toolModules[moduleId];
   return (
-    <Suspense fallback={<div className="grid min-h-40 place-items-center"><p role="status" aria-live="polite" className="text-sm font-bold text-[var(--stone)]">Loading tool…</p></div>}>
-      <ToolModule tool={tool} />
-    </Suspense>
+    // Its own boundary: a tool chunk that fails to load (typically an old page
+    // held across a redeploy) must break this pane only, not replace the whole
+    // shell — nav, search and all — with the app-level error page.
+    <ErrorBoundary
+      key={tool.id}
+      fallback={
+        <div className="grid min-h-40 place-items-center gap-3 text-center">
+          <p role="alert" className="text-sm font-bold text-[var(--foreground)]">This tool could not be loaded.</p>
+          <p className="text-xs text-[var(--stone)]">If the app was updated while this page was open, reloading will fix it.</p>
+          <button type="button" className="secondary-button" onClick={() => window.location.reload()}>Reload</button>
+        </div>
+      }
+    >
+      <Suspense fallback={<div className="grid min-h-40 place-items-center"><p role="status" aria-live="polite" className="text-sm font-bold text-[var(--stone)]">Loading tool…</p></div>}>
+        <ToolModule tool={tool} />
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 function MissingPage() {

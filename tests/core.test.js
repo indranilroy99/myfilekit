@@ -7598,3 +7598,55 @@ test("browse route carries an optional extension filter", () => {
   assert.deepEqual(routeForHash("#browse-tools?ext=" + "a".repeat(40)), { type: "browse" });
   assert.deepEqual(routeForHash("#browse-tools?nope=1"), { type: "browse" });
 });
+
+// --- Workspace hand-off scoping ----------------------------------------------
+// A release review found a file staged on the Workspace silently auto-loading
+// into P2P File Share — a WebRTC tool whose purpose is sending the file off the
+// device — because the first FileControl to mount adopted whatever was pending.
+// The hand-off is now scoped to the one tool the user clicked.
+
+test("workspace hand-off is scoped to the tool the user chose", async () => {
+  const mod = await import("../src/lib/workspace-handoff.ts").catch(() => null);
+  const handoff = mod || (await import("../src/lib/workspace-handoff.js"));
+  const { stashWorkspaceFiles, takeWorkspaceFilesFor, clearWorkspaceFilesUnless, pendingWorkspaceToolId } = handoff;
+  const file = { name: "bank-statement.pdf", size: 10 };
+
+  // Only the intended tool may take the files.
+  stashWorkspaceFiles([file], "merge-pdf-tool");
+  assert.deepEqual(takeWorkspaceFilesFor("p2p-share-tool"), [], "an unintended tool must never receive the hand-off");
+  assert.equal(pendingWorkspaceToolId(), "merge-pdf-tool", "a failed take must not consume the stash");
+  assert.deepEqual(takeWorkspaceFilesFor("merge-pdf-tool"), [file]);
+  assert.equal(pendingWorkspaceToolId(), null, "a successful take clears the stash");
+
+  // Navigating anywhere else drops it, so nothing lingers unseen.
+  stashWorkspaceFiles([file], "merge-pdf-tool");
+  clearWorkspaceFilesUnless("compress-image-tool");
+  assert.equal(pendingWorkspaceToolId(), null, "navigating to another tool must drop the stash");
+
+  // Navigating to the intended tool keeps it.
+  stashWorkspaceFiles([file], "merge-pdf-tool");
+  clearWorkspaceFilesUnless("merge-pdf-tool");
+  assert.equal(pendingWorkspaceToolId(), "merge-pdf-tool");
+  takeWorkspaceFilesFor("merge-pdf-tool");
+
+  // Nothing is staged without an explicit target.
+  stashWorkspaceFiles([file], "");
+  assert.equal(pendingWorkspaceToolId(), null);
+});
+
+test("the status bar never claims 'offline' for a tool that can reach a network", () => {
+  const appSource = readAppSource();
+  const noted = [...appSource.matchAll(/"([a-z0-9-]+-tool)":\s*"(?:Server-backed|Local · optional|Direct connection)[^"]*"/g)]
+    .map((match) => match[1]);
+
+  // Any tool whose implementation can open a connection must carry a label.
+  const networkMarkers = ["requestChatCompletion", "requestEnvelope", "RTCPeerConnection"];
+  for (const id of ["request-signature-tool", "translate-pdf-tool", "summarize-pdf-tool", "chat-with-pdf-tool", "p2p-share-tool", "collab-whiteboard-tool"]) {
+    assert.ok(noted.includes(id), `${id} can reach a network and needs an honest status-bar label`);
+  }
+  // And the markers themselves still exist, so this test fails loudly if the
+  // network paths move rather than silently passing on a stale list.
+  for (const marker of networkMarkers) {
+    assert.ok(appSource.includes(marker), `expected ${marker} in the source — update this guard if it moved`);
+  }
+});

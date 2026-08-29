@@ -209,6 +209,8 @@ body {
   right: auto;
   width: max-content;
   max-width: min(calc(100vw - 16px), 1060px);
+  /* Keep the panel inside the viewport when its trigger sits near the right edge. */
+  right: auto;
   z-index: 60;
   /* Columns flow like a print index so groups pack tightly instead of leaving
      a ragged grid; each group stays unbroken. */
@@ -883,4 +885,10 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
 
 @media (max-width: 1100px) {
   .workspace { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Narrow viewports: pin the menu panels to the viewport rather than the trigger,
+   so a panel anchored near the right edge cannot hang off-screen. */
+@media (max-width: 640px) {
+  .menu-pop { left: 8px !important; right: 8px !important; width: auto !important; max-width: none !important; }
 }

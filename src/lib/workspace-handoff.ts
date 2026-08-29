@@ -1,23 +1,44 @@
 /**
- * Files dropped on the Workspace, handed to the next tool the user opens.
+ * Files handed from the Workspace to ONE tool the user explicitly chose.
  *
- * Deliberately a module-level variable rather than storage: the File objects
- * live only in this page session, are never serialised, and are cleared the
- * moment a tool consumes them. Nothing about a user's files is persisted.
+ * Scoped to an intent on purpose. An earlier version stashed the files as soon
+ * as they were dropped and let the next FileControl to mount adopt them, which
+ * meant a staged file could silently load into a tool the user never picked —
+ * including P2P File Share, whose whole job is sending the file off the device.
+ * Nothing is staged until the user clicks a specific tool, and only that tool
+ * can take it.
+ *
+ * In memory only: the File objects live in this page session, are never
+ * serialised or persisted, and are dropped on reload or on any navigation that
+ * is not the chosen tool.
  */
-let pending: File[] = [];
+type Handoff = { files: File[]; toolId: string };
 
-export function stashWorkspaceFiles(files: File[]) {
-  pending = files.slice();
+let pending: Handoff | null = null;
+
+/** Stage files for one specific tool, chosen by the user. */
+export function stashWorkspaceFiles(files: File[], toolId: string) {
+  if (!files.length || !toolId) return;
+  pending = { files: files.slice(), toolId };
 }
 
-/** Take (and clear) any files handed over from the Workspace. */
-export function takeWorkspaceFiles(): File[] {
-  const files = pending;
-  pending = [];
+/**
+ * Take the staged files if they were staged for `toolId`. Returns [] otherwise
+ * and — importantly — leaves the stash intact, so opening some other tool on the
+ * way does not destroy a hand-off the user is still heading towards.
+ */
+export function takeWorkspaceFilesFor(toolId: string): File[] {
+  if (!pending || pending.toolId !== toolId) return [];
+  const files = pending.files;
+  pending = null;
   return files;
 }
 
-export function hasWorkspaceFiles(): boolean {
-  return pending.length > 0;
+/** Drop the stash unless the user is navigating to the tool it was staged for. */
+export function clearWorkspaceFilesUnless(toolId: string) {
+  if (pending && pending.toolId !== toolId) pending = null;
+}
+
+export function pendingWorkspaceToolId(): string | null {
+  return pending ? pending.toolId : null;
 }
