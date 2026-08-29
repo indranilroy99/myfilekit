@@ -7,9 +7,11 @@ import {
   Accessibility,
   ArrowLeft,
   ArrowRight,
+  CheckCircle2,
   ChevronRight,
   Combine,
   Download,
+  GripVertical,
   FileArchive,
   FileCheck,
   FileSignature,
@@ -913,38 +915,50 @@ function ToolMetaPanel({ status, onReset, children }: { status: Status; onReset:
     onReset();
   };
 
+  // Calm by default: the shouty "STATUS / Ready." box only appears when there is
+  // something to say — an error, active work, or a success with no download card.
+  const isIdle = status.tone === "idle" && status.message === "Ready." && !status.progress;
+  const showStatusBox = !isIdle && !(status.tone === "success" && downloadReady);
+  const hasState = !isIdle || Boolean(downloadReady);
+
   return (
     <aside className="tool-form-status">
-      <div>
-        <p className="text-xs font-black uppercase text-neutral-500">Status</p>
-        <StatusBox status={status} />
-        {status.progress ? <ProgressBar value={status.progress.value} total={status.progress.total} label={status.progress.label} /> : null}
-      </div>
-      {children}
       {downloadReady ? (
-        <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold leading-6 text-neutral-600">
+        <div className="result-card">
+          <div className="result-card-head">
+            <span className="result-card-check" aria-hidden="true"><CheckCircle2 size={18} /></span>
+            <span>Done — ready to save</span>
+          </div>
           <div>
-            <p className="text-xs font-black uppercase text-neutral-500">Export ready</p>
-            <p className="mt-1 break-words text-[var(--foreground)]">{downloadReady.filename}</p>
-            <p className="mt-1 text-xs font-semibold text-neutral-500">{formatBytes(downloadReady.size)} · Ready in this browser session</p>
+            <p className="break-words font-black text-[var(--foreground)]">{downloadReady.filename}</p>
+            <p className="mt-1 text-xs font-semibold text-neutral-500">{formatBytes(downloadReady.size)} · stayed on this device</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {canReview ? <a className="secondary-button no-underline" href={downloadReady.url} target="_blank" rel="noopener noreferrer">
-              <Eye size={16} /> Review
-            </a> : null}
-            <a className="secondary-button no-underline" href={downloadReady.url} download={downloadReady.filename}>
+            <a className="primary-button no-underline" href={downloadReady.url} download={downloadReady.filename}>
               <Download size={16} /> Download
             </a>
+            {canReview ? <a className="secondary-button no-underline" href={downloadReady.url} target="_blank" rel="noopener noreferrer">
+              <Eye size={16} /> Preview
+            </a> : null}
             {canPrint ? <button className="secondary-button" type="button" onClick={() => printDownloadUrl(downloadReady.url)}>
               <Printer size={16} /> Print
             </button> : null}
+            <button className="secondary-button" type="button" onClick={resetPanel}>Start over</button>
           </div>
         </div>
       ) : null}
-      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-        Supported files are processed locally in this browser session. Reset clears the current form state.
-      </div>
-      <SecondaryButton label="Reset" onClick={resetPanel} />
+      {showStatusBox ? (
+        <div>
+          <StatusBox status={status} />
+          {status.progress ? <ProgressBar value={status.progress.value} total={status.progress.total} label={status.progress.label} /> : null}
+        </div>
+      ) : null}
+      {children}
+      <p className="trust-line">
+        <ShieldCheck size={14} aria-hidden="true" />
+        <span>Runs entirely in your browser — your files never leave this device.</span>
+      </p>
+      {hasState && !downloadReady ? <SecondaryButton label="Reset" onClick={resetPanel} /> : null}
     </aside>
   );
 }
@@ -995,32 +1009,87 @@ function ResultConsequenceNote({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Short, human hint describing what the dropzone accepts (e.g. "PDF files"). */
+function acceptHint(accept: string, multiple: boolean): string {
+  const list = accept.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
+  if (!list.length || list.includes("*/*")) return `Any file${multiple ? "s" : ""}`;
+  const names = new Set<string>();
+  for (const rule of list) {
+    if (rule === "application/pdf") names.add("PDF");
+    else if (rule.startsWith("image/")) names.add("images");
+    else if (rule.includes("spreadsheet") || rule.includes("excel") || rule === "text/csv") names.add("spreadsheets");
+    else if (rule.startsWith("text/")) names.add("text");
+    else if (rule.includes("word") || rule.includes("document")) names.add("documents");
+    else names.add(rule.split("/").pop() || rule);
+  }
+  const label = [...names].join(", ");
+  return `${label}${multiple ? " · add several" : ""}`;
+}
+
 function FileControl({ accept, multiple = false, files, setFiles, label }: { accept: string; multiple?: boolean; files: File[]; setFiles: (files: File[]) => void; label?: string }) {
   const [isDragging, setIsDragging] = useState(false);
-  const heading = label || `Choose or drop file${multiple ? "s" : ""}`;
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const heading = label || `Drag & drop ${multiple ? "files" : "a file"} here`;
   const ariaLabel = label || `Choose ${multiple ? "files" : "file"}`;
   const acceptList = accept.split(",").map((item) => item.trim()).filter(Boolean);
   const matchesAccept = (file: File) => {
     if (!acceptList.length || acceptList.includes("*/*")) return true;
     return acceptList.some((rule) => rule === file.type || (rule.endsWith("/*") && file.type.startsWith(rule.slice(0, -1))));
   };
-  return <label
-    className={`surface-card grid cursor-pointer gap-3 rounded-3xl border-dashed border-neutral-300 p-5 transition hover:border-[var(--moss)] ${isDragging ? "border-[var(--moss)] bg-[var(--paper-soft)]" : ""}`}
-    onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
-    onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
-    onDragLeave={(event) => { event.preventDefault(); setIsDragging(false); }}
-    onDrop={(event) => {
-      event.preventDefault();
-      setIsDragging(false);
-      const dropped = Array.from(event.dataTransfer.files || []);
-      const filtered = dropped.filter(matchesAccept);
-      setFiles(filtered.length ? filtered : dropped);
-    }}
-  >
-    <span className="flex items-center gap-3 font-black"><Upload size={20} /> {heading}</span>
-    <input aria-label={ariaLabel} className="sr-only" type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} />
-    <span className="text-sm font-semibold text-neutral-500">{files.length ? files.map((file) => file.name).join(", ") : "No file selected"}</span>
-  </label>;
+  const removeAt = (index: number) => setFiles(files.filter((_, i) => i !== index));
+  // Reorder within the selected list (e.g. page order for Merge). Chips live
+  // outside the <label> so their drag never reaches the dropzone's file-drop.
+  const reorder = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0) return;
+    const next = files.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setFiles(next);
+  };
+  return (
+    <div className="grid gap-3">
+      <label
+        className={`dropzone ${isDragging ? "dropzone-active" : ""}`}
+        onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
+        onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
+        onDragLeave={(event) => { event.preventDefault(); setIsDragging(false); }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setIsDragging(false);
+          const dropped = Array.from(event.dataTransfer.files || []);
+          if (!dropped.length) return; // ignore a stray reorder-drag; never clear the selection
+          const filtered = dropped.filter(matchesAccept);
+          setFiles(filtered.length ? filtered : dropped);
+        }}
+      >
+        <input aria-label={ariaLabel} className="sr-only" type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} />
+        <span className="dropzone-tile" aria-hidden="true"><Upload size={22} /></span>
+        <span className="dropzone-title">{heading}</span>
+        <span className="dropzone-hint">{acceptHint(accept, multiple)}</span>
+        <span className="dropzone-cta">Browse files</span>
+      </label>
+      {files.length ? (
+        <ul className="file-list" aria-label="Selected files">
+          {files.map((file, index) => (
+            <li
+              key={`${file.name}-${index}`}
+              className={`file-chip ${dragIndex === index ? "file-chip-dragging" : ""}`}
+              draggable={multiple}
+              onDragStart={multiple ? (() => setDragIndex(index)) : undefined}
+              onDragOver={multiple ? ((event) => event.preventDefault()) : undefined}
+              onDrop={multiple ? ((event) => { event.preventDefault(); if (dragIndex !== null) reorder(dragIndex, index); setDragIndex(null); }) : undefined}
+              onDragEnd={multiple ? (() => setDragIndex(null)) : undefined}
+            >
+              {multiple ? <span className="file-chip-grip" aria-hidden="true"><GripVertical size={15} /></span> : null}
+              <span className="file-chip-name" title={file.name}>{file.name}</span>
+              <span className="file-chip-size tabular-nums">{formatBytes(file.size)}</span>
+              <button type="button" className="file-chip-remove" aria-label={`Remove ${file.name}`} onClick={() => removeAt(index)}><X size={15} /></button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {

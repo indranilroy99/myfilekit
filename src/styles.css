@@ -951,6 +951,156 @@ button {
   padding: 16px;
 }
 
+/* Redesigned upload dropzone — shared by every tool (replaces the thin strip). */
+.dropzone {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, .4);
+  padding: 32px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease;
+}
+
+.dropzone:hover,
+.dropzone:focus-within,
+.dropzone-active {
+  border-color: var(--primary);
+  background: var(--paper-soft);
+}
+
+.dropzone-tile {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 4px;
+  border-radius: 16px;
+  background: rgba(59, 130, 246, .12);
+  color: var(--primary);
+}
+
+.dropzone-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--foreground);
+}
+
+.dropzone-hint {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--stone);
+}
+
+.dropzone-cta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  margin-top: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+/* Selected-file list: name + size + remove, with drag-reorder for multi-file. */
+.file-list {
+  display: grid;
+  gap: 8px;
+}
+
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .5);
+}
+
+.file-chip-dragging { opacity: .5; }
+.file-chip-grip { flex: 0 0 auto; color: var(--stone); cursor: grab; }
+
+.file-chip-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.file-chip-size {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--stone);
+}
+
+.file-chip-remove {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--stone);
+}
+
+.file-chip-remove:hover {
+  background: var(--paper-soft);
+  color: var(--danger);
+}
+
+/* Result card — the moment of payoff, elevated out of the status footnote. */
+.result-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--success);
+  border-radius: var(--radius);
+  background: rgba(34, 197, 94, .06);
+}
+
+.result-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  color: var(--foreground);
+}
+
+.result-card-check { display: grid; place-items: center; color: var(--success); }
+
+/* Trust line — our differentiator, stated plainly on every tool. */
+.trust-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--stone);
+}
+
+html.dark .dropzone { background: #141416; border-color: #2a2a30; }
+html.dark .dropzone:hover,
+html.dark .dropzone:focus-within,
+html.dark .dropzone-active { background: #161618; }
+html.dark .file-chip { background: #141416; border-color: #232327; }
+html.dark .file-chip-remove:hover { background: #1c1c20; }
+html.dark .result-card { background: rgba(34, 197, 94, .08); }
+
 .pdf-result-panel {
   display: grid;
   gap: 14px;
