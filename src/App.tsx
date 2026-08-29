@@ -270,19 +270,14 @@ function Shell({ children, hash, theme, onToggleTheme }: { children: React.React
             </span>
           </a>
           <nav className="hidden items-center gap-1 lg:flex" aria-label="Primary navigation">
-            {primaryNavItems.map((item, index) => {
-              const active = index === activeNavIndex;
-              return (
-                <a
-                  key={item.id}
-                  href={item.href}
-                  aria-current={active ? "page" : undefined}
-                  className={`rounded-full px-3 py-2 text-sm no-underline transition hover:bg-[var(--paper-soft)] ${active ? "font-black text-[var(--ink)] underline decoration-2 underline-offset-8" : "font-semibold text-neutral-500 hover:text-[var(--ink)]"}`}
-                >
-                  {item.label}
-                </a>
-              );
-            })}
+            <a
+              href="#dashboard"
+              aria-current={activeNavIndex === 0 ? "page" : undefined}
+              className={`rounded-full px-3 py-2 text-sm no-underline transition hover:bg-[var(--paper-soft)] ${activeNavIndex === 0 ? "font-bold text-[var(--ink)] underline decoration-2 underline-offset-8" : "font-semibold text-neutral-500 hover:text-[var(--ink)]"}`}
+            >
+              Dashboard
+            </a>
+            <ToolsMenu items={primaryNavItems.slice(1)} active={activeNavIndex > 0} activeIndex={activeNavIndex - 1} />
           </nav>
           <div className="flex items-center gap-2">
             <ThemeToggle theme={theme} onToggle={onToggleTheme} />
@@ -306,6 +301,61 @@ function Shell({ children, hash, theme, onToggleTheme }: { children: React.React
         {children}
       </main>
     </>
+  );
+}
+
+/** Desktop "Tools" dropdown: the eight category links, collapsed out of the top
+ * bar so the header reads product-grade instead of sitemap. Accessible: real
+ * button with aria-expanded/haspopup, Escape and outside-click close, closes on
+ * route change (each item is a plain <a>). */
+function ToolsMenu({ items, active, activeIndex }: { items: { id: string; label: string; href: string }[]; active: boolean; activeIndex: number }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const onDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onHash = () => setOpen(false);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("hashchange", onHash);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("hashchange", onHash);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={`flex items-center gap-1 rounded-full px-3 py-2 text-sm transition hover:bg-[var(--paper-soft)] ${active ? "font-bold text-[var(--ink)] underline decoration-2 underline-offset-8" : "font-semibold text-neutral-500 hover:text-[var(--ink)]"}`}
+      >
+        Tools <ChevronDown size={14} className={`transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+      </button>
+      {open ? (
+        <div role="menu" aria-label="Tool categories" className="tools-menu">
+          {items.map((item, index) => (
+            <a
+              key={item.id}
+              role="menuitem"
+              href={item.href}
+              aria-current={active && index === activeIndex ? "page" : undefined}
+              className={`tools-menu-item ${active && index === activeIndex ? "tools-menu-item-active" : ""}`}
+            >
+              {item.label}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -404,7 +454,7 @@ function ThemeToggle({ theme, onToggle }: { theme: ThemeMode; onToggle: () => vo
       <span className="theme-toggle-icon" aria-hidden="true">
         {isDark ? <Sun size={17} /> : <Moon size={17} />}
       </span>
-      <span className="hidden text-sm font-black xl:inline">{isDark ? "Light" : "Dark"}</span>
+      <span className="hidden text-sm font-bold xl:inline">{isDark ? "Light" : "Dark"}</span>
     </button>
   );
 }
@@ -466,7 +516,7 @@ function Dashboard() {
             {!isSearching && (
               <div className="grid justify-items-center gap-5">
                 <div className="grid justify-items-center gap-3">
-                  <p className="app-badge mx-auto w-fit text-xs font-black uppercase">Local-first file toolkit</p>
+                  <p className="app-badge mx-auto w-fit text-xs font-bold uppercase">Local-first file toolkit</p>
                   <h1 className="font-display text-5xl font-black md:text-7xl">MyFileKit</h1>
                 </div>
                 <p className="max-w-3xl text-xl font-semibold leading-snug text-neutral-700 md:text-2xl">
@@ -581,7 +631,7 @@ function ProductCommandStrip() {
         <SpotlightCard className="command-stat" key={label}>
           <span className="command-stat-icon"><Icon size={17} /></span>
           <span>
-            <span className="block text-sm font-black">{label}</span>
+            <span className="block text-sm font-bold">{label}</span>
             <span className="block text-xs font-bold text-neutral-500">{note}</span>
           </span>
         </SpotlightCard>
@@ -690,7 +740,7 @@ function ToolSection({ title, tools: sectionTools, searchMode = false, layout = 
           </div>
         </div>
         {!searchMode && categories.includes(title) && (
-          <a className="moss-text text-sm font-black no-underline" href={categoryRoute(title)}>
+          <a className="moss-text text-sm font-bold no-underline" href={categoryRoute(title)}>
             View all <ChevronRight className="inline" size={15} />
           </a>
         )}
@@ -721,11 +771,11 @@ function ToolCard({ tool, compact = false }: { tool: Tool; compact?: boolean }) 
           <p className={`tool-description mt-1 text-sm font-semibold leading-6 text-neutral-600 ${compact ? "tool-description-compact" : ""}`}>{tool.description}</p>
         </div>
         <div className="mt-auto flex flex-wrap gap-2">
-          {tool.isNew && <span className="new-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">New</span>}
-          <span className="tag-badge category-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{primaryBadge}</span>
-          {!compact && visibleBadges.map((badge: string) => <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{badge}</span>)}
-          {!compact && multiFile && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{multiFile}</span>}
-          {!compact && fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase">{fileTypeLabel(tool)}</span>}
+          {tool.isNew && <span className="new-badge rounded-full px-2.5 py-1 text-[11px] font-bold uppercase">New</span>}
+          <span className="tag-badge category-badge rounded-full px-2.5 py-1 text-[11px] font-bold uppercase">{primaryBadge}</span>
+          {!compact && visibleBadges.map((badge: string) => <span key={badge} className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-bold uppercase">{badge}</span>)}
+          {!compact && multiFile && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-bold uppercase">{multiFile}</span>}
+          {!compact && fileTypeLabel(tool) && <span className="tag-badge rounded-full px-2.5 py-1 text-[11px] font-bold uppercase">{fileTypeLabel(tool)}</span>}
         </div>
       </a>
     </SpotlightCard>
@@ -778,7 +828,7 @@ function BrowseToolsPage() {
         </div>
         {visibleTools.length > browseToolsPageSize && (
           <div className="pagination-shell mt-8 flex flex-col items-center justify-between gap-4 p-4 sm:flex-row">
-            <p className="text-sm font-black text-neutral-500">
+            <p className="text-sm font-bold text-neutral-500">
               Showing {rangeStart}-{rangeEnd} of {visibleTools.length} tools
             </p>
             <NumberedPagination count={visibleTools.length} page={currentPage} pageSize={browseToolsPageSize} onPageChange={setPage} />
@@ -1007,7 +1057,7 @@ function StatusBox({ status }: { status: Status }) {
 function ResultConsequenceNote({ children }: { children: React.ReactNode }) {
   return (
     <div role="note" className="grid gap-1 rounded-lg border border-[var(--line)] bg-[var(--paper-soft)] p-4 text-sm font-semibold leading-6 text-neutral-600">
-      <p className="text-xs font-black uppercase text-neutral-500">Keep in mind</p>
+      <p className="text-xs font-bold uppercase text-neutral-500">Keep in mind</p>
       <p className="text-[var(--foreground)]">{children}</p>
     </div>
   );
@@ -1122,19 +1172,19 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 function Input({ label, value, onChange, placeholder = "", helper = "", type = "text" }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; helper?: string; type?: string }) {
-  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}</span><input className="field-input" type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />{helper && <span className="text-xs font-semibold text-neutral-500">{helper}</span>}</label>;
+  return <label className="grid gap-2"><span className="text-xs font-bold uppercase text-neutral-500">{label}</span><input className="field-input" type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />{helper && <span className="text-xs font-semibold text-neutral-500">{helper}</span>}</label>;
 }
 
 function Textarea({ label, value, onChange, rows = 8 }: { label: string; value: string; onChange: (value: string) => void; rows?: number }) {
-  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}</span><textarea className="field-input resize-y leading-6" rows={rows} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+  return <label className="grid gap-2"><span className="text-xs font-bold uppercase text-neutral-500">{label}</span><textarea className="field-input resize-y leading-6" rows={rows} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }
 
 function Select({ label, value, onChange, options, labels = options }: { label: string; value: string; onChange: (value: string) => void; options: string[]; labels?: string[] }) {
-  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}</span><select className="field-input" value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option, index) => <option key={option} value={option}>{labels[index]}</option>)}</select></label>;
+  return <label className="grid gap-2"><span className="text-xs font-bold uppercase text-neutral-500">{label}</span><select className="field-input" value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option, index) => <option key={option} value={option}>{labels[index]}</option>)}</select></label>;
 }
 
 function Range({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label className="grid gap-2"><span className="text-xs font-black uppercase text-neutral-500">{label}: {value}</span><input type="range" min="0.25" max="0.95" step="0.05" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+  return <label className="grid gap-2"><span className="text-xs font-bold uppercase text-neutral-500">{label}: {value}</span><input type="range" min="0.25" max="0.95" step="0.05" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }
 
 function Checkbox({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
@@ -1205,13 +1255,13 @@ function PageHeader({ eyebrow, title, subtitle, icon: Icon, badges = [] }: { eye
       <div className="flex min-w-0 items-start gap-4">
         <span className="icon-tile page-header-icon grid place-items-center rounded-2xl"><Icon size={24} /></span>
         <div className="min-w-0">
-          <p className="moss-text text-xs font-black uppercase">{eyebrow}</p>
+          <p className="moss-text text-xs font-bold uppercase">{eyebrow}</p>
           <h1 className="font-display page-title font-black">{title}</h1>
           <p className="mt-2 max-w-3xl font-semibold leading-7 text-neutral-600">{subtitle}</p>
           {badges.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2">
               {badges.map((badge) => (
-                <span key={badge} className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{badge}</span>
+                <span key={badge} className="tag-badge rounded-full px-3 py-1 text-xs font-bold uppercase">{badge}</span>
               ))}
             </div>
           )}
@@ -1424,11 +1474,11 @@ function PdfResultPanel({ result }: { result: PdfOutput | null }) {
     <section className="pdf-result-panel">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-black uppercase text-neutral-500">Generated PDF</p>
+          <p className="text-xs font-bold uppercase text-neutral-500">Generated PDF</p>
           <p className="mt-1 font-black text-[var(--foreground)]">{result.filename}</p>
           <p className="mt-1 text-sm font-semibold text-neutral-500">{result.pages} page{result.pages === 1 ? "" : "s"} from {result.sourceName}</p>
         </div>
-        <span className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{formatBytes(result.blob.size)}</span>
+        <span className="tag-badge rounded-full px-3 py-1 text-xs font-bold uppercase">{formatBytes(result.blob.size)}</span>
       </div>
       <iframe className="pdf-preview-frame" title={`Preview of ${result.filename}`} src={result.url} />
       <div className="grid gap-2 sm:grid-cols-2">
@@ -1709,7 +1759,7 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
   return (
     <ToolForm status={status} onReset={reset}>
       <div className="surface-muted wabi-card-edge grid gap-1 p-4 text-sm font-semibold leading-6 text-neutral-600">
-        <p className="text-xs font-black uppercase text-neutral-500">How this works — and its limits</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">How this works — and its limits</p>
         <p className="text-[var(--foreground)]">Click a line of existing text, edit the string, and Apply. On export the original glyphs are covered with a rectangle in the sampled background colour and your new text is drawn on top at the same spot.</p>
         <ul className="ml-4 list-disc">
           <li>This is a <strong>block-level overlay edit, not full-page reflow</strong>: a longer replacement now <strong>re-wraps within the clicked block's width</strong> onto multiple lines instead of overflowing off the edge; a shorter one still fits on one line. Only the clicked run is touched — surrounding text never moves, so wrapped lines can run over content directly beneath the block.</li>
@@ -1726,7 +1776,7 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <button className="secondary-button" type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}><ArrowLeft size={16} /> Prev</button>
-            <span className="text-sm font-black tabular-nums">Page {currentPage} / {pageCount}</span>
+            <span className="text-sm font-bold tabular-nums">Page {currentPage} / {pageCount}</span>
             <button className="secondary-button" type="button" disabled={currentPage >= pageCount} onClick={() => setCurrentPage((p) => Math.min(pageCount, p + 1))}>Next <ArrowRight size={16} /></button>
           </div>
           <span className="text-xs font-bold text-neutral-500">{edits.size} edit{edits.size === 1 ? "" : "s"} pending across {new Set(editList.map((e) => e.page)).size || 0} page{new Set(editList.map((e) => e.page)).size === 1 ? "" : "s"}</span>
@@ -1770,10 +1820,10 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
 
       {selectedRun && (
         <div className="surface-card wabi-card-edge grid gap-3 p-4">
-          <p className="text-xs font-black uppercase text-neutral-500">Selected text · page {currentPage}</p>
+          <p className="text-xs font-bold uppercase text-neutral-500">Selected text · page {currentPage}</p>
           <p className="break-words rounded-lg border border-[var(--border)] bg-[var(--paper-soft)] px-3 py-2 font-mono text-sm text-neutral-600">{selectedRun.str}</p>
           <label className="grid gap-2">
-            <span className="text-xs font-black uppercase text-neutral-500">Replacement text (leave empty to delete)</span>
+            <span className="text-xs font-bold uppercase text-neutral-500">Replacement text (leave empty to delete)</span>
             <input className="field-input" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Type the corrected text…" />
           </label>
           <div className="flex flex-wrap gap-2">
@@ -1790,11 +1840,11 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
           <div className="grid gap-1">
             {[...edits.entries()].map(([key, edit]) => (
               <div key={key} className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold text-neutral-600">
-                <span className="text-xs font-black uppercase text-neutral-500">p{edit.page}</span>
+                <span className="text-xs font-bold uppercase text-neutral-500">p{edit.page}</span>
                 <span className="min-w-0 break-words font-mono text-neutral-500 line-through">{edit.original}</span>
                 <ArrowRight size={14} />
                 <span className="min-w-0 break-words font-mono text-[var(--foreground)]">{edit.text || "(deleted)"}</span>
-                <button className="ml-auto text-xs font-black uppercase text-[var(--danger-fg)] hover:underline" type="button" onClick={() => removeEdit(key)}>Remove</button>
+                <button className="ml-auto text-xs font-bold uppercase text-[var(--danger-fg)] hover:underline" type="button" onClick={() => removeEdit(key)}>Remove</button>
               </div>
             ))}
           </div>
@@ -2033,7 +2083,7 @@ function ReflowEditorTool({ tool }: { tool: Tool }) {
   return (
     <ToolForm status={status} onReset={reset}>
       <div className="surface-muted wabi-card-edge grid gap-1 p-4 text-sm font-semibold leading-6 text-neutral-600">
-        <p className="text-xs font-black uppercase text-neutral-500">How this works — and its limits</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">How this works — and its limits</p>
         <p className="text-[var(--foreground)]">This is genuine reflow: edit a paragraph and the whole text column re-wraps, the following paragraphs move, and content repaginates onto new pages when it overflows. It is the heavier sibling of <a className="underline" href="#edit-pdf-text-tool">Edit PDF Text</a> (which edits one block in place and moves nothing).</p>
         <ul className="ml-4 list-disc">
           <li>Works well for <strong>single-column text documents</strong>. Multi-column pages, tables, and complex layouts may reorder or misplace content — for those, prefer <a className="underline" href="#edit-pdf-text-tool">Edit PDF Text</a>.</li>
@@ -2048,7 +2098,7 @@ function ReflowEditorTool({ tool }: { tool: Tool }) {
 
       {complexPages.length > 0 && (
         <div className="surface-card wabi-card-edge grid gap-1 border-[var(--warning)] p-4 text-sm font-semibold leading-6 text-neutral-600">
-          <p className="text-xs font-black uppercase text-[var(--warning)]">Complex layout detected</p>
+          <p className="text-xs font-bold uppercase text-[var(--warning)]">Complex layout detected</p>
           <p className="text-[var(--foreground)]">Page{complexPages.length === 1 ? "" : "s"} {complexPages.join(", ")} look multi-column or tabular. Reflow treats the document as one single column, so side-by-side content there may be reordered. You can still proceed, but for those pages <a className="underline" href="#edit-pdf-text-tool">Edit PDF Text</a> preserves the layout.</p>
         </div>
       )}
@@ -2064,14 +2114,14 @@ function ReflowEditorTool({ tool }: { tool: Tool }) {
         <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
           <div className="grid gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-black uppercase text-neutral-500">Paragraphs ({blocks.length})</p>
+              <p className="text-xs font-bold uppercase text-neutral-500">Paragraphs ({blocks.length})</p>
               <span className="text-xs font-bold text-neutral-500">Reflows to {flowed ? flowed.pageCount : 1} page{flowed && flowed.pageCount === 1 ? "" : "s"}</span>
             </div>
             <div className="grid gap-3" style={{ maxHeight: "62vh", overflowY: "auto" }}>
               {blocks.map((block, index) => (
                 <div key={block.id} className="surface-card wabi-card-edge grid gap-2 p-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-black uppercase text-neutral-500">p{block.sourcePage}</span>
+                    <span className="text-xs font-bold uppercase text-neutral-500">p{block.sourcePage}</span>
                     <select className="field-input h-8 w-auto py-0 text-xs" value={block.type} aria-label="Paragraph type" onChange={(event) => updateBlock(block.id, { type: event.target.value as ReflowBlock["type"], isHeading: event.target.value === "heading" } as Partial<ReflowBlock>)}>
                       <option value="paragraph">Paragraph</option>
                       <option value="heading">Heading</option>
@@ -2083,9 +2133,9 @@ function ReflowEditorTool({ tool }: { tool: Tool }) {
                       <option value="right">Right</option>
                     </select>
                     <div className="ml-auto flex flex-wrap gap-1">
-                      <button className="text-xs font-black uppercase text-neutral-500 hover:underline" type="button" onClick={() => splitBlock(index)}><Scissors size={12} className="inline" /> Split</button>
-                      <button className="text-xs font-black uppercase text-neutral-500 hover:underline disabled:opacity-40" type="button" disabled={index === 0} onClick={() => mergeUp(index)}>Merge up</button>
-                      <button className="text-xs font-black uppercase text-[var(--danger-fg)] hover:underline" type="button" onClick={() => deleteBlock(block.id)}>Delete</button>
+                      <button className="text-xs font-bold uppercase text-neutral-500 hover:underline" type="button" onClick={() => splitBlock(index)}><Scissors size={12} className="inline" /> Split</button>
+                      <button className="text-xs font-bold uppercase text-neutral-500 hover:underline disabled:opacity-40" type="button" disabled={index === 0} onClick={() => mergeUp(index)}>Merge up</button>
+                      <button className="text-xs font-bold uppercase text-[var(--danger-fg)] hover:underline" type="button" onClick={() => deleteBlock(block.id)}>Delete</button>
                     </div>
                   </div>
                   <textarea
@@ -2097,14 +2147,14 @@ function ReflowEditorTool({ tool }: { tool: Tool }) {
                     onKeyUp={(event) => caretRef.current.set(block.id, (event.target as HTMLTextAreaElement).selectionStart)}
                     onClick={(event) => caretRef.current.set(block.id, (event.target as HTMLTextAreaElement).selectionStart)}
                   />
-                  <button className="justify-self-start text-xs font-black uppercase text-[var(--moss)] hover:underline" type="button" onClick={() => addBlockAfter(index)}>+ Add paragraph below</button>
+                  <button className="justify-self-start text-xs font-bold uppercase text-[var(--moss)] hover:underline" type="button" onClick={() => addBlockAfter(index)}>+ Add paragraph below</button>
                 </div>
               ))}
             </div>
           </div>
 
           <div className="grid gap-2">
-            <p className="text-xs font-black uppercase text-neutral-500">Live reflow preview</p>
+            <p className="text-xs font-bold uppercase text-neutral-500">Live reflow preview</p>
             <div className="surface-card wabi-card-edge grid justify-items-center gap-3 p-3" style={{ maxHeight: "62vh", overflowY: "auto" }}>
               {flowed ? flowed.pages.map((page, pi) => (
                 <div key={pi} className="relative shrink-0 border border-[var(--border)] bg-white shadow-sm" style={{ width: model.pageWidth * previewScale, height: model.pageHeight * previewScale }}>
@@ -2848,7 +2898,7 @@ function AnnotatePdfTool({ tool }: { tool: Tool }) {
   return (
     <ToolForm status={status} onReset={reset}>
       <div className="surface-muted wabi-card-edge grid gap-1 p-4 text-sm font-semibold leading-6 text-neutral-600">
-        <p className="text-xs font-black uppercase text-neutral-500">How this works — and its limits</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">How this works — and its limits</p>
         <p className="text-[var(--foreground)]">Pick a tool, mark up the page, navigate pages, then export. Your markup is <strong>flattened (burned) into the page</strong> on export.</p>
         <ul className="ml-4 list-disc">
           <li>Flattened markup renders <strong>identically in every reader</strong> and cannot be tampered with as data — but it is <strong>not reader-editable</strong> (no selectable /Annot objects). Edit here before exporting.</li>
@@ -2869,7 +2919,7 @@ function AnnotatePdfTool({ tool }: { tool: Tool }) {
                 type="button"
                 aria-pressed={activeTool === t.id}
                 onClick={() => { setActiveTool(t.id); calloutTargetRef.current = null; if (t.id !== "select") { setSelectedId(null); selectedRef.current = null; } }}
-                className={`rounded-full border px-3 py-1.5 text-xs font-black uppercase transition ${activeTool === t.id ? "border-[var(--moss)] bg-[var(--moss)] text-white" : "border-[var(--line)] bg-[var(--paper-soft)] text-neutral-600 hover:border-[var(--moss)]"}`}
+                className={`rounded-full border px-3 py-1.5 text-xs font-bold uppercase transition ${activeTool === t.id ? "border-[var(--moss)] bg-[var(--moss)] text-white" : "border-[var(--line)] bg-[var(--paper-soft)] text-neutral-600 hover:border-[var(--moss)]"}`}
               >
                 {t.label}
               </button>
@@ -2879,7 +2929,7 @@ function AnnotatePdfTool({ tool }: { tool: Tool }) {
           <div className="surface-card wabi-card-edge grid gap-3 p-4">
             {activeTool === "highlight" && (
               <div className="grid gap-2">
-                <span className="text-xs font-black uppercase text-neutral-500">Highlight colour</span>
+                <span className="text-xs font-bold uppercase text-neutral-500">Highlight colour</span>
                 <div className="flex flex-wrap gap-2">
                   {HIGHLIGHT_PALETTE.map((c) => (
                     <button
@@ -2916,7 +2966,7 @@ function AnnotatePdfTool({ tool }: { tool: Tool }) {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <button className="secondary-button" type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}><ArrowLeft size={16} /> Prev</button>
-              <span className="text-sm font-black tabular-nums">Page {currentPage} / {pageCount}</span>
+              <span className="text-sm font-bold tabular-nums">Page {currentPage} / {pageCount}</span>
               <button className="secondary-button" type="button" disabled={currentPage >= pageCount} onClick={() => setCurrentPage((p) => Math.min(pageCount, p + 1))}>Next <ArrowRight size={16} /></button>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -3091,7 +3141,7 @@ function LlmEndpointPanel({ settings, onChange }: { settings: LlmSettings; onCha
   return (
     <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold leading-6 text-neutral-600">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-black uppercase text-neutral-500">Optional AI endpoint — {configured ? "on" : "off"}</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">Optional AI endpoint — {configured ? "on" : "off"}</p>
         <button className="secondary-button" type="button" onClick={() => setOpen(!open)}>{open ? "Hide settings" : "Settings"}</button>
       </div>
       <p>
@@ -3136,10 +3186,10 @@ function KeywordChips({ keywords }: { keywords: SummaryResult["keywords"] }) {
   if (!keywords.length) return null;
   return (
     <div className="grid gap-2">
-      <p className="text-xs font-black uppercase text-neutral-500">Top keywords</p>
+      <p className="text-xs font-bold uppercase text-neutral-500">Top keywords</p>
       <div className="flex flex-wrap gap-2">
         {keywords.map((keyword) => (
-          <span key={keyword.term} className="tag-badge rounded-full px-3 py-1 text-xs font-black">{keyword.term} · {keyword.count}</span>
+          <span key={keyword.term} className="tag-badge rounded-full px-3 py-1 text-xs font-bold">{keyword.term} · {keyword.count}</span>
         ))}
       </div>
     </div>
@@ -3218,7 +3268,7 @@ function SummarizePdfTool({ tool }: { tool: Tool }) {
     {result && (
       <div className="surface-card grid gap-4 rounded-3xl p-5">
         <div>
-          <p className="text-xs font-black uppercase text-neutral-500">Extractive summary</p>
+          <p className="text-xs font-bold uppercase text-neutral-500">Extractive summary</p>
           <ol className="mt-2 grid list-decimal gap-2 pl-5 text-sm font-semibold leading-6 text-[var(--foreground)]">
             {result.sentences.map((sentence) => <li key={sentence.index}>{sentence.text}</li>)}
           </ol>
@@ -3253,7 +3303,7 @@ function SummarizePdfTool({ tool }: { tool: Tool }) {
         })} />
         {aiSummary && (
           <div className="surface-card grid gap-2 rounded-3xl p-5">
-            <p className="text-xs font-black uppercase text-neutral-500">Abstractive summary — generated off this device</p>
+            <p className="text-xs font-bold uppercase text-neutral-500">Abstractive summary — generated off this device</p>
             <p className="whitespace-pre-line text-sm font-semibold leading-6 text-[var(--foreground)]">{aiSummary}</p>
           </div>
         )}
@@ -3334,18 +3384,18 @@ function ChatWithPdfTool({ tool }: { tool: Tool }) {
     })} />
     {history.map((entry) => (
       <div key={entry.id} className="surface-card grid gap-3 rounded-3xl p-5">
-        <p className="text-xs font-black uppercase text-neutral-500">Question</p>
-        <p className="text-sm font-black text-[var(--foreground)]">{entry.question}</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">Question</p>
+        <p className="text-sm font-bold text-[var(--foreground)]">{entry.question}</p>
         {entry.hits.map((hit) => (
           <div key={hit.chunk.id} className="surface-muted wabi-card-edge grid gap-1 p-4">
-            <p className="text-xs font-black uppercase text-neutral-500">Page {hit.page} · relevance {hit.score.toFixed(2)}</p>
+            <p className="text-xs font-bold uppercase text-neutral-500">Page {hit.page} · relevance {hit.score.toFixed(2)}</p>
             <HighlightedPassage text={hit.chunk.text} terms={hit.matchedTerms} />
           </div>
         ))}
         {configured && <SecondaryButton label={`Generate an answer from these passages (sends them to ${endpointOrigin(settings.baseUrl)})`} onClick={() => generateAnswer(entry)} />}
         {entry.answer && (
           <div className="surface-muted wabi-card-edge grid gap-1 p-4">
-            <p className="text-xs font-black uppercase text-neutral-500">Generated answer — produced off this device</p>
+            <p className="text-xs font-bold uppercase text-neutral-500">Generated answer — produced off this device</p>
             <p className="whitespace-pre-line text-sm font-semibold leading-6 text-[var(--foreground)]">{entry.answer}</p>
           </div>
         )}
@@ -3405,7 +3455,7 @@ function TranslatePdfTool({ tool }: { tool: Tool }) {
     })} />
     {text && (
       <div className="surface-card grid gap-2 rounded-3xl p-5">
-        <p className="text-xs font-black uppercase text-neutral-500">Extracted text (local, not yet sent anywhere)</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">Extracted text (local, not yet sent anywhere)</p>
         <p className="max-h-40 overflow-auto whitespace-pre-line text-sm font-semibold leading-6 text-[var(--foreground)]">{text.slice(0, 2000)}{text.length > 2000 ? "\n…" : ""}</p>
       </div>
     )}
@@ -3438,7 +3488,7 @@ function TranslatePdfTool({ tool }: { tool: Tool }) {
     {progress && <ProgressBar value={progress.done} total={progress.total} label={`Translating chunk ${Math.min(progress.done + 1, progress.total)} of ${progress.total} into ${language}`} />}
     {translation && (
       <div className="surface-card grid gap-3 rounded-3xl p-5">
-        <p className="text-xs font-black uppercase text-neutral-500">Translation — {language} · generated off this device</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">Translation — {language} · generated off this device</p>
         <p className="whitespace-pre-line text-sm font-semibold leading-6 text-[var(--foreground)]">{translation}</p>
         <div className="flex flex-wrap gap-2">
           <SecondaryButton label="Copy translation" onClick={() => runSafely(setStatus, async () => { await copyText(translation); return "Copied."; })} />
@@ -3708,7 +3758,7 @@ function confidenceTone(confidence: number) {
 }
 
 function ConfidenceTag({ confidence }: { confidence: number }) {
-  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black uppercase ${confidenceTone(confidence)}`}>{confidenceLabel(confidence)}</span>;
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold uppercase ${confidenceTone(confidence)}`}>{confidenceLabel(confidence)}</span>;
 }
 
 function groupHitsByType(hits: PiiHit[]) {
@@ -3834,7 +3884,7 @@ function AutoRedactPiiTool({ tool }: { tool: Tool }) {
                       {group.hits.map((hit) => (
                         <label key={hit.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-neutral-600">
                           <input type="checkbox" checked={selected.has(hit.id)} disabled={!hit.rects.length} onChange={(event) => toggleHit(hit, event.target.checked)} />
-                          <span className="text-xs font-black uppercase text-neutral-500">p{hit.page}</span>
+                          <span className="text-xs font-bold uppercase text-neutral-500">p{hit.page}</span>
                           <span className="break-all font-mono text-[var(--foreground)]">{piiDisplayValue(hit, reveal)}</span>
                           <ConfidenceTag confidence={hit.confidence} />
                           {hit.rects.length ? <span className="text-xs">{hit.rects.length} area{hit.rects.length === 1 ? "" : "s"}</span> : <span className="text-xs text-[var(--danger-fg)]">no rectangle found — redact this one manually</span>}
@@ -3974,7 +4024,7 @@ function PrivacyScannerTool({ tool }: { tool: Tool }) {
                     <div className="grid gap-1">
                       {group.hits.map((hit) => (
                         <div key={hit.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-neutral-600">
-                          <span className="text-xs font-black uppercase text-neutral-500">p{hit.page}</span>
+                          <span className="text-xs font-bold uppercase text-neutral-500">p{hit.page}</span>
                           <span className="break-all font-mono text-[var(--foreground)]">{piiDisplayValue(hit, reveal)}</span>
                           <ConfidenceTag confidence={hit.confidence} />
                           {hit.note ? <span className="text-xs text-neutral-500">{hit.note}</span> : null}
@@ -4087,7 +4137,7 @@ function severityTone(severity: string) {
 }
 
 function SeverityTag({ severity }: { severity: string }) {
-  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black uppercase ${severityTone(severity)}`}>{severity}</span>;
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold uppercase ${severityTone(severity)}`}>{severity}</span>;
 }
 
 function verdictTone(level: string) {
@@ -4142,7 +4192,7 @@ function PdfAnalyzerTool({ tool }: { tool: Tool }) {
       {report && (
         <>
           <div className={`wabi-card-edge grid gap-2 rounded-2xl border p-4 ${verdictTone(report.verdict.level)}`}>
-            <p className="text-xs font-black uppercase tracking-wide">Triage verdict</p>
+            <p className="text-xs font-bold uppercase tracking-wide">Triage verdict</p>
             <p className="text-lg font-black">{report.verdict.headline}</p>
             <p className="text-sm font-semibold leading-6">{report.verdict.summary}</p>
           </div>
@@ -4185,7 +4235,7 @@ function PdfAnalyzerTool({ tool }: { tool: Tool }) {
           <div className="surface-card wabi-card-edge grid gap-3 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="font-black">Findings</p>
-              <p className="text-xs font-black uppercase text-neutral-500">
+              <p className="text-xs font-bold uppercase text-neutral-500">
                 {report.verdict.counts.critical}C · {report.verdict.counts.high}H · {report.verdict.counts.medium}M · {report.verdict.counts.low}L · {report.verdict.counts.info}I
               </p>
             </div>
@@ -4275,7 +4325,7 @@ function SanitizePdfTool({ tool }: { tool: Tool }) {
               </ul>
             )}
             <div className={`wabi-card-edge grid gap-1 rounded-2xl border p-3 text-sm font-semibold ${result.residual.length ? verdictTone("caution") : verdictTone("clean")}`}>
-              <p className="text-xs font-black uppercase tracking-wide">Cross-check with the PDF Analyser</p>
+              <p className="text-xs font-bold uppercase tracking-wide">Cross-check with the PDF Analyser</p>
               <p>Active-content indicators: {result.before} before → {result.residual.length} after.</p>
               {result.residual.length > 0 && (
                 <p>Residual (could not be removed — likely inside an encrypted or unusual stream): {result.residual.map((finding) => finding.indicator).join(", ")}.</p>
@@ -4348,7 +4398,7 @@ function ExtractImagesTool({ tool }: { tool: Tool }) {
           </dl>
           {result.images.length > 0 && (
             <div className="grid gap-1 text-sm font-semibold text-neutral-600">
-              <p className="text-xs font-black uppercase text-neutral-500">Images</p>
+              <p className="text-xs font-bold uppercase text-neutral-500">Images</p>
               <ul className="grid gap-1">
                 {result.images.map((image) => <li key={image.name} className="flex flex-wrap items-center justify-between gap-2"><span className="break-words text-[var(--foreground)]">{image.name}</span><span className="text-xs text-neutral-500">{image.kind} · {formatBytes(image.bytes.length)}</span></li>)}
               </ul>
@@ -4356,7 +4406,7 @@ function ExtractImagesTool({ tool }: { tool: Tool }) {
           )}
           {result.attachments.length > 0 && (
             <div className="grid gap-1 text-sm font-semibold text-neutral-600">
-              <p className="text-xs font-black uppercase text-neutral-500">Attachments</p>
+              <p className="text-xs font-bold uppercase text-neutral-500">Attachments</p>
               <ul className="grid gap-1">
                 {result.attachments.map((attachment) => <li key={attachment.name} className="flex flex-wrap items-center justify-between gap-2"><span className="break-words text-[var(--foreground)]">{attachment.name}</span><span className="text-xs text-neutral-500">{formatBytes(attachment.size)}</span></li>)}
               </ul>
@@ -4364,7 +4414,7 @@ function ExtractImagesTool({ tool }: { tool: Tool }) {
           )}
           {result.skipped.length > 0 && (
             <div className="grid gap-1 text-sm font-semibold text-neutral-600">
-              <p className="text-xs font-black uppercase text-neutral-500">Skipped</p>
+              <p className="text-xs font-bold uppercase text-neutral-500">Skipped</p>
               <ul className="grid gap-1">
                 {result.skipped.map((entry, index) => <li key={index} className="break-words text-neutral-500">{entry.width && entry.height ? `${entry.width}×${entry.height}: ` : ""}{entry.reason}</li>)}
               </ul>
@@ -4589,7 +4639,7 @@ function BookmarksEditorTool({ tool }: { tool: Tool }) {
     })} />
     {existing && existing.length > 0 && (
       <div className="surface-muted wabi-card-edge grid gap-1 p-4 text-sm font-semibold text-neutral-600">
-        <p className="text-xs font-black uppercase text-neutral-500">Current outline</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">Current outline</p>
         {existing.map((entry, index) => <p key={index} className="break-words text-[var(--foreground)]">{entry.level === 1 ? "— " : ""}{entry.title || "(untitled)"} · page {entry.page ?? "?"}</p>)}
       </div>
     )}
@@ -4638,7 +4688,7 @@ function CreateFormTool({ tool }: { tool: Tool }) {
       {fields.map((field) => (
         <div key={field.id} className="surface-card grid gap-3 rounded-2xl p-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-black uppercase text-neutral-500">Field</span>
+            <span className="text-xs font-bold uppercase text-neutral-500">Field</span>
             {fields.length > 1 && <button type="button" className="secondary-button" onClick={() => removeField(field.id)}>Remove</button>}
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -4927,7 +4977,7 @@ function ComparePdfTool({ tool }: { tool: Tool }) {
             <div className="surface-card wabi-card-edge grid gap-3 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="font-black">Text diff</p>
-                <p className="text-xs font-black uppercase text-neutral-500">A: {result.pageCountA}p · B: {result.pageCountB}p</p>
+                <p className="text-xs font-bold uppercase text-neutral-500">A: {result.pageCountA}p · B: {result.pageCountB}p</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <SecondaryButton label="Download .txt report" onClick={() => {
@@ -4942,7 +4992,7 @@ function ComparePdfTool({ tool }: { tool: Tool }) {
                 <div className="grid gap-3">
                   {changedPages.map((entry) => (
                     <div key={entry.page} className="surface-muted wabi-card-edge grid gap-2 p-3">
-                      <p className="text-sm font-black text-[var(--foreground)]">Page {entry.page} — +{entry.added} / -{entry.removed} line(s)</p>
+                      <p className="text-sm font-bold text-[var(--foreground)]">Page {entry.page} — +{entry.added} / -{entry.removed} line(s)</p>
                       <pre className="max-h-64 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--paper-soft)] px-3 py-2 text-xs leading-5 whitespace-pre-wrap break-words">
                         {entry.rows
                           .filter((row) => row.type !== "same")
@@ -5121,13 +5171,13 @@ function PdfaPrepTool({ tool }: { tool: Tool }) {
       <div className="surface-card wabi-card-edge grid gap-3 p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="font-black">Pre-flight check — {compliance.target}</p>
-          <p className="text-sm font-black text-neutral-500">{compliance.passed} of {compliance.total} machine-checkable criteria pass</p>
+          <p className="text-sm font-bold text-neutral-500">{compliance.passed} of {compliance.total} machine-checkable criteria pass</p>
         </div>
         <div className="grid gap-2">
           {compliance.criteria.map((c) => (
             <div key={c.id} className="surface-muted wabi-card-edge grid gap-1 p-3">
               <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black uppercase ${c.pass ? "border-[var(--success)] bg-[var(--success-bg)] text-[var(--success-fg)]" : "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"}`}>{c.pass ? "PASS" : "FAIL"}</span>
+                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold uppercase ${c.pass ? "border-[var(--success)] bg-[var(--success-bg)] text-[var(--success-fg)]" : "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"}`}>{c.pass ? "PASS" : "FAIL"}</span>
                 <span className="font-black text-[var(--foreground)]">{c.label}</span>
               </div>
               <p className="text-sm font-semibold leading-6 text-neutral-600">{c.detail}</p>
@@ -5136,7 +5186,7 @@ function PdfaPrepTool({ tool }: { tool: Tool }) {
         </div>
         {compliance.notChecked?.length ? (
           <div className="grid gap-1 text-sm font-semibold text-neutral-600">
-            <p className="text-xs font-black uppercase text-neutral-500">Not checked here (needs veraPDF / a human)</p>
+            <p className="text-xs font-bold uppercase text-neutral-500">Not checked here (needs veraPDF / a human)</p>
             {compliance.notChecked.map((item, index) => <p key={index}>• {item}</p>)}
           </div>
         ) : null}
@@ -5148,11 +5198,11 @@ function PdfaPrepTool({ tool }: { tool: Tool }) {
       <div className="surface-card wabi-card-edge grid gap-3 p-4">
         <p className="font-black">What was done — {report.conformance}</p>
         <div className="grid gap-1 text-sm font-semibold text-neutral-600">
-          <p className="text-xs font-black uppercase text-neutral-500">Applied</p>
+          <p className="text-xs font-bold uppercase text-neutral-500">Applied</p>
           {report.applied.map((item, index) => <p key={index} className="text-[var(--foreground)]">• {item}</p>)}
         </div>
         <div className="grid gap-1 text-sm font-semibold text-neutral-600">
-          <p className="text-xs font-black uppercase text-neutral-500">Removed</p>
+          <p className="text-xs font-bold uppercase text-neutral-500">Removed</p>
           {report.removed.length ? report.removed.map((item, index) => <p key={index} className="text-[var(--foreground)]">• {item}</p>) : <p>Nothing forbidden was found to remove.</p>}
         </div>
         <p className="text-sm font-semibold text-neutral-500">Not guaranteed: font embedding, colour-space coverage for every object, transparency flattening, and a validation pass. Verify with a PDF/A validator (e.g. veraPDF) if certification matters.</p>
@@ -5188,7 +5238,7 @@ function a11yStatusTone(status: A11yStatus) {
 
 function A11yStatusTag({ status }: { status: A11yStatus }) {
   const label = status === "pass" ? "PASS" : status === "warn" ? "WARN" : status === "fail" ? "FAIL" : "INFO";
-  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black uppercase ${a11yStatusTone(status)}`}>{label}</span>;
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold uppercase ${a11yStatusTone(status)}`}>{label}</span>;
 }
 
 function A11yCheckList({ checks }: { checks: A11yCheck[] }) {
@@ -5246,9 +5296,9 @@ function AccessibilityCheckTool({ tool }: { tool: Tool }) {
       {report && (
         <>
           <div className={`wabi-card-edge grid gap-2 rounded-2xl border p-4 ${verdictTone(report.verdict.level)}`}>
-            <p className="text-xs font-black uppercase tracking-wide">Accessibility verdict</p>
+            <p className="text-xs font-bold uppercase tracking-wide">Accessibility verdict</p>
             <p className="text-lg font-black">{report.verdict.headline}</p>
-            {report.conformance ? <p className="text-sm font-black">{report.conformance.summary}</p> : null}
+            {report.conformance ? <p className="text-sm font-bold">{report.conformance.summary}</p> : null}
             <p className="text-sm font-semibold leading-6">{report.verdict.summary}</p>
             {report.conformance ? <p className="text-xs font-semibold leading-5 opacity-80">{report.conformance.caveat}</p> : null}
           </div>
@@ -5256,7 +5306,7 @@ function AccessibilityCheckTool({ tool }: { tool: Tool }) {
           <div className="surface-card wabi-card-edge grid gap-3 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="font-black">Checks</p>
-              <p className="text-xs font-black uppercase text-neutral-500">{report.summary.pass}P · {report.summary.warn}W · {report.summary.fail}F</p>
+              <p className="text-xs font-bold uppercase text-neutral-500">{report.summary.pass}P · {report.summary.warn}W · {report.summary.fail}F</p>
             </div>
             <A11yCheckList checks={report.checks} />
             <div className="flex flex-wrap gap-2">
@@ -5368,7 +5418,7 @@ function TagPdfTool({ tool }: { tool: Tool }) {
                   <p className="text-sm font-semibold text-neutral-500">Type alt text that describes each image's meaning. Leave it blank and tick “decorative” for images that carry no information (they are marked as artifacts and skipped by screen readers).</p>
                   {figures.map((figure, index) => (
                     <div key={figure.id} className="surface-muted wabi-card-edge grid gap-2 p-3">
-                      <p className="text-xs font-black uppercase text-neutral-500">{figure.id}</p>
+                      <p className="text-xs font-bold uppercase text-neutral-500">{figure.id}</p>
                       <Input label="Alt text" value={figure.alt} onChange={(value) => updateFigure(index, { alt: value, decorative: value.trim() ? false : figure.decorative })} placeholder="Describe the image" />
                       <Checkbox label="Decorative (no alt text needed)" checked={figure.decorative} onChange={(checked) => updateFigure(index, { decorative: checked, alt: checked ? "" : figure.alt })} />
                     </div>
@@ -5386,8 +5436,8 @@ function TagPdfTool({ tool }: { tool: Tool }) {
       <ToolMetaPanel status={status} onReset={reset}>
         {before && (
           <div className="surface-card wabi-card-edge grid gap-2 p-4">
-            <p className="text-xs font-black uppercase text-neutral-500">{after ? "Before → after" : "Before (current)"}</p>
-            <div className="flex flex-wrap items-center gap-3 text-sm font-black">
+            <p className="text-xs font-bold uppercase text-neutral-500">{after ? "Before → after" : "Before (current)"}</p>
+            <div className="flex flex-wrap items-center gap-3 text-sm font-bold">
               <span>Failing checks:</span>
               <span className="tabular-nums">{before.summary.fail}</span>
               {after ? <><span aria-hidden>→</span><span className="tabular-nums text-[var(--success-fg)]">{after.summary.fail}</span></> : null}
@@ -5398,11 +5448,11 @@ function TagPdfTool({ tool }: { tool: Tool }) {
         {remediation && (
           <div className="surface-card wabi-card-edge grid gap-3 p-4">
             <div className="grid gap-1 text-sm font-semibold text-neutral-600">
-              <p className="text-xs font-black uppercase text-neutral-500">What I set</p>
+              <p className="text-xs font-bold uppercase text-neutral-500">What I set</p>
               {remediation.applied.map((item, index) => <p key={index} className="text-[var(--foreground)]">• {item}</p>)}
             </div>
             <div className="grid gap-1 text-sm font-semibold text-neutral-600">
-              <p className="text-xs font-black uppercase text-neutral-500">What still needs human review</p>
+              <p className="text-xs font-bold uppercase text-neutral-500">What still needs human review</p>
               {remediation.review.map((item, index) => <p key={index} className="text-[var(--foreground)]">• {item}</p>)}
             </div>
           </div>
@@ -5427,7 +5477,7 @@ function listPermissions(flags: Record<string, boolean>, wanted: boolean) {
 
 function PasswordField({ label, value, onChange, helper = "" }: { label: string; value: string; onChange: (value: string) => void; helper?: string }) {
   return <label className="grid gap-2">
-    <span className="text-xs font-black uppercase text-neutral-500">{label}</span>
+    <span className="text-xs font-bold uppercase text-neutral-500">{label}</span>
     <input className="field-input" type="password" value={value} onChange={(event) => onChange(event.target.value)} autoComplete="new-password" spellCheck={false} />
     {helper && <span className="text-xs font-semibold text-neutral-500">{helper}</span>}
   </label>;
@@ -5467,10 +5517,10 @@ function EncryptPdfTool({ tool }: { tool: Tool }) {
     <PasswordField label="Owner password (optional)" value={ownerPassword} onChange={setOwnerPassword} helper="A second, different password that can change the permissions below. Leave it blank to reuse the password above." />
     <Select label="Encryption" value={algorithm} onChange={setAlgorithm} options={offeredAlgorithmIds} labels={offeredAlgorithmIds.map((id) => encryptionAlgorithms[id].label)} />
     {algorithm === "rc4-128" && (
-      <p className="text-xs font-black uppercase text-[var(--danger-fg)]">RC4 is broken and offers no real protection. Only pick it for a reader too old to handle AES.</p>
+      <p className="text-xs font-bold uppercase text-[var(--danger-fg)]">RC4 is broken and offers no real protection. Only pick it for a reader too old to handle AES.</p>
     )}
     <fieldset className="grid gap-2">
-      <legend className="text-xs font-black uppercase text-neutral-500">Allow anyone with the password to</legend>
+      <legend className="text-xs font-bold uppercase text-neutral-500">Allow anyone with the password to</legend>
       {permissionKeys.map((key) => (
         <Checkbox
           key={key}
@@ -5636,8 +5686,8 @@ function SignatureCard({ sig, index }: { sig: any; index: number }) {
   return (
     <div className="surface-card grid gap-3 rounded-3xl p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-black uppercase text-neutral-500">Signature {index + 1} · field {sig.fieldName}</span>
-        <span className={`rounded-full border px-3 py-1 text-xs font-black ${verdict.tone}`}>{verdict.label}</span>
+        <span className="text-xs font-bold uppercase text-neutral-500">Signature {index + 1} · field {sig.fieldName}</span>
+        <span className={`rounded-full border px-3 py-1 text-xs font-bold ${verdict.tone}`}>{verdict.label}</span>
       </div>
       <p className="text-sm font-semibold leading-6 text-[var(--foreground)]">{sig.detail}</p>
       <dl className="grid gap-2 text-sm">
@@ -5733,7 +5783,7 @@ function EsignBackendPanel({ settings, onChange }: { settings: EsignSettings; on
   return (
     <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold leading-6 text-neutral-600">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-black uppercase text-neutral-500">Signing backend — {configured ? "on" : "off"}</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">Signing backend — {configured ? "on" : "off"}</p>
         <button className="secondary-button" type="button" onClick={() => setOpen(!open)}>{open ? "Hide settings" : "Settings"}</button>
       </div>
       <p>
@@ -5833,7 +5883,7 @@ function RequestSignatureTool({ tool }: { tool: Tool }) {
     )}
     {result && (
       <div className="surface-card grid gap-2 rounded-3xl p-5">
-        <p className="text-xs font-black uppercase text-neutral-500">Envelope — uploaded to your backend</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">Envelope — uploaded to your backend</p>
         <InfoRow label="Tracking id" value={result.id} />
         <InfoRow label="Status" value={result.status} />
         <InfoRow label="Signers" value={String(result.signers)} />
@@ -5849,7 +5899,7 @@ function RequestSignatureTool({ tool }: { tool: Tool }) {
         })} />
         {statusReport && (
           <div className="surface-muted wabi-card-edge grid gap-2 p-4">
-            <p className="text-xs font-black uppercase text-neutral-500">Status — from your backend</p>
+            <p className="text-xs font-bold uppercase text-neutral-500">Status — from your backend</p>
             <InfoRow label="Envelope" value={statusReport.id} />
             <InfoRow label="Status" value={statusReport.status} />
             {statusReport.signers.map((signer: any, index: number) => (
@@ -6383,7 +6433,7 @@ function HtmlToPdfTool() {
     </div>
     <Textarea label="HTML" value={html} onChange={setHtml} rows={10} />
     <div className="grid gap-2">
-      <span className="text-xs font-black uppercase text-neutral-500">Local preview</span>
+      <span className="text-xs font-bold uppercase text-neutral-500">Local preview</span>
       <iframe
         ref={frameRef}
         title="Sandboxed HTML preview"
@@ -7090,7 +7140,7 @@ function ScanToPdfTool() {
     <Checkbox label="Enhance pages (grayscale + contrast)" checked={enhance} onChange={setEnhance} />
     {thumbs.length > 0 && (
       <div className="surface-card wabi-card-edge grid gap-3 p-4">
-        <p className="text-xs font-black uppercase text-neutral-500">Captured pages · {thumbs.length}</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">Captured pages · {thumbs.length}</p>
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
           {thumbs.map((thumb, index) => (
             <img key={index} src={thumb} alt={`Captured page ${index + 1}`} className="wabi-card-edge w-full rounded-xl border border-[var(--line)]" />
@@ -7212,7 +7262,7 @@ function WordCounterTool() {
         ["Read time", `${stats.readingMinutes} min`],
       ].map(([label, value]) => (
         <div key={label} className="surface-card wabi-card-edge p-4">
-          <p className="text-xs font-black uppercase text-neutral-500">{label}</p>
+          <p className="text-xs font-bold uppercase text-neutral-500">{label}</p>
           <p className="mt-1 font-display text-2xl font-black">{value}</p>
         </div>
       ))}
@@ -7253,7 +7303,7 @@ function ApiPlaygroundTool({ tool }: { tool: Tool }) {
   return (
     <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
       <div className="surface-muted wabi-card-edge grid gap-1 p-4 text-sm font-semibold leading-6 text-neutral-600">
-        <p className="text-xs font-black uppercase text-neutral-500">The privacy differentiator</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">The privacy differentiator</p>
         <p className="text-[var(--foreground)]">MyFileKit ships a <strong>local, client-side</strong> programmatic API. Unlike iLovePDF or Stirling PDF — whose APIs are server-side and require you to upload your file and hold a key — this one runs 100% in your own browser or Node process. There is <strong>no server, no upload, and no key</strong>; your bytes never leave the process. Every method wraps the same service the matching tool uses.</p>
         <p>It is exposed here as <code className="font-mono">window.MyFileKit</code> {onWindow ? "(loaded on this page)" : ""} and as an <code className="font-mono">import</code> from the module. Full reference: <a className="underline" href="https://github.com/indranilroy99/myfilekit/blob/main/docs/API.md" target="_blank" rel="noreferrer">docs/API.md</a>.</p>
       </div>
@@ -7263,7 +7313,7 @@ function ApiPlaygroundTool({ tool }: { tool: Tool }) {
         <div className="grid gap-3 sm:grid-cols-2">
           {groups.map((group) => (
             <div key={group.name} className="grid gap-1">
-              <p className="font-mono text-xs font-black text-[var(--foreground)]">{group.name}</p>
+              <p className="font-mono text-xs font-bold text-[var(--foreground)]">{group.name}</p>
               <p className="font-mono text-xs leading-5 text-neutral-500">{group.methods.join(", ")}</p>
             </div>
           ))}
@@ -7392,7 +7442,7 @@ function PasswordGeneratorTool() {
     </div>
     <div className="password-output-panel" aria-live="polite">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs font-black uppercase tracking-[.08em] text-neutral-500">Generated {modeLabel}</p>
+        <p className="text-xs font-bold uppercase tracking-[.08em] text-neutral-500">Generated {modeLabel}</p>
         <span className={`password-strength strength-${strength.score}`}>{strength.label}{strength.bits ? ` · ~${strength.bits} bits` : ""}</span>
       </div>
       <p className="password-output-value">{output || "Generate a private value when ready."}</p>
@@ -7478,7 +7528,7 @@ function PeerCodeBox({ title, hint, code, onCopy }: { title: string; hint: strin
   return (
     <div className="surface-muted wabi-card-edge grid gap-3 p-4">
       <div>
-        <p className="text-xs font-black uppercase text-neutral-500">{title}</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">{title}</p>
         <p className="mt-1 text-sm font-semibold leading-6 text-neutral-600">{hint}</p>
       </div>
       <textarea
@@ -7831,12 +7881,12 @@ function P2pShareTool({ tool }: { tool: Tool }) {
       {answerCode ? <SecondaryButton label="Cancel transfer" onClick={cancelTransfer} /> : null}
     </>}
 
-    <p className="text-xs font-black uppercase text-neutral-500">{connected ? "Connected to peer" : "Not connected"}</p>
+    <p className="text-xs font-bold uppercase text-neutral-500">{connected ? "Connected to peer" : "Not connected"}</p>
     {progress ? <TransferProgressBar progress={progress} /> : null}
 
     {received.length > 0 ? (
       <div className="surface-card wabi-card-edge grid gap-3 p-4">
-        <p className="text-xs font-black uppercase text-neutral-500">Received files · {received.length}</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">Received files · {received.length}</p>
         {received.map((item, index) => (
           <div key={`${item.filename}-${index}`} className="grid gap-2 border-b border-[var(--border)] pb-3 last:border-b-0 last:pb-0">
             <p className="break-all text-sm font-bold text-[var(--foreground)]">{item.filename}</p>
@@ -8239,7 +8289,7 @@ function WhiteboardTool() {
           ? <PeerCodeBox title="Step 2 · your answer code" hint="Send this whole code back to the host. Drawing syncs as soon as they paste it." code={answerCode} onCopy={() => runSafely(setStatus, async () => { await copyText(answerCode); return "Answer code copied."; })} />
           : <PrimaryButton label="Create answer code" onClick={createAnswer} />}
       </>}
-      <p className="text-xs font-black uppercase text-neutral-500">{connected ? "Paired with peer" : "Not paired"}</p>
+      <p className="text-xs font-bold uppercase text-neutral-500">{connected ? "Paired with peer" : "Not paired"}</p>
     </> : null}
   </ToolForm>;
 }
@@ -8254,7 +8304,7 @@ const emptyGstLine: GstLineItem = { description: "", hsn: "", qty: "1", unit: "N
 
 function MiniField({ label, value, onChange, type = "text", placeholder = "" }: { label: string; value: string; onChange: (value: string) => void; type?: string; placeholder?: string }) {
   return <label className="grid gap-1">
-    <span className="text-[10px] font-black uppercase tracking-wide text-neutral-500">{label}</span>
+    <span className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">{label}</span>
     <input className="field-input" type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
   </label>;
 }
@@ -8333,11 +8383,11 @@ function GstInvoiceTool() {
     </div>
 
     <div className="grid gap-3">
-      <p className="text-xs font-black uppercase text-neutral-500">Line items</p>
+      <p className="text-xs font-bold uppercase text-neutral-500">Line items</p>
       {items.map((item, index) => (
         <div key={index} className="surface-card wabi-card-edge grid gap-2 p-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-black uppercase text-neutral-500">Item {index + 1}</span>
+            <span className="text-xs font-bold uppercase text-neutral-500">Item {index + 1}</span>
             {items.length > 1 && <button className="secondary-button" type="button" onClick={() => setItems((previous) => previous.filter((_, position) => position !== index))}>Remove</button>}
           </div>
           <MiniField label="Description" value={item.description} onChange={(value) => updateItem(index, "description", value)} placeholder="Consulting services" />
@@ -8358,11 +8408,11 @@ function GstInvoiceTool() {
       <div className="surface-card wabi-card-edge grid gap-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="font-black">{invoice.supplyType}</p>
-          <span className="tag-badge rounded-full px-3 py-1 text-xs font-black uppercase">{invoice.lines.length} line{invoice.lines.length === 1 ? "" : "s"}</span>
+          <span className="tag-badge rounded-full px-3 py-1 text-xs font-bold uppercase">{invoice.lines.length} line{invoice.lines.length === 1 ? "" : "s"}</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-sm font-semibold">
-            <thead className="text-xs font-black uppercase text-neutral-500">
+            <thead className="text-xs font-bold uppercase text-neutral-500">
               <tr><th className="py-1">Description</th><th className="py-1 text-right">Taxable</th>{invoice.interState ? <th className="py-1 text-right">IGST</th> : <><th className="py-1 text-right">CGST</th><th className="py-1 text-right">SGST</th></>}<th className="py-1 text-right">Total</th></tr>
             </thead>
             <tbody>
@@ -8492,7 +8542,7 @@ function PosBillingTool() {
     </div>
 
     <div className="surface-card wabi-card-edge grid gap-3 p-4">
-      <p className="text-xs font-black uppercase text-neutral-500">Item catalogue ({catalogue.length})</p>
+      <p className="text-xs font-bold uppercase text-neutral-500">Item catalogue ({catalogue.length})</p>
       <div className="grid gap-2 sm:grid-cols-4">
         <MiniField label="Name" value={newName} onChange={setNewName} placeholder="Filter coffee" />
         <MiniField label="Price" value={newPrice} onChange={setNewPrice} type="number" />
@@ -8518,7 +8568,7 @@ function PosBillingTool() {
           {visible.map((item) => (
             <div key={item.id} className="surface-muted wabi-card-edge flex items-center gap-2 px-3 py-2 text-sm font-bold">
               <button className="text-left hover:underline" type="button" onClick={() => addToCart(item)}>{item.name} · {formatAmount(Number(item.price))}{Number(item.taxPercent) ? ` · ${item.taxPercent}%` : ""}</button>
-              <button className="text-xs font-black uppercase text-neutral-500 hover:underline" type="button" aria-label={`Remove ${item.name} from the catalogue`} onClick={() => updateCatalogue(catalogue.filter((entry) => entry.id !== item.id))}>Del</button>
+              <button className="text-xs font-bold uppercase text-neutral-500 hover:underline" type="button" aria-label={`Remove ${item.name} from the catalogue`} onClick={() => updateCatalogue(catalogue.filter((entry) => entry.id !== item.id))}>Del</button>
             </div>
           ))}
         </div>
@@ -8526,7 +8576,7 @@ function PosBillingTool() {
     </div>
 
     <div className="surface-card wabi-card-edge grid gap-3 p-4">
-      <p className="text-xs font-black uppercase text-neutral-500">Current bill</p>
+      <p className="text-xs font-bold uppercase text-neutral-500">Current bill</p>
       {cart.length ? cart.map((line, index) => (
         <div key={`${line.name}-${index}`} className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-2 text-sm font-bold last:border-b-0">
           <span>{line.name} · {formatAmount(Number(line.price))}</span>
@@ -8578,7 +8628,7 @@ function PosBillingTool() {
     </div>
 
     <div className="surface-card wabi-card-edge grid gap-2 p-4">
-      <p className="text-xs font-black uppercase text-neutral-500">This session ({session.bills} bill{session.bills === 1 ? "" : "s"})</p>
+      <p className="text-xs font-bold uppercase text-neutral-500">This session ({session.bills} bill{session.bills === 1 ? "" : "s"})</p>
       <AmountRow label="Session total (INR)" value={formatAmount(session.total)} strong />
       <p className="text-sm font-semibold text-neutral-500">Cash {formatAmount(session.byMode.cash)} · Card {formatAmount(session.byMode.card)} · UPI {formatAmount(session.byMode.upi)} · Tax {formatAmount(session.tax)} · {session.items} item{session.items === 1 ? "" : "s"}</p>
       {bills.map((entry) => (
@@ -8619,7 +8669,7 @@ function GstFilingPrepTool({ tool }: { tool: Tool }) {
       <div className="surface-card wabi-card-edge grid gap-4 p-4">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-left text-sm font-semibold">
-            <thead className="text-xs font-black uppercase text-neutral-500">
+            <thead className="text-xs font-bold uppercase text-neutral-500">
               <tr><th className="py-1">Section</th><th className="py-1 text-right">Invoices</th><th className="py-1 text-right">Taxable</th><th className="py-1 text-right">CGST</th><th className="py-1 text-right">SGST</th><th className="py-1 text-right">IGST</th><th className="py-1 text-right">Total tax</th></tr>
             </thead>
             <tbody>
@@ -8639,14 +8689,14 @@ function GstFilingPrepTool({ tool }: { tool: Tool }) {
         </div>
 
         <div className="grid gap-1">
-          <p className="text-xs font-black uppercase text-neutral-500">Rate-wise</p>
+          <p className="text-xs font-bold uppercase text-neutral-500">Rate-wise</p>
           {summary.rateWise.map((slab: any) => (
             <AmountRow key={String(slab.rate)} label={`${slab.rate === null ? "unknown" : slab.rate}% · taxable ${formatAmount(slab.taxable)}`} value={formatAmount(slab.tax)} />
           ))}
         </div>
 
         <div className="grid gap-2">
-          <p className="text-xs font-black uppercase text-neutral-500">Needs review ({summary.needsReview.length})</p>
+          <p className="text-xs font-bold uppercase text-neutral-500">Needs review ({summary.needsReview.length})</p>
           {summary.needsReview.length ? summary.needsReview.map((item: any) => (
             <div key={`${item.row}-${item.invoiceNo}`} className="surface-muted wabi-card-edge p-3 text-sm font-semibold">
               <p className="font-black">Row {item.row} · {item.invoiceNo}</p>
@@ -8709,7 +8759,7 @@ function WorkflowBuilderTool({ tool }: { tool: Tool }) {
     <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setOutput(null); setProgress([]); }} />
 
     <div className="grid gap-2">
-      <p className="text-xs font-black uppercase text-neutral-500">Presets — one click fills a chain you can still edit</p>
+      <p className="text-xs font-bold uppercase text-neutral-500">Presets — one click fills a chain you can still edit</p>
       <div className="flex flex-wrap gap-2">
         {workflowPresets.map((preset) => (
           <button
@@ -8875,7 +8925,7 @@ function BatchProcessTool({ tool }: { tool: Tool }) {
       <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold">
         {result.outputs.length > 0 && (
           <div className="grid gap-1">
-            <p className="text-xs font-black uppercase text-neutral-500">Succeeded ({result.outputs.length})</p>
+            <p className="text-xs font-bold uppercase text-neutral-500">Succeeded ({result.outputs.length})</p>
             <ul className="grid gap-1">
               {result.outputs.map((item) => <li key={item.name} className="break-words text-[var(--foreground)]">{item.name}</li>)}
             </ul>
@@ -8883,7 +8933,7 @@ function BatchProcessTool({ tool }: { tool: Tool }) {
         )}
         {result.failures.length > 0 && (
           <div className="grid gap-1">
-            <p className="text-xs font-black uppercase text-[var(--danger-fg)]">Failed / skipped ({result.failures.length})</p>
+            <p className="text-xs font-bold uppercase text-[var(--danger-fg)]">Failed / skipped ({result.failures.length})</p>
             <ul className="grid gap-1">
               {result.failures.map((item) => <li key={`${item.name}-${item.reason}`} className="break-words text-neutral-600">{item.name} — {item.reason}</li>)}
             </ul>
@@ -8918,7 +8968,7 @@ function WorkflowStepsEditor({ steps, setSteps }: { steps: WorkflowStep[]; setSt
   return (
     <>
       <div className="grid gap-2">
-        <p className="text-xs font-black uppercase text-neutral-500">Presets — one click fills a chain you can still edit</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">Presets — one click fills a chain you can still edit</p>
         <div className="flex flex-wrap gap-2">
           {workflowPresets.map((preset) => (
             <button key={preset.id} type="button" className="quick-chip" title={preset.hint} onClick={() => setSteps(presetSteps(preset.id) as WorkflowStep[])}>
@@ -9015,7 +9065,7 @@ function BatchWorkflowTool({ tool }: { tool: Tool }) {
       <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold">
         {result.outputs.length > 0 && (
           <div className="grid gap-1">
-            <p className="text-xs font-black uppercase text-neutral-500">Succeeded ({result.outputs.length})</p>
+            <p className="text-xs font-bold uppercase text-neutral-500">Succeeded ({result.outputs.length})</p>
             <ul className="grid gap-1">
               {result.outputs.map((item) => <li key={item.name} className="break-words text-[var(--foreground)]">{item.name}</li>)}
             </ul>
@@ -9023,7 +9073,7 @@ function BatchWorkflowTool({ tool }: { tool: Tool }) {
         )}
         {result.failures.length > 0 && (
           <div className="grid gap-1">
-            <p className="text-xs font-black uppercase text-[var(--danger-fg)]">Failed / skipped ({result.failures.length})</p>
+            <p className="text-xs font-bold uppercase text-[var(--danger-fg)]">Failed / skipped ({result.failures.length})</p>
             <ul className="grid gap-1">
               {result.failures.map((item) => <li key={`${item.name}-${item.reason}`} className="break-words text-neutral-600">{item.name} — {item.reason}</li>)}
             </ul>
@@ -9051,7 +9101,7 @@ function InvoiceLauncher() {
   return (
     <div className="surface-card wabi-card-edge grid gap-5 p-5">
       <div>
-        <p className="text-xs font-black uppercase text-neutral-500">Business document editor</p>
+        <p className="text-xs font-bold uppercase text-neutral-500">Business document editor</p>
         <h3 className="mt-1 font-display text-2xl font-black">One invoice editor, fully customizable</h3>
         <p className="mt-2 max-w-2xl font-semibold leading-7 text-neutral-700">
           Receipts, quotes, and estimates are handled as invoice-style business documents inside the full editor, instead of split into weaker duplicate tools.

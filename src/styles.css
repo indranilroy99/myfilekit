@@ -838,11 +838,11 @@ button {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 42px;
+  min-height: 44px;
   border-radius: 999px;
   padding: 10px 16px;
   font-size: 14px;
-  font-weight: 900;
+  font-weight: 700;
   text-decoration: none;
 }
 
@@ -1100,6 +1100,51 @@ button {
 }
 
 .result-card-check { display: grid; place-items: center; color: var(--primary); }
+
+/* Desktop "Tools" dropdown menu. */
+.tools-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  min-width: 220px;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: 0 18px 44px rgba(15, 23, 42, .12);
+  backdrop-filter: blur(18px);
+}
+
+.tools-menu-item {
+  display: block;
+  min-height: 44px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.tools-menu-item:hover,
+.tools-menu-item:focus-visible {
+  background: var(--paper-soft);
+}
+
+.tools-menu-item-active {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+html.dark .tools-menu {
+  /* Slate family like the other dark surfaces; near-opaque because it floats over text. */
+  background: rgba(15, 23, 42, .92);
+  border-color: rgba(148, 163, 184, .18);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .5);
+}
 
 /* Trust line — our differentiator, stated plainly on every tool. */
 .trust-line {
@@ -2150,6 +2195,14 @@ html.dark .hero-empty-result {
   background: #111113 !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
+}
+
+/* One elevation step (dark): a card/muted surface nested INSIDE a panel sits a
+   hair lighter than the panel, so depth reads without shadows or glow. */
+html.dark .surface-panel .surface-card,
+html.dark .surface-panel .surface-muted {
+  background: #17171a !important;
+  border-color: #26262b !important;
 }
 
 .category-overview-grid,
