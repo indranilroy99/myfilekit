@@ -14,7 +14,7 @@ done in one working stretch.
 
 | Gate | Result |
 |---|---|
-| Tests | 308 pass / 0 fail |
+| Tests | 310 pass / 0 fail |
 | TypeScript + build | clean |
 | `npm run security:audit` | pass (SRI + sha256 pins verified) |
 | `npm audit` | 0 vulnerabilities |
@@ -60,9 +60,25 @@ DO-NOT-SHIP blockers and a dozen majors. The ones worth knowing about:
 - **The file matcher rejected files we have tools for**, and a file named `pdf`
   with no extension matched all 59 PDF tools.
 
-### 5. Honesty fixes
-- The status bar claimed "Offline · nothing uploaded" on every route, including
-  the two tools whose own copy says they are server-backed. It now says so.
+### 5. A file could reach the P2P sender — found, fixed, retested
+
+The most serious bug of the session, and I introduced it. The Workspace hand-off
+adopted staged files into the *first* file control that mounted, whatever tool
+that was. Choosing a file, browsing the filtered list, clearing the filter, then
+opening **P2P File Share** pre-loaded that file into a WebRTC sender — no user
+intent, no sign anything was staged, and a status bar reading "Offline · nothing
+uploaded". One click from transmitting it.
+
+Now nothing is staged when a file is dropped. Files stage only when you click a
+specific offered tool, only that tool can take them, and any other navigation
+drops the stash. Verified live: the exact repro now yields no file, while the
+intended path still works. Guarded by tests.
+
+### 6. Honesty fixes
+- The status bar claimed "Offline · nothing uploaded" on every route. Six tools
+  can reach a network — the e-signature backend, three bring-your-own-endpoint AI
+  tools, and two WebRTC tools whose optional STUN/TURN reveals your IP. Each now
+  carries an accurate label, and a test fails if one is missing from the list.
 - A test banned *all* dynamic imports as a proxy for "no remote code", which
   blocked a legitimate bundled split. Rather than weaken it, it now requires
   dynamic imports to be relative literals — a remote URL or computed specifier
@@ -87,10 +103,12 @@ Two reviewer recommendations were rejected on purpose:
 
 ## Still open
 
-- **A re-review was running when the session ended.** It was re-verifying the
-  nine release findings and hunting for regressions in the hand-off, the ext
-  filter, and the lazy chunks. Its result is not in this document. Treat the
-  branch as "fixed and self-verified, awaiting independent confirmation".
+- **Two review rounds completed; a third was running when the session ended.**
+  Round one returned DO-NOT-SHIP (file matcher, discarded file, mobile header) —
+  all fixed. Round two returned DO-NOT-SHIP for the P2P hand-off leak above —
+  fixed and retested. Round three was verifying that fix adversarially. Its
+  result is not in this document, so treat the branch as "fixed and
+  self-verified, awaiting final independent confirmation".
 - **~900 lines of dead marketing components** remain in `App.tsx` (`Shell`,
   `Dashboard`, `BrowseToolsPage`, etc.). They are tree-shaken, so there is no
   runtime cost. I attempted a mechanical deletion, it broke on JSX braces, and I
