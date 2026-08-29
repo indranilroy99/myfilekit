@@ -83,9 +83,20 @@ Headers additionally: `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `X-Cont
 
 ---
 
+## Phase 4 — Premium feel (P1) — commit `80e9a42`
+
+Files: `src/App.tsx`, `src/styles.css`.
+
+- **Navigation:** the 8 flat category links (sitemap look) collapsed into Dashboard + an accessible **`Tools ▾` dropdown** (aria-haspopup/expanded, Escape/outside-click/route-change close, 44px items, active category highlighted).
+- **Typography discipline:** buttons 900→700 weight and 42→44px min-height; every small-size 900 label/badge → bold. `font-black` instances 181 → 66, reserved for headings/display only.
+- **Dark elevation step:** nested card/muted surfaces sit at `#17171a` on the `#111113` panel (scoped to dark; light verified unchanged) — depth without shadows/glow.
+- Verified live: menu behavior, computed weights/sizes, elevation values, light-theme intact.
+- Skipped within P1 (documented): mobile sticky CTA (layout-risk > evidence of need).
+
+---
+
 ## Deliberately not done
 
-- **Phase 4 (P1 "premium feel")** — one type scale, an elevation step, and a `Tools ▾` nav mega-menu — was scoped but **not run**: it touches global typography + navigation and is enhancement, not the deployable bar (Phases 1–3 hit that). Left for explicit go-ahead.
 - **L-3** iframe sandbox (see above).
 - **Non-client features** (cloud import, native apps) remain out of scope by prior decision.
 - One pre-existing, non-CSP console error remains: `register-sw.js` service-worker fetch fails under `vite preview` (cosmetic; no offline cache; unrelated to this overhaul).
