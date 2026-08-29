@@ -204,16 +204,279 @@ export default function App() {
   }, [hash]);
 
   return (
-    <div className="min-h-screen bg-[var(--app-bg)] text-[var(--ink)]">
+    <div className="app">
       <span aria-live="polite" className="sr-only">{routeTitle}</span>
-      <Shell hash={hash} theme={theme} onToggleTheme={() => setTheme((current) => current === "dark" ? "light" : "dark")}>
-        {route.type === "dashboard" && <Dashboard />}
-        {route.type === "browse" && <BrowseToolsPage />}
-        {route.type === "category" && <CategoryPage category={route.category} />}
-        {route.type === "tool" && <ToolPage tool={route.tool} />}
-        {route.type === "missing" && <MissingPage />}
-      </Shell>
+      <MenuBar hash={hash} theme={theme} onToggleTheme={() => setTheme((current) => current === "dark" ? "light" : "dark")} />
+      <div className="workbench">
+        <SideBar hash={hash} />
+        <div className="worksurface" id="app-main" tabIndex={-1}>
+          {route.type === "dashboard" && <ToolIndex />}
+          {route.type === "browse" && <ToolIndex />}
+          {route.type === "category" && <ToolIndex category={route.category} />}
+          {route.type === "tool" && <ToolPage tool={route.tool} />}
+          {route.type === "missing" && <MissingPage />}
+        </div>
+      </div>
+      <StatusBar route={route} />
     </div>
+  );
+}
+
+/** Application menu bar: brand, tool mega-menu, global search, theme. */
+function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMode; onToggleTheme: () => void }) {
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const barRef = useRef<HTMLElement | null>(null);
+  const activeCategory = useMemo(() => {
+    const route = routeForHash(hash);
+    return route.type === "category" ? route.category : route.type === "tool" ? route.tool.category : "";
+  }, [hash]);
+
+  useEffect(() => { setOpenMenu(null); }, [hash]);
+
+  useEffect(() => {
+    if (!openMenu) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpenMenu(null); };
+    const onDown = (event: MouseEvent) => {
+      if (barRef.current && !barRef.current.contains(event.target as Node)) setOpenMenu(null);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("mousedown", onDown); };
+  }, [openMenu]);
+
+  // Menus mirror how the work is actually organised, not the registry's shape.
+  const menus: { id: string; label: string; categories: string[] }[] = [
+    { id: "pdf", label: "PDF", categories: ["PDF Tools"] },
+    { id: "convert", label: "Convert & Data", categories: ["Text & Data Tools"] },
+    { id: "image", label: "Image", categories: ["Image Tools"] },
+    { id: "secure", label: "Security", categories: ["Security & Privacy"] },
+    { id: "more", label: "More", categories: ["Business Tools", "Signature Tools", "Developer Utilities", "Sharing & Collaboration"] },
+  ];
+
+  return (
+    <header className="menubar" ref={barRef as any}>
+      <a className="menubar-brand" href="#dashboard">MyFileKit <span>local</span></a>
+      {menus.map((menu) => {
+        const isOpen = openMenu === menu.id;
+        const owns = menu.categories.includes(activeCategory);
+        return (
+          <div key={menu.id} className="contents">
+            <button
+              type="button"
+              className={`menubar-item ${owns ? "menubar-item-active" : ""}`}
+              aria-haspopup="menu"
+              aria-expanded={isOpen}
+              onClick={() => setOpenMenu(isOpen ? null : menu.id)}
+              onMouseEnter={() => { if (openMenu && openMenu !== menu.id) setOpenMenu(menu.id); }}
+            >
+              {menu.label}<ChevronDown size={12} aria-hidden="true" />
+            </button>
+            {isOpen ? <ToolMegaMenu categories={menu.categories} label={menu.label} /> : null}
+          </div>
+        );
+      })}
+      <span className="menubar-spacer" />
+      <GlobalSearch />
+      <button type="button" className="menubar-icon" onClick={onToggleTheme} aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} title="Toggle theme">
+        {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+      </button>
+    </header>
+  );
+}
+
+/** Sejda-style multi-column tool menu: every tool listed as text, grouped. */
+function ToolMegaMenu({ categories, label }: { categories: string[]; label: string }) {
+  const columns = useMemo(() => {
+    const out: { title: string; items: Tool[] }[] = [];
+    for (const category of categories) {
+      const inCategory = tools.filter((tool: Tool) => tool.category === category);
+      const groups = (categoryGroups as Record<string, string[]>)[category];
+      if (groups) {
+        for (const group of groups) {
+          const items = inCategory.filter((tool: Tool) => tool.group === group);
+          if (items.length) out.push({ title: group, items });
+        }
+        const ungrouped = inCategory.filter((tool: Tool) => !tool.group || !groups.includes(tool.group));
+        if (ungrouped.length) out.push({ title: "Other", items: ungrouped });
+      } else if (inCategory.length) {
+        out.push({ title: category.replace(" Tools", ""), items: inCategory });
+      }
+    }
+    return out;
+  }, [categories]);
+
+  return (
+    <div className="menu-pop" role="menu" aria-label={`${label} tools`}>
+      {columns.map((column) => (
+        <div className="menu-col" key={column.title}>
+          <p className="menu-col-title">{column.title}</p>
+          {column.items.map((tool: Tool) => {
+            const Icon = iconForTool(tool);
+            return (
+              <a key={tool.id} role="menuitem" className={`menu-link ${tool.isNew ? "menu-link-new" : ""}`} href={tool.route}>
+                <Icon size={13} aria-hidden="true" />{tool.name}
+              </a>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function GlobalSearch() {
+  const [query, setQuery] = useState("");
+  const matches = useMemo(() => (query.trim() ? filterTools(query).slice(0, 8) : []), [query]);
+  return (
+    <div className="relative">
+      <div className="sidebar-search" style={{ padding: 0, border: 0 }}>
+        <input
+          aria-label="Search all tools"
+          placeholder="Search tools…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter" && matches[0]) { window.location.hash = matches[0].route; setQuery(""); } }}
+          style={{ width: 210 }}
+        />
+      </div>
+      {matches.length ? (
+        <div className="menu-pop" role="listbox" aria-label="Search results" style={{ left: "auto", right: 0, width: 320, gridTemplateColumns: "1fr" }}>
+          {matches.map((tool: Tool) => {
+            const Icon = iconForTool(tool);
+            return (
+              <a key={tool.id} className="menu-link" href={tool.route} onClick={() => setQuery("")}>
+                <Icon size={13} aria-hidden="true" />{tool.name}
+              </a>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Fixed left rail: categories, then the tools of the active category. */
+function SideBar({ hash }: { hash: string }) {
+  const [filter, setFilter] = useState("");
+  const route = routeForHash(hash);
+  const activeCategory = route.type === "category" ? route.category : route.type === "tool" ? route.tool.category : "";
+  const activeToolId = route.type === "tool" ? route.tool.id : "";
+  const listed = useMemo(() => {
+    const term = filter.trim().toLowerCase();
+    if (term) return filterTools(filter).slice(0, 60);
+    return activeCategory ? tools.filter((tool: Tool) => tool.category === activeCategory) : [];
+  }, [filter, activeCategory]);
+
+  return (
+    <nav className="sidebar" aria-label="Tool navigation">
+      <div className="sidebar-search">
+        <input aria-label="Filter tools" placeholder="Filter…" value={filter} onChange={(event) => setFilter(event.target.value)} />
+      </div>
+      <div className="sidebar-scroll">
+        <p className="sidebar-group">Library</p>
+        <a className={`sidebar-link ${route.type === "dashboard" ? "sidebar-link-active" : ""}`} href="#dashboard"><LayoutDashboard size={14} aria-hidden="true" />All tools</a>
+        <p className="sidebar-group">Categories</p>
+        {categories.map((category: string) => {
+          const Icon = categoryIcons[category] || Sparkles;
+          return (
+            <a
+              key={category}
+              className={`sidebar-link ${category === activeCategory && !filter ? "sidebar-link-active" : ""}`}
+              href={categoryRoute(category)}
+              aria-current={category === activeCategory ? "page" : undefined}
+            >
+              <Icon size={14} aria-hidden="true" />{category.replace(" Tools", "")}
+            </a>
+          );
+        })}
+        {listed.length ? (
+          <>
+            <p className="sidebar-group">{filter.trim() ? "Matches" : activeCategory.replace(" Tools", "")}</p>
+            {listed.map((tool: Tool) => (
+              <a
+                key={tool.id}
+                className={`sidebar-link ${tool.id === activeToolId ? "sidebar-link-active" : ""}`}
+                href={tool.route}
+                aria-current={tool.id === activeToolId ? "page" : undefined}
+              >
+                {tool.name}
+              </a>
+            ))}
+          </>
+        ) : null}
+      </div>
+    </nav>
+  );
+}
+
+function StatusBar({ route }: { route: ReturnType<typeof routeForHash> }) {
+  const label = route.type === "tool" ? route.tool.name
+    : route.type === "category" ? route.category
+    : route.type === "dashboard" || route.type === "browse" ? "All tools"
+    : "Not found";
+  return (
+    <footer className="statusbar">
+      <span className="statusbar-dot" aria-hidden="true" />
+      <span>Offline · nothing uploaded</span>
+      <span className="doc-bar-sep" aria-hidden="true" />
+      <span>{label}</span>
+      <span className="statusbar-right">
+        <span>{tools.length} tools</span>
+      </span>
+    </footer>
+  );
+}
+
+/** Dense, scannable tool index — a text list, not a bento grid. */
+function ToolIndex({ category }: { category?: string } = {}) {
+  const scoped = category ? tools.filter((tool: Tool) => tool.category === category) : tools;
+  const sections = useMemo(() => {
+    if (category) {
+      const groups = (categoryGroups as Record<string, string[]>)[category];
+      if (!groups) return [{ title: category, items: scoped }];
+      const out = groups
+        .map((group) => ({ title: group, items: scoped.filter((tool: Tool) => tool.group === group) }))
+        .filter((section) => section.items.length);
+      const rest = scoped.filter((tool: Tool) => !tool.group || !groups.includes(tool.group));
+      if (rest.length) out.push({ title: "Other", items: rest });
+      return out;
+    }
+    return categories
+      .map((name: string) => ({ title: name, items: tools.filter((tool: Tool) => tool.category === name) }))
+      .filter((section) => section.items.length);
+  }, [category, scoped]);
+
+  return (
+    <>
+      <div className="doc-bar">
+        <h1>{category || "All tools"}</h1>
+        <span className="doc-bar-sep" aria-hidden="true" />
+        <span className="doc-bar-meta">{scoped.length} tools · every file stays on this device</span>
+      </div>
+      <div className="tool-index">
+        {sections.map((section) => (
+          <section className="index-section" key={section.title}>
+            <div className="index-head">
+              <h2>{section.title}</h2>
+              <span>{section.items.length}</span>
+            </div>
+            <div className="index-grid">
+              {section.items.map((tool: Tool) => {
+                const Icon = iconForTool(tool);
+                return (
+                  <a className="index-row" key={tool.id} href={tool.route}>
+                    <Icon size={14} aria-hidden="true" />
+                    <span className="index-row-name">{tool.name}</span>
+                    {tool.isNew ? <span className="index-new">NEW</span> : null}
+                    <span className="index-row-desc">{tool.description}</span>
+                  </a>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -904,33 +1167,36 @@ function ToolPage({ tool }: { tool: Tool }) {
   }, [tool.id]);
 
   return (
-    <div className="grid gap-6">
-      <PageHeader
-        eyebrow={tool.category}
-        title={tool.name}
-        subtitle={tool.description}
-        icon={Icon}
-        badges={[fileTypeLabel(tool), multiFileLabel(tool), tool.category].filter(Boolean)}
-      />
-      <section className="grid gap-6">
-        <div className="surface-panel wabi-edge tool-page-panel p-5 md:p-7">
-          <div className="tool-action-panel">
-            <ToolRenderer tool={tool} />
-          </div>
+    <>
+      <div className="doc-bar">
+        <Icon size={15} aria-hidden="true" />
+        <h1>{tool.name}</h1>
+        <span className="doc-bar-sep" aria-hidden="true" />
+        <span className="doc-bar-meta">{tool.category.replace(" Tools", "")}{fileTypeLabel(tool) ? ` · ${fileTypeLabel(tool)}` : ""}{multiFileLabel(tool) ? ` · ${multiFileLabel(tool)}` : ""}</span>
+        <span className="doc-bar-actions">
+          <a className="secondary-button" href={categoryRoute(tool.category)}>Category</a>
+        </span>
+      </div>
+      <div className="tool-shell">
+        <div className="tool-canvas">
+          <p className="doc-bar-meta" style={{ marginBottom: 12 }}>{tool.description}</p>
+          <ToolRenderer tool={tool} />
         </div>
-        {related.length > 0 && (
-          <section className="related-tools-section">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <SectionHeader title={`More ${tool.category.replace(" Tools", "")} Tools`} subtitle="Keep working in the same category." />
-              <a className="secondary-button w-fit" href={categoryRoute(tool.category)}>View category</a>
-            </div>
-            <div className="dashboard-tool-row">
-              {related.slice(0, 6).map((item: Tool) => <ToolCard key={item.id} tool={item} compact />)}
-            </div>
-          </section>
-        )}
-      </section>
-    </div>
+        <aside className="tool-inspector" aria-label="Related tools">
+          <p className="inspector-title">More in {tool.category.replace(" Tools", "")}</p>
+          {related.slice(0, 14).map((item: Tool) => {
+            const RelatedIcon = iconForTool(item);
+            return (
+              <a className="index-row" key={item.id} href={item.route}>
+                <RelatedIcon size={13} aria-hidden="true" />
+                <span className="index-row-name">{item.name}</span>
+                {item.isNew ? <span className="index-new">NEW</span> : null}
+              </a>
+            );
+          })}
+        </aside>
+      </div>
+    </>
   );
 }
 
