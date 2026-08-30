@@ -1559,3 +1559,32 @@ html.dark .result-card-note { color: var(--c-text-dim) !important; }
 .editor-panel-page canvas {
   margin-inline: auto;
 }
+
+/* Nothing in a side panel may force horizontal scroll.
+   A panel is a fixed-width column of prose and controls; the moment something
+   inside is wider than it, every line of text is clipped at the right edge and
+   the user has to scroll sideways to read a sentence. Two causes, both closed
+   here: a grid/flex child defaulting to min-width:auto (so it refuses to shrink
+   below its content), and an unbreakable token — a long hyphenated filename, a
+   URL, a hash — that cannot wrap. */
+.editor-panel,
+.tool-canvas,
+.tool-inspector,
+.editor-rail {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.editor-panel *,
+.tool-canvas *,
+.tool-inspector * {
+  min-width: 0;
+}
+
+/* Prose and labels wrap mid-token rather than overhang. Deliberately not applied
+   to <pre>, which is meant to scroll on its own. */
+.editor-panel p, .editor-panel li, .editor-panel label, .editor-panel dd, .editor-panel summary,
+.tool-canvas p, .tool-canvas li, .tool-canvas label, .tool-canvas dd, .tool-canvas summary,
+.tool-inspector p, .tool-inspector li {
+  overflow-wrap: anywhere;
+}

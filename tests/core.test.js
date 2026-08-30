@@ -8536,3 +8536,19 @@ test("a large pair of documents differing in one place stays cheap and exact", (
   // what keeps this exact rather than degrading to a block replacement.
   assert.deepEqual(counts, { added: 1, removed: 0, same: 4000 });
 });
+
+test("side panels can never scroll sideways", () => {
+  const css = fs.readFileSync(new URL("../src/app-shell.css", import.meta.url), "utf8");
+  // A panel wider than its column clips every line of text at the right edge and
+  // forces the user to scroll sideways to read a sentence.
+  const block = css.slice(css.indexOf("Nothing in a side panel may force horizontal scroll"));
+  for (const scope of [".editor-panel", ".tool-canvas", ".tool-inspector"]) {
+    assert.ok(block.includes(scope), `${scope} must be covered by the no-sideways-scroll rule`);
+  }
+  assert.match(block, /min-width: 0/);
+  assert.match(block, /overflow-x: hidden/);
+  // Unbreakable tokens (long hyphenated filenames, URLs, hashes) must wrap.
+  assert.match(block, /overflow-wrap: anywhere/);
+  // <pre> is deliberately excluded — it is meant to scroll on its own.
+  assert.ok(!/\.editor-panel pre\b[^{]*\{[^}]*overflow-wrap/.test(block));
+});
