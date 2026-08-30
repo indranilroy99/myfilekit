@@ -26,7 +26,7 @@ import { docxToHtml, epubToHtml, pptxToSlides, readWorkbookSheets, sanitizeHtmlF
 import { pdfToDocx, pdfToEpub, pdfToHtml, pdfToXlsx } from "../services/export.service.js";
 import { DEFAULT_OCR_LANG, OCR_ENGINE_SIZE_LABEL, OCR_LANGUAGES, mergeSearchablePdfPages, ocrImages, ocrPdf, terminateOcrWorker } from "../services/ocr.service.js";
 import { getSpeechSynthesis, loadSpeechVoices, speechSynthesisSupported, splitTextForSpeech } from "../services/audio.service.js";
-import { initialStatus, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, canvasToBlob, requireOutput, copyText } from "./shared";
+import { initialStatus, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, ToolNotes, canvasToBlob, requireOutput, copyText } from "./shared";
 import type { Tool } from "./shared";
 
 type PdfOutput = { url: string; blob: Blob; filename: string; pages: number; sourceName: string };
@@ -379,7 +379,10 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
       setPageCount(loaded.numPages);
       setCurrentPage(1);
       setDoc(loaded);
-      return `Loaded ${file.name} — ${loaded.numPages} page${loaded.numPages === 1 ? "" : "s"}. Click any text on the page to edit it.`;
+      // Deliberately no success message: a green "Loaded" box sat in the panel
+      // for the rest of the session restating what the open document already
+      // shows. Success boxes are for things you cannot see.
+      return "";
     });
     return () => { cancelled = true; };
   }, [files, tool.file]);
@@ -475,17 +478,14 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
 
   return (
     <ToolForm status={status} onReset={reset}>
-      <div className="surface-muted wabi-card-edge grid gap-1 p-4 text-sm font-semibold leading-6 text-neutral-600">
-        <p className="text-xs font-bold uppercase text-neutral-500">How this works — and its limits</p>
-        <p className="text-[var(--foreground)]">Click a line of existing text, edit the string, and Apply. On export the original glyphs are covered with a rectangle in the sampled background colour and your new text is drawn on top at the same spot.</p>
-        <ul className="ml-4 list-disc">
-          <li>This is a <strong>block-level overlay edit, not full-page reflow</strong>: a longer replacement now <strong>re-wraps within the clicked block's width</strong> onto multiple lines instead of overflowing off the edge; a shorter one still fits on one line. Only the clicked run is touched — surrounding text never moves, so wrapped lines can run over content directly beneath the block.</li>
-          <li>Font matching is <strong>approximate</strong> (Helvetica / Times / Courier substitute). The original embedded font is not reused, so glyph shapes and spacing may differ slightly.</li>
-          <li>The original text is <strong>visually covered, not stripped</strong> from the file — for permanent removal use <a className="underline" href="#redact-pdf-tool">Redact PDF</a>.</li>
-          <li>Needs a real text layer. Scanned / image-only PDFs have no text runs — run <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a> first.</li>
-          <li>Replacement text is <strong>Latin-1 only</strong> (no CJK or emoji).</li>
-        </ul>
-      </div>
+      <p className="tool-lead">Click any text on the page, change it, then apply.</p>
+      <ToolNotes summary="What to know">
+        <li>Your new text is drawn over the old, which stays in the file. To remove text for good, use <a className="underline" href="#redact-pdf-tool">Redact PDF</a>.</li>
+        <li>Fonts are matched, not reused, so spacing can shift a little.</li>
+        <li>Only the line you click moves. To re-wrap a whole paragraph, use <a className="underline" href="#reflow-pdf-tool">Reflow Editor</a>.</li>
+        <li>Needs real text. For a scanned page, run <a className="underline" href="#ocr-pdf-tool">OCR</a> first.</li>
+        <li>Latin characters only — no CJK or emoji.</li>
+      </ToolNotes>
 
       <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
 
@@ -568,7 +568,7 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
         </div>
       )}
 
-      <PrimaryButton label="Apply edits & download" disabled={editList.length === 0} onClick={() => runSafely(setStatus, async () => {
+      <PrimaryButton label="Apply edits" disabled={editList.length === 0} onClick={() => runSafely(setStatus, async () => {
         if (!bytesRef.current) throw new Error("Load a PDF first.");
         if (!editList.length) throw new Error("Make at least one edit first — click a text run, change it, and Apply.");
         const out = await applyTextEdits(bytesRef.current, editList.map((edit) => ({
@@ -583,7 +583,7 @@ function EditPdfTextTool({ tool }: { tool: Tool }) {
         return `Applied ${editList.length} edit${editList.length === 1 ? "" : "s"} to ${fileName}. Longer edits wrap within their block; surrounding text was not reflowed.`;
       })} />
 
-      <ResultConsequenceNote>Edits are applied by covering and redrawing — a longer replacement re-wraps within its own block, but the surrounding text is never re-flowed, and the original text remains in the file underneath the cover. For permanent removal of sensitive text, use Redact PDF instead.</ResultConsequenceNote>
+      <ResultConsequenceNote>The old text is still in the file underneath your edit. If you are removing something sensitive, use Redact PDF instead.</ResultConsequenceNote>
     </ToolForm>
   );
 }
@@ -1381,7 +1381,7 @@ function AnnotatePdfTool({ tool }: { tool: Tool }) {
       setPageCount(loaded.numPages);
       setCurrentPage(1);
       setDoc(loaded);
-      return `Loaded ${file.name} — ${loaded.numPages} page${loaded.numPages === 1 ? "" : "s"}. Pick a tool and mark up the page.`;
+      return "";
     });
     return () => { cancelled = true; };
   }, [files, tool.file]);

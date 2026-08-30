@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, FileText, Image as ImageIcon, RotateCcw, X } from "lucide-react";
 import { tools, categoryGroups } from "../registry/tools.registry.js";
 import { takeWorkspaceFilesFor, stashWorkspaceFiles } from "../lib/workspace-handoff";
+import { SELECT_MODE_BY_TOOL } from "../lib/routing";
 import { formatBytes } from "../utils/format.js";
 import DocumentView from "./DocumentView";
 
@@ -59,6 +60,9 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
   const [result, setResult] = useState<{ name: string; size: number; url: string; blob?: Blob } | null>(null);
   const [imageUrl, setImageUrl] = useState<string>("");
   const [original, setOriginal] = useState<File | null>(null);
+  // Areas drawn on the page, published by the tool from its OWN coordinate list
+  // so what is shown is always what will be applied.
+  const [regions, setRegions] = useState<{ page: number; x: number; y: number; w: number; h: number }[]>([]);
   const openedRef = useRef(false);
   // The download-ready listener is registered once, so it must not read `file`
   // or `kind` from its own closure — it would see the values from first mount.
@@ -152,6 +156,19 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
 
+  useEffect(() => {
+    const onAreas = (event: Event) => {
+      const d = (event as CustomEvent<{ areas: { page: number; x: number; y: number; w: number; h: number }[] }>).detail;
+      setRegions(Array.isArray(d?.areas) ? d.areas : []);
+    };
+    window.addEventListener("myfilekit:marked-areas", onAreas);
+    return () => window.removeEventListener("myfilekit:marked-areas", onAreas);
+  }, []);
+
+  // A different document, or a different tool, starts with a clean page: marks
+  // must never be shown over — or applied to — something they were not drawn on.
+  useEffect(() => { setRegions([]); }, [file, activeTool]);
+
   const revertToOriginal = () => {
     if (!original) return;
     setFile(original);
@@ -222,7 +239,20 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
         ) : null}
 
         <section className="editor-canvas" aria-label="Document preview">
-          {kind === "pdf" ? <DocumentView file={file} /> : null}
+          {/*
+            The editor was strictly WORSE at direct manipulation than the
+            individual tool pages: those pass selectMode and regions so you can
+            drag a redaction box on the page, and this one passed neither. Same
+            map, same round-trip, so Redact and Add Text behave here as they do
+            there.
+          */}
+          {kind === "pdf" ? (
+            <DocumentView
+              file={file}
+              selectMode={activeTool ? SELECT_MODE_BY_TOOL[activeTool.id] || null : null}
+              regions={regions}
+            />
+          ) : null}
           {kind === "image" && imageUrl ? (
             <div className="editor-image-stage"><img src={imageUrl} alt={`Preview of ${file.name}`} /></div>
           ) : null}
@@ -248,8 +278,11 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
                   aria-pressed={activeTool?.id === tool.id}
                   onClick={() => selectTool(tool)}
                 >
+                  {/* No NEW badge here. Eight of them down one 232px rail is
+                      not news, it is noise — and it competes with the document
+                      for attention while you are trying to work on it. The
+                      badge still appears where tools are browsed. */}
                   {tool.name}
-                  {tool.isNew ? <span className="index-new">NEW</span> : null}
                 </button>
               ))}
             </div>

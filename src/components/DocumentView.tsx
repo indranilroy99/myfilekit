@@ -53,6 +53,16 @@ export function DocumentView({ file, page, onPageChange, onPageCount, selectMode
   // not see.
   const [zoomIndex, setZoomIndex] = useState(FIT);
   const [fitScale, setFitScale] = useState(1);
+  /**
+   * The stage's own width, watched.
+   *
+   * Fit was computed once inside the render effect, whose deps are
+   * [doc, current, zoomIndex] — so it never re-fit when the window resized or
+   * when the options panel opened and took 360px. The page kept its old scale
+   * and silently lost the difference off the right edge, which is exactly what
+   * "I have to scroll right to see the document" looks like.
+   */
+  const [stageWidth, setStageWidth] = useState(0);
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [message, setMessage] = useState("");
   const [thumbs, setThumbs] = useState<Record<number, string>>({});
@@ -120,6 +130,21 @@ export function DocumentView({ file, page, onPageChange, onPageCount, selectMode
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
+  useEffect(() => {
+    const stage = stageRef.current?.closest(".doc-stage") as HTMLElement | null;
+    if (!stage || typeof ResizeObserver === "undefined") return;
+    let frame = 0;
+    const observer = new ResizeObserver((entries) => {
+      // Coalesce in rAF: writing a canvas size from inside the observer that is
+      // watching that canvas's container is how you get a resize loop.
+      cancelAnimationFrame(frame);
+      const width = Math.round(entries[0].contentRect.width);
+      frame = requestAnimationFrame(() => setStageWidth((previous) => (Math.abs(previous - width) > 1 ? width : previous)));
+    });
+    observer.observe(stage);
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+  }, []);
+
   // Render the current page at the current zoom.
   useEffect(() => {
     if (!doc || !stageRef.current) return;
@@ -137,8 +162,15 @@ export function DocumentView({ file, page, onPageChange, onPageCount, selectMode
           // the canvas's own width — or 0 on first paint, which left `scale` at
           // its initial 1 forever. Fit was measuring the thing it was supposed
           // to be fitting.
-          const stageWidth = stage.closest(".doc-stage")?.clientWidth || stage.parentElement?.clientWidth || stage.clientWidth;
+          const box = stage.closest(".doc-stage") as HTMLElement | null;
+          const stageWidth = box?.clientWidth || stage.parentElement?.clientWidth || stage.clientWidth;
           if (stageWidth > 0) {
+            // Fit WIDTH, deliberately, not the whole page. Fitting the whole
+            // page of a portrait A4 into a 764px-tall stage renders it at ~517px
+            // wide — the document ends up smaller than the panel beside it,
+            // which is the complaint this work started from. Scrolling down
+            // through pages is what every document reader does; scrolling
+            // sideways to finish a line is not.
             scale = Math.max(0.2, Math.min(3, (stageWidth - 32) / base.width));
             setFitScale(scale);
           }
@@ -164,7 +196,7 @@ export function DocumentView({ file, page, onPageChange, onPageCount, selectMode
         stage.replaceChildren();
       }
     })();
-  }, [doc, current, zoomIndex]);
+  }, [doc, current, zoomIndex, stageWidth]);
 
   // Thumbnails, rendered small and lazily so a 500-page file does not stall.
   useEffect(() => {

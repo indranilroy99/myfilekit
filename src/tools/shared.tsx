@@ -118,7 +118,7 @@ function ToolMetaPanel({ status, onReset, children, sends }: { status: Status; o
             <p className="mt-1 text-xs font-semibold text-neutral-500">{formatBytes(downloadReady.size)} · stayed on this device</p>
             {successNote ? <p className="result-card-note">{successNote}</p> : null}
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 result-card-actions">
             <a className="primary-button no-underline" href={downloadReady.url} download={downloadReady.filename}>
               <Download size={16} /> Download
             </a>
@@ -208,6 +208,26 @@ function StatusBox({ status }: { status: Status }) {
 }
 
 /** A persistent, result-attached consequence note — survives the transient status message. */
+/**
+ * A tool's caveats, collapsed.
+ *
+ * These were rendered open as a block of prose above the controls. On Edit PDF
+ * Text the first interactive control sat 902px down a 790px-tall panel — you
+ * scrolled past the bottom of the pane before reaching anything you could use,
+ * and the text itself explained the implementation ("block-level overlay edit,
+ * not full-page reflow", "the original glyphs are covered") rather than what to
+ * expect. Honest caveats still matter, so they stay one click away rather than
+ * being deleted.
+ */
+function ToolNotes({ summary, children }: { summary: string; children: React.ReactNode }) {
+  return (
+    <details className="tool-notes">
+      <summary>{summary}</summary>
+      <ul>{children}</ul>
+    </details>
+  );
+}
+
 function ResultConsequenceNote({ children }: { children: React.ReactNode }) {
   return (
     <div role="note" className="grid gap-1 rounded-lg border border-[var(--line)] bg-[var(--paper-soft)] p-4 text-sm font-semibold leading-6 text-neutral-600">
@@ -508,4 +528,4 @@ function imageExt(type: string) {
 
 
 export type { Tool, Status, DownloadReady };
-export { initialStatus, printDownloadUrl, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, acceptHint, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, usePendingHandler, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, canvasToBlob, dataUrlToBlob, requireOutput, copyText, imageExt };
+export { initialStatus, printDownloadUrl, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, acceptHint, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, usePendingHandler, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, ToolNotes, canvasToBlob, dataUrlToBlob, requireOutput, copyText, imageExt };

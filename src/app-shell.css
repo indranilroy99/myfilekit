@@ -1483,3 +1483,61 @@ html.dark .result-card-note { color: var(--c-text-dim) !important; }
 @media (max-width: 1100px) {
   .editor-shell-wide { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* The marketing sheet sets `#app-main { padding: 32px 48px 80px !important }`
+   (styles.css:1827) for a centred landing page, and it applied on every route.
+   In the application chrome that is 96px of horizontal and 112px of vertical
+   space taken from the work surface — and because .editor-shell's height is
+   computed from the viewport minus the bars, the 32px top offset pushed its
+   bottom edge under the status bar and clipped the last 32px of all three
+   panes. The landing page keeps it; every other route uses the app's own
+   gutters. */
+.app[data-route="home"] #app-main { padding: 32px 48px 80px !important; }
+.app:not([data-route="home"]) #app-main { padding: 0 !important; }
+
+/* A tool's lead line: what this does, in one sentence, above the controls. */
+.tool-lead {
+  margin: 0 0 2px !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+  color: var(--c-text-dim) !important;
+}
+
+/* Caveats, collapsed. Closed they cost one 26px row instead of a screen of
+   prose; open they read as a list, not a warning. */
+.tool-notes { border: 1px solid var(--c-line); border-radius: var(--app-radius); background: var(--c-chrome); }
+.tool-notes > summary {
+  display: flex; align-items: center; gap: 6px;
+  min-height: 26px; padding: 0 10px;
+  font-size: 12px; font-weight: 600; color: var(--c-text-dim);
+  cursor: default; list-style: none;
+}
+.tool-notes > summary::-webkit-details-marker { display: none; }
+.tool-notes > summary::before { content: "›"; display: inline-block; transition: transform .12s ease; }
+.tool-notes[open] > summary::before { transform: rotate(90deg); }
+.tool-notes > summary:hover { color: var(--c-text); }
+.tool-notes > ul {
+  margin: 0; padding: 2px 12px 10px 26px;
+  display: grid; gap: 5px;
+  font-size: 12px; line-height: 1.5; color: var(--c-text-dim);
+}
+
+/* In the editor the result IS the open document — the doc bar carries Download
+   and "Edited". A second Download inside the options panel is a competing call
+   to action for the same file, so the card keeps its filename, size and the
+   tool's note, and loses the buttons. */
+.editor-panel .result-card-actions { display: none !important; }
+
+/* A disabled primary read as a washed-out enabled one — "Apply edits" looked
+   broken rather than not-yet-available. Disabled controls now read as disabled:
+   no accent fill, no pointer, and a visibly muted label. */
+.primary-button:disabled,
+.liquid-button:disabled,
+.primary-button[aria-disabled="true"] {
+  background: var(--c-hover) !important;
+  background-color: var(--c-hover) !important;
+  border-color: var(--c-line) !important;
+  color: var(--c-text-faint) !important;
+  cursor: not-allowed !important;
+  opacity: 1 !important;
+}

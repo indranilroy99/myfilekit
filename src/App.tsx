@@ -9,7 +9,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import LandingPage from "./components/LandingPage";
 import EditorPage from "./components/EditorPage";
 import DocumentView from "./components/DocumentView";
-import { categoryRoute, routeForHash } from "./lib/routing";
+import { categoryRoute, routeForHash, SELECT_MODE_BY_TOOL } from "./lib/routing";
 import { filterTools, searchableText } from "./lib/search.js";
 import { formatBytes } from "./utils/format.js";
 import { StatusBox } from "./tools/shared";
@@ -1341,15 +1341,6 @@ function CategoryPage({ category }: { category: string }) {
     </div>
   );
 }
-
-// Tools whose input is a place on the page, so the page itself becomes the
-// control: drag an area to redact, click a point to place text.
-const SELECT_MODE_BY_TOOL: Record<string, "rect" | "point"> = {
-  "redact-pdf-tool": "rect",
-  "add-text-to-pdf-tool": "point",
-  // Drag a box where the signature goes: position AND size in one gesture.
-  "add-signature-to-pdf-tool": "rect",
-};
 
 function ToolPage({ tool }: { tool: Tool }) {
   const related = tools.filter((item: Tool) => item.category === tool.category && item.id !== tool.id);
