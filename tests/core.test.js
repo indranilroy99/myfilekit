@@ -8042,7 +8042,10 @@ test("Compress PDF reports a larger-than-input result as a warning, never as a s
   assert.match(refusal, /got bigger/i, "it says plainly that this file got bigger");
   assert.match(refusal, /formatBytes\(before\)/, "the original size is quoted");
   assert.match(refusal, /formatBytes\(after\)/, "the output size is quoted");
-  assert.match(refusal, /rasteris/i, "it explains why: rasterising text inflates it");
+  // Asserts the EXPLANATION, not the word. This used to require the literal
+  // "rasteris", which pinned prepress jargon into user-facing copy — the point
+  // is that the message says why the file grew, in language a user can follow.
+  assert.match(refusal, /picture of text|turns every page into|into a JPEG/i, "it explains why the file grew");
   assert.match(refusal, /instead/i, "it tells the user what to do instead");
 
   // The savings message belongs only to the path that actually saved bytes.
@@ -8081,7 +8084,7 @@ test("Compress PDF flags a text-heavy PDF before it rasterises anything", () => 
 test("Excel to PDF warns that its output is a picture, and points at CSV to PDF", () => {
   const section = sourceOfComponents(["ExcelToPdfTool"]);
   assert.match(section, /no selectable/i, "the UI warns the output has no selectable text");
-  assert.match(section, /rasteris/i, "and names what actually happens");
+  assert.match(section, /picture|image/i, "and names what actually happens, in plain words");
   assert.match(section, /#csv-to-pdf-tool/, "and cross-references the text-output sibling");
 
   // The descriptions stop over-promising and cross-reference each other, the way

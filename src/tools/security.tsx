@@ -11,7 +11,7 @@ import { CONFIDENCE as PII_CONFIDENCE, PII_TYPE_LABELS, buildPrivacyReportText, 
 import { analyzePdfBytes, buildAnalyzerReportText } from "../services/pdf-analyzer.service.js";
 import { sanitizePdf, buildSanitizeReportText, residualActiveContent } from "../services/pdf-sanitize.service.js";
 import { backendOrigin, clearEsignSettings, getEnvelopeStatus, isEsignConfigured, maskApiKey as maskEsignApiKey, parseSigners, readEsignSettings, requestEnvelope, saveEsignSettings } from "../services/esign.service.js";
-import { initialStatus, ToolForm, StatusBox, ResultConsequenceNote, FileControl, InfoRow, Input, Textarea, Select, Checkbox, PrimaryButton, SecondaryButton, verdictTone, pageProgress, runSafely } from "./shared";
+import { initialStatus, ToolForm, StatusBox, ResultConsequenceNote, FileControl, InfoRow, Input, Textarea, Select, Checkbox, PrimaryButton, SecondaryButton, verdictTone, pageProgress, runSafely, ToolNotes } from "./shared";
 import type { Tool } from "./shared";
 import { ImageMetadataTool } from "./image";
 
@@ -57,7 +57,7 @@ const readCoverage = describeUnreadablePages as (scan: PiiScan | null) => TextCo
 /**
  * The page-level "this was not scanned" banner.
  *
- * Redaction rasterises pages, so the scanners routinely see a page with no text
+ * Redaction turns pages into images, so the scanners routinely see a page with no text
  * layer. Reporting "no known patterns matched" for such a page is a false clean
  * bill of health: the result is identical whether the redaction box landed on
  * the account number or missed it by 5mm. Both scanners render this, in colour,
@@ -208,7 +208,7 @@ function AutoRedactPiiTool({ tool }: { tool: Tool }) {
   return (
     <ToolForm status={status} onReset={reset}>
       <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-        Finds Aadhaar (Verhoeff-checked), PAN, payment cards (Luhn-checked), GSTIN, IFSC, account numbers (including grouped forms like 4419-8827-6634), US routing numbers (ABA-checked), passport numbers, emails, phone numbers, dates of birth, IPs and URLs in the PDF's text layer, then permanently removes the ones you tick. It reads the text layer only, so a scanned or already-rasterised page is reported as unreadable rather than clean — add a text layer with <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a> first. Redaction rasterises every page to an image and paints opaque boxes over the matches, so the text underneath is genuinely gone — the honest trade is that the output is flattened: selectable text, links, and form fields are lost for the whole document. Nothing leaves this browser.
+        Finds Aadhaar (Verhoeff-checked), PAN, payment cards (Luhn-checked), GSTIN, IFSC, account numbers (including grouped forms like 4419-8827-6634), US routing numbers (ABA-checked), passport numbers, emails, phone numbers, dates of birth, IPs and URLs in the PDF's text layer, then permanently removes the ones you tick. It reads the text layer only, so a scanned or already-flattened page is reported as unreadable rather than clean — add a text layer with <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a> first. Redaction turns every page into an image and paints opaque boxes over the matches, so the text underneath is genuinely gone — the honest trade is that the output is flattened: selectable text, links, and form fields are lost for the whole document. Nothing leaves this browser.
       </div>
       <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
 
@@ -479,9 +479,19 @@ function PrivacyScannerTool({ tool }: { tool: Tool }) {
             <p className="font-black text-[var(--foreground)]">6 · What this means</p>
             {coverage.unreadable && <p className="text-[var(--danger-fg)]">{coverage.headline} {coverage.advice}</p>}
             <p>{scan.summary.high} match{scan.summary.high === 1 ? "" : "es"} passed a checksum or a context rule, so treat those as real findings. The other {scan.summary.total - scan.summary.high} are medium or low confidence and need your judgement.</p>
-            <p>There is no risk score here on purpose: a single number would hide what actually matters. The findings above are the report.</p>
-            <p className="font-black text-[var(--foreground)]">Limits, plainly stated</p>
-            <p>This finds common patterns only. It cannot guarantee it found every piece of sensitive data. Names, addresses, salary and health details, text inside images, anything inside an attachment, and text in encodings pdf.js cannot map are not detected. Only Aadhaar, payment cards and GSTIN carry a checksum; PAN, IFSC and passport are shape rules, so a part number shaped like one is reported as a match. Passport and bank-account shapes are so generic that low-confidence hits there will include false positives. A dotted quad like 1.2.3.4 is reported as an IP even when it is a version number.</p>
+            <p>There is no risk score on purpose — a single number would hide what matters.</p>
+            {/* Stays visible, and stays verbatim. This tool once reported "no
+                matches" on a page it physically could not read; the sentence
+                that stops a clean result being mistaken for a safe one is not a
+                detail to fold away behind a disclosure. */}
+            <p className="font-black text-[var(--foreground)]">This finds common patterns only. It cannot guarantee it found every piece of sensitive data.</p>
+            <ToolNotes summary="What this cannot find">
+              <li>Names, addresses, salary and health details — there is no pattern to match.</li>
+              <li>Text inside images, and anything inside an attachment.</li>
+              <li>Aadhaar, payment cards and GSTIN are checksum-verified. PAN, IFSC and passport are shape rules, so a part number shaped like one is reported.</li>
+              <li>Passport and account shapes are generic, so low-confidence hits there include false positives.</li>
+              <li>A version number like 1.2.3.4 is reported as an IP address.</li>
+            </ToolNotes>
           </div>
         </>
       )}
@@ -626,8 +636,12 @@ function PdfAnalyzerTool({ tool }: { tool: Tool }) {
           </div>
 
           <div className="surface-card wabi-card-edge grid gap-2 p-4 text-sm font-semibold leading-6 text-neutral-600">
-            <p className="font-black text-[var(--foreground)]">Limits, plainly stated</p>
-            <p>This reads bytes; it does not run the file. It will miss novel or heavy obfuscation, payloads behind unsupported filters or encryption, exploits that live inside malformed object internals, and anything that only reveals itself when the PDF is opened in a real reader. There is deliberately no numeric "threat score": the findings above are the report, and the call is yours. When in doubt, detonate the file in an isolated sandbox.</p>
+            <ToolNotes summary="What this cannot find">
+              <li>Heavy or novel obfuscation, and payloads behind filters this cannot decode.</li>
+              <li>Exploits inside malformed object internals, or anything that only fires when a real reader opens the file.</li>
+              <li>There is no threat score on purpose — the findings above are the report, and the call is yours.</li>
+              <li>If in doubt, open the file in an isolated sandbox instead.</li>
+            </ToolNotes>
           </div>
         </>
       )}
@@ -706,7 +720,7 @@ function SanitizePdfTool({ tool }: { tool: Tool }) {
             downloadBytes(result.bytes, filename, "application/pdf");
             return `${filename} downloaded.`;
           })} />
-          {status.tone === "success" && <ResultConsequenceNote>Sanitizing rewrites the file to drop active content; it does not decode or neutralise an exploit hidden inside an image, font, or encrypted stream. For an untrusted file, still triage it with the PDF Analyser and detonate in a sandbox when in doubt.</ResultConsequenceNote>}
+          {status.tone === "success" && <ResultConsequenceNote>This removes active content. It cannot neutralise an exploit hidden inside an image, font or encrypted stream — for a suspicious file, check it in PDF Analyser first.</ResultConsequenceNote>}
         </>
       )}
     </ToolForm>
@@ -822,7 +836,7 @@ function RemovePasswordTool({ tool }: { tool: Tool }) {
 
   return <ToolForm status={status} onReset={() => { setFiles([]); forgetPassword(); setStatus(initialStatus); }}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      This decrypts a PDF you can already open, with a password you already know, and saves an identical copy that needs no password. Text, fonts, images, and structure are kept — nothing is rasterised. It does not crack, guess, or bypass anything: a wrong password just fails. Use it only on documents you are entitled to decrypt.
+      This decrypts a PDF you can already open, with a password you already know, and saves an identical copy that needs no password. Text, fonts, images, and structure are kept — nothing is turned into an image. It does not crack, guess, or bypass anything: a wrong password just fails. Use it only on documents you are entitled to decrypt.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
     <PasswordField label="Current PDF password" value={password} onChange={setPassword} helper="Either the password that opens the PDF or its owner password will work." />

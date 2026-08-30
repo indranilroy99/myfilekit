@@ -810,7 +810,7 @@ function ReflowEditorTool({ tool }: { tool: Tool }) {
         <ul className="ml-4 list-disc">
           <li>Works well for <strong>single-column text documents</strong>. Multi-column pages, tables, and complex layouts may reorder or misplace content — for those, prefer <a className="underline" href="#edit-pdf-text-tool">Edit PDF Text</a>.</li>
           <li>The output <strong>rebuilds the text column</strong> on fresh pages, so exact original positioning of untouched paragraphs may shift slightly.</li>
-          <li>Fonts are matched to <strong>base-14 substitutes</strong> (Helvetica / Times / Courier); the original embedded font is not reused. Drawn text is <strong>Latin-1 only</strong> (no CJK/emoji).</li>
+          <li>Fonts are matched to <strong>standard fonts</strong> (Helvetica, Times, Courier); the original embedded font is not reused. Drawn text is <strong>Latin-1 only</strong> (no CJK/emoji).</li>
           <li><strong>Images and other non-text content are not carried</strong> into the reflowed text column. Needs a real text layer — scanned PDFs must be <a className="underline" href="#ocr-pdf-tool">OCR'd</a> first.</li>
           <li>This is honest single-column reflow, <strong>not pixel-perfect Adobe reflow</strong>.</li>
         </ul>
@@ -897,7 +897,7 @@ function ReflowEditorTool({ tool }: { tool: Tool }) {
 
       <PrimaryButton label="Reflow & download PDF" disabled={!extracted || !blocks.some((block) => block.text.trim())} onClick={download} />
 
-      <ResultConsequenceNote>Reflow rebuilds the document's text column on fresh pages: your edits re-wrap and the following paragraphs move and repaginate. Untouched paragraphs may shift slightly, fonts are base-14 substitutes, and images / non-text content are not carried over. To edit a single run without moving anything, use Edit PDF Text.</ResultConsequenceNote>
+      <ResultConsequenceNote>Text is rebuilt on fresh pages, so untouched paragraphs may shift and images are not carried over. To change one line without moving anything, use Edit PDF Text.</ResultConsequenceNote>
     </ToolForm>
   );
 }
@@ -1649,7 +1649,7 @@ function AnnotatePdfTool({ tool }: { tool: Tool }) {
         <ul className="ml-4 list-disc">
           <li>Flattened markup renders <strong>identically in every reader</strong> and cannot be tampered with as data — but it is <strong>not reader-editable</strong> (no selectable /Annot objects). Edit here before exporting.</li>
           <li>The original page content stays intact <strong>underneath</strong> the markup; a highlight is drawn as a translucent marker over it.</li>
-          <li>Text notes and sticky notes are <strong>Latin-1 only</strong> (no CJK or emoji).</li>
+          <li>Text notes and sticky notes are <strong>English and common European letters only</strong> — no CJK or emoji.</li>
           <li>To permanently remove content rather than mark it up, use <a className="underline" href="#redact-pdf-tool">Redact PDF</a>.</li>
         </ul>
       </div>
@@ -1752,7 +1752,7 @@ function AnnotatePdfTool({ tool }: { tool: Tool }) {
         return `Exported ${totalAnnos} annotation${totalAnnos === 1 ? "" : "s"} across ${pagesWithAnnos} page${pagesWithAnnos === 1 ? "" : "s"}. The markup is now flattened into ${fileName}.`;
       })} />
 
-      <ResultConsequenceNote>Annotations are flattened (burned) into the page on export — they render the same in every reader, but are not reader-editable annotation objects. Keep this working file open if you still need to move or delete marks. For permanent removal of underlying content, use Redact PDF.</ResultConsequenceNote>
+      <ResultConsequenceNote>Marks are drawn into the page, so every reader shows them the same way — but they cannot be edited afterwards. Keep your original if you might need to change them.</ResultConsequenceNote>
     </ToolForm>
   );
 }
@@ -1821,10 +1821,10 @@ function PdfToImageTool({ tool }: { tool: Tool }) {
   </ToolForm>;
 }
 
-// Compressing rasterises every page to JPEG. On a genuinely text-based PDF that
+// Compressing turns every page into a JPEG. On a genuinely text-based PDF that
 // both destroys the selectable text and inflates the file — a 15 KB text PDF
 // comes back at 1 MB. So we look before we leap: a substantial text layer with
-// far fewer embedded images than pages means "this is text, don't rasterise it".
+// far fewer embedded images than pages means "this is text, don't flatten it".
 // A scan (or an OCR'd scan) carries a full-page image per page, so it is never
 // flagged and keeps compressing as before.
 const TEXT_HEAVY_CHARS_PER_PAGE = 200;
@@ -1850,14 +1850,14 @@ function CompressPdfTool({ tool }: { tool: Tool }) {
   const [dpi, setDpi] = useState("120");
   const [status, setStatus] = useState(initialStatus);
   const [preflight, setPreflight] = useState<CompressPreflight | null>(null);
-  const [rasteriseAnyway, setRasteriseAnyway] = useState(false);
+  const [flattenAnyway, setFlattenAnyway] = useState(false);
 
   // Inspect the chosen PDF up front so the warning arrives before the damage,
   // not after. The check is advisory: if it fails, compressing still works.
   useEffect(() => {
     const file = files[0];
     setPreflight(null);
-    setRasteriseAnyway(false);
+    setFlattenAnyway(false);
     if (!file) return;
     let cancelled = false;
     inspectPdfForCompression(file)
@@ -1866,11 +1866,11 @@ function CompressPdfTool({ tool }: { tool: Tool }) {
     return () => { cancelled = true; };
   }, [files]);
 
-  const blocked = Boolean(preflight?.textHeavy) && !rasteriseAnyway;
+  const blocked = Boolean(preflight?.textHeavy) && !flattenAnyway;
 
-  return <ToolForm status={status} onReset={() => { setFiles([]); setPreflight(null); setRasteriseAnyway(false); setStatus(initialStatus); }}>
+  return <ToolForm status={status} onReset={() => { setFiles([]); setPreflight(null); setFlattenAnyway(false); setStatus(initialStatus); }}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      This rasterises each page to a JPEG image, so selectable text becomes part of the image. Best for image-heavy or scanned PDFs. On a text-based PDF it destroys the text and usually makes the file <strong>bigger</strong>.
+      This turns each page into a JPEG image, so selectable text becomes part of the image. Best for image-heavy or scanned PDFs. On a text-based PDF it destroys the text and usually makes the file <strong>bigger</strong>.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
     {preflight?.textHeavy && (
@@ -1878,7 +1878,7 @@ function CompressPdfTool({ tool }: { tool: Tool }) {
         <p className="text-xs font-bold uppercase text-[var(--warning)]">This is a text-based PDF — compressing will probably make it larger</p>
         <p className="text-[var(--foreground)]">It carries about {preflight.chars.toLocaleString()} characters of selectable text across {preflight.pages} page{preflight.pages === 1 ? "" : "s"}, with {preflight.images === 0 ? "no" : preflight.images} embedded image{preflight.images === 1 ? "" : "s"}. Text is already tiny to store; a photograph of that text is not — so rasterising it typically inflates the file many times over <em>and</em> leaves you with no selectable, searchable, or copyable text.</p>
         <p>What to do instead: keep this file as it is, drop pages you don't need with <a className="underline" href="#split-pdf-tool">Split / Extract PDF Pages</a>, pull out the heavy artwork with <a className="underline" href="#extract-images-tool">Extract Images &amp; Attachments</a>, or re-save it with <a className="underline" href="#repair-pdf-tool">Repair PDF</a> to drop unused objects.</p>
-        <Checkbox label="Rasterise it anyway — I accept a bigger file with no selectable text" checked={rasteriseAnyway} onChange={setRasteriseAnyway} />
+        <Checkbox label="Do it anyway — I accept a bigger file with no selectable text" checked={flattenAnyway} onChange={setFlattenAnyway} />
       </div>
     )}
     <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["96", "120", "150", "200"]} labels={["96 · smallest", "120 · default", "150 · sharp", "200 · sharpest"]} />
@@ -1893,8 +1893,8 @@ function CompressPdfTool({ tool }: { tool: Tool }) {
         throw new Error([
           `Not compressed — this file got bigger, so nothing was saved.`,
           `Original: ${formatBytes(before)}`,
-          `Rasterised output: ${formatBytes(after)}`,
-          `Why: compressing rasterises every page to a JPEG. This PDF's pages are mostly text, and a picture of text costs far more to store than the text itself — so the output grew instead of shrinking, and it would have had no selectable text.`,
+          `Turn into an imaged output: ${formatBytes(after)}`,
+          `Why: compressing turns every page into a JPEG. This PDF's pages are mostly text, and a picture of text costs far more to store than the text itself — so the output grew instead of shrinking, and it would have had no selectable text.`,
           `What to do instead: keep the original, remove pages you don't need with Split / Extract PDF Pages, or re-save it with Repair PDF. Compression only pays off on scans and image-heavy PDFs.`,
         ].join("\n"));
       }
@@ -2099,7 +2099,7 @@ function RedactPdfTool({ tool }: { tool: Tool }) {
 
   return <ToolForm status={status} onReset={() => { setFiles([]); setAreas(""); setStatus(initialStatus); }}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Redaction rasterises the whole PDF to images and paints opaque black boxes on the listed areas, so covered content is permanently removed — not just hidden. Selectable text is lost.
+      Redaction turns the whole PDF into images and paints opaque black boxes on the listed areas, so covered content is permanently removed — not just hidden. Selectable text is lost.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={loadFiles} />
     {files.length ? <p className="doc-select-hint">Drag on the page, or press Enter on it and use the arrow keys — or type coordinates below.</p> : null}
@@ -2485,7 +2485,7 @@ function CreateFormTool({ tool }: { tool: Tool }) {
 
 const VISUAL_DIFF_THRESHOLD = 40; // luma delta that counts a pixel as "changed"
 
-/** Rasterises `src` onto a fresh w×h white canvas and returns its pixel data. */
+/** Turn into an images `src` onto a fresh w×h white canvas and returns its pixel data. */
 function rasterOnWhite(src: HTMLCanvasElement, w: number, h: number) {
   const canvas = document.createElement("canvas");
   canvas.width = w;
@@ -2586,7 +2586,7 @@ function canvasToDarkness(canvas: HTMLCanvasElement, maxDim: number) {
 }
 
 /**
- * Rasterises each page, estimates (or applies an override) skew angle, rotates
+ * Turn into an images each page, estimates (or applies an override) skew angle, rotates
  * the page image to straighten it, and rebuilds an image-based PDF. Output pages
  * are images, so text is no longer selectable. Browser-only.
  */
@@ -2808,7 +2808,7 @@ function DeskewPdfTool({ tool }: { tool: Tool }) {
 
   return <ToolForm status={status} onReset={() => { setFiles([]); setOverrideAngle(""); setStatus(initialStatus); }}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Auto-straightens skewed scans. Each page is rasterised, its skew angle is estimated with a projection-profile method (the angle that lines the text rows up into the sharpest horizontal profile), and the page is rotated to correct it. Because it works on rendered pages, the output pages become images — text is no longer selectable. Leave the override blank to auto-detect per page.
+      Auto-straightens skewed scans. Each page is turned into an image, its skew angle is estimated with a projection-profile method (the angle that lines the text rows up into the sharpest horizontal profile), and the page is rotated to correct it. Because it works on rendered pages, the output pages become images — text is no longer selectable. Leave the override blank to auto-detect per page.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
     <Input label="Override angle (degrees)" value={overrideAngle} onChange={setOverrideAngle} placeholder="Auto-detect" helper="Optional. Positive rotates one way, negative the other. Blank = detect each page (-10° to +10°)." />
@@ -2850,10 +2850,10 @@ function PdfaPrepTool({ tool }: { tool: Tool }) {
       Aims for a structurally valid <strong>PDF/A-2b</strong> via the self-contained path — but this is <strong>not</strong> a certified, veraPDF-validated conversion. It adds an sRGB OutputIntent with an embedded ICC profile, writes XMP carrying the PDF/A-2B conformance identifier, sets the document Title, language (/Lang), Info, /ID, and /MarkInfo, and strips things PDF/A forbids where it can (JavaScript, auto-run OpenAction, and Launch actions). We cannot run veraPDF in the browser, so <strong>run veraPDF to certify before relying on it for legal compliance</strong> — this does not claim compliance it cannot prove.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
-    <Checkbox label="Guaranteed self-contained (rasterise every page)" checked={raster} onChange={setRaster} />
+    <Checkbox label="Turn every page into an image (guaranteed self-contained)" checked={raster} onChange={setRaster} />
     {raster && (
       <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold leading-6 text-neutral-600">
-        <p>Rasterising renders each page to an image, so every page becomes an image XObject with no unembedded fonts — the most reliable client-side path to PDF/A-2b — but plain rasterised text is not selectable.</p>
+        <p>This turns each page into an image, so no font can be missing — the most reliable client-side path to PDF/A-2b — but plain turned into an image text is not selectable.</p>
         <Checkbox label="Add a searchable OCR text layer (self-contained AND searchable)" checked={ocrLayer} onChange={setOcrLayer} />
         {ocrLayer && (
           <>
@@ -2879,7 +2879,7 @@ function PdfaPrepTool({ tool }: { tool: Tool }) {
         // Refuse encrypted originals with a clear message before rasterising.
         await assertPdfDecryptable(originalBytes);
         if (ocrLayer) {
-          // OCR rasterises internally and returns a searchable image PDF (page
+          // OCR turns pages into images internally and returns a searchable image PDF (page
           // image + invisible text layer). Feed those bytes to archival prep.
           const ocr = await ocrPdf(file, {
             lang: ocrLang,
@@ -2895,7 +2895,7 @@ function PdfaPrepTool({ tool }: { tool: Tool }) {
         }
       }
       const { bytes, report: prepReport } = await archivalPrepPdf(source, { title: docTitle, author: author.trim(), lang: docLang });
-      if (raster) prepReport.removed.unshift(ocrApplied ? "rasterised all pages, then added a searchable OCR text layer" : "rasterised all pages (text no longer selectable)");
+      if (raster) prepReport.removed.unshift(ocrApplied ? "turned into an image all pages, then added a searchable OCR text layer" : "turned into an image all pages (text no longer selectable)");
       if (ocrApplied) prepReport.applied.push("searchable OCR text layer over the raster (invisible, selectable)");
       setReport(prepReport);
       // Re-run the self-check on the produced bytes so the user sees exactly
@@ -3314,8 +3314,8 @@ function ExcelToPdfTool({ tool }: { tool: Tool }) {
     </div>
     <div className="surface-card wabi-card-edge grid gap-2 border-[var(--warning)] p-4 text-sm font-semibold leading-6 text-neutral-600">
       <p className="text-xs font-bold uppercase text-[var(--warning)]">The output is a picture of your sheet, not selectable text</p>
-      <p className="text-[var(--foreground)]">The table is laid out and then <strong>rasterised</strong>, so the PDF contains images rather than text. It looks exactly like your spreadsheet, but nobody can select, copy, search, or extract the figures from it — and the file is much larger than a text PDF of the same data.</p>
-      <p>If you need a ledger whose rows stay real, selectable text, paste the sheet's CSV into <a className="underline" href="#csv-to-pdf-tool">CSV to PDF</a> instead. To turn a rasterised PDF back into searchable text afterwards, run <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a>.</p>
+      <p className="text-[var(--foreground)]">The table is laid out and then <strong>turned into an image</strong>, so the PDF contains images rather than text. It looks exactly like your spreadsheet, but nobody can select, copy, search, or extract the figures from it — and the file is much larger than a text PDF of the same data.</p>
+      <p>If you need a ledger whose rows stay real, selectable text, paste the sheet's CSV into <a className="underline" href="#csv-to-pdf-tool">CSV to PDF</a> instead. To turn a turned into an image PDF back into searchable text afterwards, run <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a>.</p>
     </div>
     <FileControl accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" files={files} setFiles={setFiles} label="Choose or drop a spreadsheet" />
     <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
@@ -3810,7 +3810,7 @@ type WorkflowStep = { op: string; options: Record<string, string> };
 
 const workflowOps = workflowOpList() as { id: string; label: string; hint: string; browserOnly: boolean; fields: { key: string; label: string; type: string; options?: string[]; placeholder?: string }[] }[];
 const workflowOpIds = workflowOps.map((op) => op.id);
-const workflowOpLabels = workflowOps.map((op) => `${op.label}${op.browserOnly ? " (rasterises pages)" : ""}`);
+const workflowOpLabels = workflowOps.map((op) => `${op.label}${op.browserOnly ? " (turns pages into images)" : ""}`);
 const workflowPresets = WORKFLOW_PRESETS as { id: string; label: string; hint: string; steps: { op: string; options: Record<string, string> }[] }[];
 
 function WorkflowBuilderTool({ tool }: { tool: Tool }) {
@@ -3836,7 +3836,7 @@ function WorkflowBuilderTool({ tool }: { tool: Tool }) {
 
   return <ToolForm status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Chain PDF operations over one file: each step's output PDF becomes the next step's input. Steps marked "rasterises pages" turn text into page images, so put them last if you want selectable text earlier in the chain. Merge is not available here because it needs more than one input file.
+      Chain PDF operations over one file: each step's output PDF becomes the next step's input. Steps marked "turns pages into images" replace text with a picture of it, so put them last if you want selectable text earlier in the chain. Merge is not available here because it needs more than one input file.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setOutput(null); setProgress([]); }} />
 
@@ -3926,7 +3926,7 @@ function WorkflowBuilderTool({ tool }: { tool: Tool }) {
 
 const batchOps = batchOpList() as { id: string; label: string; hint: string; accepts: string; browserOnly: boolean; fields: { key: string; label: string; type: string; options?: string[]; placeholder?: string }[] }[];
 const batchOpIds = batchOps.map((op) => op.id);
-const batchOpLabels = batchOps.map((op) => `${op.label}${op.browserOnly ? " (rasterises)" : ""}`);
+const batchOpLabels = batchOps.map((op) => `${op.label}${op.browserOnly ? " (turns pages into images)" : ""}`);
 const batchMime: Record<string, string> = { pdf: "application/pdf", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" };
 
 function BatchProcessTool({ tool }: { tool: Tool }) {
@@ -3967,7 +3967,7 @@ function BatchProcessTool({ tool }: { tool: Tool }) {
 
   return <ToolForm status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Apply one operation across many files at once — up to {MAX_BATCH_FILES}. Each file is processed on its own: if one fails, the rest keep going, and you get a report of which succeeded and which did not. Successful results download together as a ZIP (or as a single file when there is only one). Operations marked "rasterises" turn PDF text into page images.
+      Apply one operation across many files at once — up to {MAX_BATCH_FILES}. Each file is processed on its own: if one fails, the rest keep going, and you get a report of which succeeded and which did not. Successful results download together as a ZIP (or as a single file when there is only one). Operations marked "turns pages into images" replace text with a picture of it.
     </div>
 
     <Select label="Operation" value={opId} onChange={pickOp} options={batchOpIds} labels={batchOpLabels} />
@@ -4117,7 +4117,7 @@ function BatchWorkflowTool({ tool }: { tool: Tool }) {
 
   return <ToolForm status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Build a workflow once — a chain of steps, or a one-click preset — and run it over many PDFs at once, up to {MAX_WORKFLOW_BATCH_FILES}. Each file goes through the identical pipeline; if one file fails, the rest keep going and you get a per-file report. Successful results download together as a ZIP (or as a single PDF when there is only one). Steps marked "rasterises pages" turn text into page images.
+      Build a workflow once — a chain of steps, or a one-click preset — and run it over many PDFs at once, up to {MAX_WORKFLOW_BATCH_FILES}. Each file goes through the identical pipeline; if one file fails, the rest keep going and you get a per-file report. Successful results download together as a ZIP (or as a single PDF when there is only one). Steps marked "turns pages into images" replace text with a picture of it.
     </div>
 
     <WorkflowStepsEditor steps={steps} setSteps={setSteps} />
