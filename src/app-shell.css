@@ -1671,3 +1671,6 @@ body::before { display: none !important; }
   height: auto !important;
   border-radius: var(--app-radius) !important;
 }
+
+/* File-type cards in the editor's empty state. */
+.editor-empty-cards { display: flex; gap: 18px; justify-content: center; margin-bottom: 4px; }

@@ -5,6 +5,7 @@ import { takeWorkspaceFilesFor, stashWorkspaceFiles } from "../lib/workspace-han
 import { SELECT_MODE_BY_TOOL, PAGE_SURFACE_TOOLS } from "../lib/routing";
 import { formatBytes } from "../utils/format.js";
 import DocumentView from "./DocumentView";
+import { FileCard } from "./ui/file-card-collections";
 
 /**
  * The editor: one document stays open while tools act on it.
@@ -191,7 +192,12 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
         <div className="editor-empty">
           <label className="workspace-drop">
             <input className="sr-only" type="file" aria-label="Open a file to edit" onChange={(event) => openFile(event.target.files)} />
-            <span className="dropzone-tile" aria-hidden="true"><FileText size={22} /></span>
+            {/* Shows the kinds of file this opens, rather than one generic glyph. */}
+            <span className="editor-empty-cards" aria-hidden="true">
+              <FileCard formatFile="pdf" />
+              <FileCard formatFile="png" />
+              <FileCard formatFile="xlsx" />
+            </span>
             <span className="workspace-drop-title">Open a file to edit</span>
             <span className="dropzone-hint">PDF · images · documents</span>
             <span className="dropzone-cta">Choose a file</span>
