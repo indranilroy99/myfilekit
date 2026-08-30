@@ -8555,3 +8555,75 @@ test("side panels can never scroll sideways", () => {
   // <pre> is deliberately excluded — it is meant to scroll on its own.
   assert.ok(!/\.editor-panel pre\b[^{]*\{[^}]*overflow-wrap/.test(block));
 });
+
+// --- Auto-Tag must not leave the document written twice ----------------------
+
+test("a duplicated text layer is detected, and a clean document is not", async () => {
+  const { duplicateTextRatio } = await import("../src/services/pdf-accessibility.service.js");
+  const clean = ["Quarterly Report", "Aadhaar: 2234 5678 9012", "Contact: rakesh@example.com", "Signed by the board"].join("\n");
+  assert.equal(duplicateTextRatio(clean), 0, "an ordinary document must not be flagged");
+  assert.ok(duplicateTextRatio([clean, clean].join("\n")) >= 0.6, "a document written twice must be flagged");
+  // Too little text to judge — a two-line file with a repeated line is not
+  // evidence of a duplicated layer, and a false accusation here is expensive.
+  assert.equal(duplicateTextRatio("Hi there\nHi there"), 0);
+  assert.equal(duplicateTextRatio(""), 0);
+  assert.equal(duplicateTextRatio(null), 0);
+});
+
+test("Auto-Tag marks the original page content as decorative, and a re-run does not stack", async () => {
+  const { PDFDocument, StandardFonts } = globalThis.window.PDFLib;
+  const { remediatePdfAccessibility } = await import("../src/services/pdf-accessibility.service.js");
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([595, 842]);
+  page.drawText("Quarterly Report", { x: 60, y: 760, size: 22, font });
+  page.drawText("Aadhaar: 2234 5678 9012", { x: 60, y: 700, size: 12, font });
+  const source = new Uint8Array(await doc.save());
+
+  const textBlocks = [
+    { page: 1, text: "Quarterly Report", role: "H1", x: 60, y: 760, width: 300, height: 22, size: 22 },
+    { page: 1, text: "Aadhaar: 2234 5678 9012", role: "P", x: 60, y: 700, width: 300, height: 12, size: 12 },
+  ];
+  const run = async (bytes) =>
+    (await remediatePdfAccessibility(bytes, { lang: "en-US", title: "T", textBlocks, figures: [] })).bytes;
+
+  const once = await run(source);
+  const raw = (bytes) => Buffer.from(bytes).toString("latin1");
+  const count = (bytes, needle) => (raw(bytes).match(new RegExp(needle, "g")) || []).length;
+
+  // The tool draws a tagged copy of the text; the ORIGINAL must therefore be
+  // marked as an artifact, or a screen reader reads the whole document twice.
+  assert.equal(count(once, "MFKAccessArtifact"), 2, "one /Artifact BMC wrapper opening and closing the original content");
+  assert.equal(count(once, "MFKAccessLayer"), 1, "exactly one tagged text layer");
+
+  // Re-running must replace, not nest.
+  const twice = await run(once);
+  assert.equal(count(twice, "MFKAccessArtifact"), 2, "a re-run must not stack another wrapper");
+  assert.equal(count(twice, "MFKAccessLayer"), 1, "a re-run must not stack another tagged layer");
+});
+
+test("the checker fails a document whose text is written twice", async () => {
+  const { PDFDocument, StandardFonts } = globalThis.window.PDFLib;
+  const { auditPdfAccessibility } = await import("../src/services/pdf-accessibility.service.js");
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  doc.addPage([595, 842]).drawText("Quarterly Report", { x: 60, y: 760, size: 18, font });
+  const bytes = new Uint8Array(await doc.save());
+
+  const lines = ["Quarterly Report", "Aadhaar: 2234 5678 9012", "Contact: rakesh@example.com", "Signed by the board"].join("\n");
+  const findCheck = (report) => report.checks.find((check) => check.id === "duplicate-text");
+
+  const clean = await auditPdfAccessibility(bytes, { textLayer: { characters: lines.length, pageCount: 1, text: lines } });
+  assert.equal(findCheck(clean)?.status, "pass", "an ordinary document passes");
+
+  const doubled = await auditPdfAccessibility(bytes, {
+    textLayer: { characters: lines.length * 2, pageCount: 1, text: [lines, lines].join("\n") },
+  });
+  const check = findCheck(doubled);
+  assert.equal(check?.status, "fail", "a document written twice must FAIL, not merely warn");
+  assert.match(check.detail, /read the document twice|stored twice/i, "and must say why it matters");
+  assert.ok(check.fix, "and must say what to do about it");
+
+  // The whole point: this must move the verdict, not sit in the list unnoticed.
+  assert.ok(doubled.summary.fail > clean.summary.fail, "the failure must reach the tally the verdict is built from");
+});

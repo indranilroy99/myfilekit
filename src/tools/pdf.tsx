@@ -2980,7 +2980,7 @@ type A11yReport = {
   stats: Record<string, any>;
 };
 type A11yFigure = { page: number; id: string; alt: string; decorative: boolean };
-type A11yAnalysis = { textBlocks: any[]; figures: A11yFigure[]; links?: any[]; textLayer: { characters: number; pageCount: number }; pageCount: number };
+type A11yAnalysis = { textBlocks: any[]; figures: A11yFigure[]; links?: any[]; textLayer: { characters: number; pageCount: number; text?: string }; pageCount: number };
 
 function a11yStatusTone(status: A11yStatus) {
   if (status === "fail") return "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger-fg)]";

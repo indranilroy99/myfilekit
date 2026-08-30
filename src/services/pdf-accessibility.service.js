@@ -432,11 +432,34 @@ function readEncryptionPermissions(lib, pdf) {
  *
  * @param {Uint8Array} bytes
  * @param {object} [options]
- * @param {{characters:number, pageCount:number}} [options.textLayer] Text-layer
+ * @param {{characters:number, pageCount:number, text?:string}} [options.textLayer] Text-layer
  *   summary from pdf.js (browser). When omitted, the extractable-text check is
  *   reported as "not evaluated" rather than guessed.
  * @returns {object} report with checks[], stats, verdict.
  */
+
+/**
+ * Fraction of substantial lines that appear more than once.
+ *
+ * A remediation that draws a tagged copy of the text over the original leaves
+ * every string in the file twice. The checker graded such a file 12 pass /
+ * 0 fail, because nothing looked for it — the tool that produces the defect and
+ * the tool that certifies the result were both blind to the same thing, which
+ * is the failure mode this project keeps hitting.
+ */
+export function duplicateTextRatio(text) {
+  const lines = String(text || "")
+    .split(/\r?\n|(?<=[.:;])\s{2,}/)
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 8);
+  if (lines.length < 4) return 0;
+  const seen = new Map();
+  for (const line of lines) seen.set(line, (seen.get(line) || 0) + 1);
+  let repeated = 0;
+  for (const [, n] of seen) if (n > 1) repeated += n;
+  return repeated / lines.length;
+}
+
 export async function auditPdfAccessibility(bytes, options = {}) {
   const lib = getPdfLib();
   const { PDFDocument } = lib;
@@ -551,6 +574,23 @@ export async function auditPdfAccessibility(bytes, options = {}) {
   });
 
   // 6. Extractable text (needs the pdf.js text layer)
+  // Every string present twice: a tagged copy drawn over untagged original.
+  if (textLayer && typeof textLayer.text === "string") {
+    const ratio = duplicateTextRatio(textLayer.text);
+    const duplicated = ratio >= 0.6;
+    add({
+      id: "duplicate-text",
+      label: "Text appears once",
+      status: duplicated ? "fail" : "pass",
+      detail: duplicated
+        ? `About ${Math.round(ratio * 100)}% of the text appears more than once. A screen reader will read the document twice, and any sensitive value is stored twice in the file.`
+        : "No duplicated text layer detected.",
+      fix: duplicated
+        ? "This usually means a tagged text layer was drawn over content that is still unmarked. Re-run Make Accessible on the ORIGINAL file rather than on an already-tagged copy."
+        : "",
+    });
+  }
+
   if (textLayer) {
     const scanned = textLayer.characters < 8 && imageCount > 0;
     add({
@@ -958,8 +998,12 @@ function stripPriorAccessLayers(lib, ctx, page) {
   for (let i = 0; i < resolved.size(); i += 1) {
     const ref = resolved.get(i);
     const stream = ref instanceof lib.PDFRef ? ctx.lookup(ref) : undefined;
-    const marker = stream && stream.dict && typeof stream.dict.get === "function" ? stream.dict.get(N("MFKAccessLayer")) : undefined;
-    if (marker && isTrue(marker)) {
+    const dict = stream && stream.dict && typeof stream.dict.get === "function" ? stream.dict : null;
+    const marker = dict ? dict.get(N("MFKAccessLayer")) : undefined;
+    // The /Artifact BMC ... EMC wrappers are ours too: without removing them a
+    // re-run nests another pair around the previous one.
+    const wrapper = dict ? dict.get(N("MFKAccessArtifact")) : undefined;
+    if ((marker && isTrue(marker)) || (wrapper && isTrue(wrapper))) {
       try { ctx.delete(ref); } catch { /* gone */ }
       removed += 1;
     } else {
@@ -972,6 +1016,51 @@ function stripPriorAccessLayers(lib, ctx, page) {
     page.node.set(N("Contents"), arr);
   }
   return removed;
+}
+
+
+/**
+ * Marks the page's ORIGINAL content as an artifact.
+ *
+ * This tool cannot tag the existing content stream — it never parses it — so it
+ * draws an invisible, tagged copy of the text and leaves the visible original
+ * alone. That left every string in the document present TWICE and neither copy
+ * marked: extracting text from a tagged file returned 142 characters where the
+ * input had 70, with the Aadhaar number appearing twice. A screen reader would
+ * read the whole document, then read it again. Under PDF/UA every content item
+ * must be tagged or marked as an artifact, so the output was non-conformant by
+ * construction — while the app's own checker graded it 12 pass, 0 fail.
+ *
+ * Wrapping the original streams in /Artifact BMC ... EMC makes them decorative:
+ * assistive technology skips them and reads the tagged layer, which is the one
+ * carrying headings, lists and reading order. BMC/EMC nest independently of
+ * q/Q, so this is safe around arbitrary existing content.
+ *
+ * Both wrappers carry /MFKAccessArtifact so a re-run strips them instead of
+ * nesting another pair.
+ */
+function artifactWrapOriginalContent(lib, ctx, page) {
+  const N = (k) => lib.PDFName.of(k);
+  const existing = page.node.get(N("Contents"));
+  if (!existing) return false;
+
+  const make = (text) => {
+    const stream = ctx.flateStream(text);
+    stream.dict.set(N("MFKAccessArtifact"), lib.PDFBool.True);
+    return ctx.register(stream);
+  };
+
+  const arr = lib.PDFArray.withContext(ctx);
+  arr.push(make("/Artifact BMC\n"));
+  const resolved = ctx.lookup(existing);
+  if (resolved instanceof lib.PDFArray) {
+    for (let i = 0; i < resolved.size(); i += 1) arr.push(resolved.get(i));
+  } else {
+    arr.push(existing);
+  }
+  arr.push(make("EMC\n"));
+  page.node.set(N("Contents"), arr);
+  return true;
 }
 
 // --- structure planning (pure) ------------------------------------------------
@@ -1368,9 +1457,14 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
     return elRef;
   };
 
+  let artifactedPages = 0;
   for (let pi = 0; pi < pageCount; pi += 1) {
     const page = pages[pi];
     const pageRef = page.ref;
+
+    // Mark the page's existing content decorative BEFORE the tagged layer is
+    // appended, so the layer itself is never caught inside the wrapper.
+    if (artifactWrapOriginalContent(lib, ctx, page)) artifactedPages += 1;
 
     const pageBlocks = blocksByPage[pi].filter((b) => String(b?.text ?? "").trim());
     const contentBlocks = pageBlocks.filter((b) => !runningBlocks.has(b));
@@ -1559,6 +1653,9 @@ export async function remediatePdfAccessibility(bytes, params = {}) {
   review.push("Reading order was inferred from text position (top-to-bottom, left-to-right). Confirm it is logically correct for multi-column, table, or form layouts.");
   review.push("Heading levels were guessed from text size/weight. Confirm the H1–H6 outline by hand.");
   if (tables) review.push("Table structure was inferred from text positions and is heuristic — confirm the /TH header cells and cell reading order by hand.");
+  if (artifactedPages) {
+    applied.push(`Marked the original page content on ${artifactedPages} page${artifactedPages === 1 ? "" : "s"} as decorative, so a screen reader reads the tagged text once rather than the document twice`);
+  }
   if (links) review.push("Confirm each link's /Contents description conveys its purpose.");
   if (taggedFigures) review.push("Confirm each image's alt text actually describes the image's meaning.");
 
@@ -1662,7 +1759,10 @@ export async function extractAccessibilityContent(source, onProgress) {
     page.cleanup();
   }
 
-  return { textBlocks, figures, links, textLayer: { characters, pageCount }, pageCount };
+  // The text itself, so the checker can spot a duplicated text layer. Capped:
+  // this is only ever scanned for repeats, never displayed or stored.
+  const sampleText = textBlocks.map((b) => String(b?.text ?? "").trim()).filter(Boolean).join("\n").slice(0, 200_000);
+  return { textBlocks, figures, links, textLayer: { characters, pageCount, text: sampleText }, pageCount };
 }
 
 // Maps parseParagraphs heading blocks to H1..H6 by distinct font-size tier
