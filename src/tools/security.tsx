@@ -465,7 +465,7 @@ function PrivacyScannerTool({ tool }: { tool: Tool }) {
               {structure.attachments.map((attachment, index) => (
                 <InfoRow key={`${attachment.name}-${index}`} label={`Attachment · ${attachment.type}`} value={`${attachment.name}${attachment.size ? ` · ${formatBytes(attachment.size)} stored` : ""}${attachment.description ? ` · ${attachment.description}` : ""}`} />
               ))}
-              {structure.embeddedFileStreams > 0 && <InfoRow label="/EmbeddedFile streams" value={`${structure.embeddedFileStreams} · ${formatBytes(structure.embeddedFileBytes)} stored`} />}
+              {structure.embeddedFileStreams > 0 && <InfoRow label="Embedded files" value={`${structure.embeddedFileStreams} · ${formatBytes(structure.embeddedFileBytes)} stored`} />}
               {!structure.attachments.length && !structure.embeddedFileStreams && <InfoRow label="Attachments" value="None found" />}
               <InfoRow label="Encrypted" value={structure.encrypted ? "Yes — this file carries PDF encryption" : "No"} />
               {structure.signatures.length
@@ -581,7 +581,7 @@ function PdfAnalyzerTool({ tool }: { tool: Tool }) {
               <InfoRow label="PDF version" value={report.version} />
               <InfoRow label="Pages (best-effort)" value={report.pageCount == null ? "unknown" : String(report.pageCount)} />
               <InfoRow label="Objects" value={String(report.objectCount)} />
-              <InfoRow label="Object streams (/ObjStm)" value={String(report.objStmCount)} />
+              <InfoRow label="Compressed object streams" value={String(report.objStmCount)} />
               <InfoRow label="Linearized" value={report.linearized ? "Yes" : "No"} />
               <InfoRow label="Encrypted" value={report.encrypted ? "Yes" : "No"} />
               <InfoRow label="Digital signature" value={report.hasSignature ? "Present (cryptography not verified)" : "None"} />

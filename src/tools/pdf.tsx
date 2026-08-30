@@ -2846,18 +2846,21 @@ function PdfaPrepTool({ tool }: { tool: Tool }) {
   const reset = () => { setFiles([]); setRaster(false); setOcrLayer(false); setOcrLang(DEFAULT_OCR_LANG); setTitle(""); setAuthor(""); setLang("en"); setReport(null); setCompliance(null); setStatus(initialStatus); };
 
   return <ToolForm status={status} onReset={reset}>
-    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Aims for a structurally valid <strong>PDF/A-2b</strong> via the self-contained path — but this is <strong>not</strong> a certified, veraPDF-validated conversion. It adds an sRGB OutputIntent with an embedded ICC profile, writes XMP carrying the PDF/A-2B conformance identifier, sets the document Title, language (/Lang), Info, /ID, and /MarkInfo, and strips things PDF/A forbids where it can (JavaScript, auto-run OpenAction, and Launch actions). We cannot run veraPDF in the browser, so <strong>run veraPDF to certify before relying on it for legal compliance</strong> — this does not claim compliance it cannot prove.
-    </div>
+    <p className="tool-lead">Prepare a PDF for long-term archiving.</p>
+    <ToolNotes summary="What this does, and what it cannot promise">
+      <li>Embeds the colour profile and the archival identifier the format needs.</li>
+      <li>Sets the document title and language, and removes scripts and auto-run actions.</li>
+      <li>This is <strong>not</strong> a certified conformance check. Before relying on it for legal compliance, validate the result with a formal tool.</li>
+    </ToolNotes>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
     <Checkbox label="Turn every page into an image (guaranteed self-contained)" checked={raster} onChange={setRaster} />
     {raster && (
       <div className="surface-muted wabi-card-edge grid gap-3 p-4 text-sm font-semibold leading-6 text-neutral-600">
-        <p>This turns each page into an image, so no font can be missing — the most reliable client-side path to PDF/A-2b — but plain turned into an image text is not selectable.</p>
+        <p>Turning pages into images guarantees no font can go missing, but the text stops being selectable.</p>
         <Checkbox label="Add a searchable OCR text layer (self-contained AND searchable)" checked={ocrLayer} onChange={setOcrLayer} />
         {ocrLayer && (
           <>
-            <p>OCR reads the text back with the local engine and draws it as an invisible, selectable layer over the image. The archival PDF is then <strong>both</strong> self-contained <strong>and</strong> searchable — a real advantage over a plain raster. The OCR text uses an embedded glyphless font, so the file stays self-contained. First run loads {OCR_ENGINE_SIZE_LABEL}.</p>
+            <p>Reads the text back and layers it invisibly over the image, so the file stays searchable. First run downloads {OCR_ENGINE_SIZE_LABEL} of language data.</p>
             <Select label="OCR language" value={ocrLang} onChange={setOcrLang} options={OCR_LANGUAGES.map((entry) => entry.code)} labels={OCR_LANGUAGES.map((entry) => entry.label)} />
           </>
         )}
@@ -3038,9 +3041,13 @@ function AccessibilityCheckTool({ tool }: { tool: Tool }) {
 
   return (
     <ToolForm status={status} onReset={reset}>
-      <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-        Audits a PDF against the machine-verifiable PDF/UA and WCAG criteria — tagging, title, language, image alt text, extractable text, encryption permissions, reading order, heading structure and nesting, list structure, table header cells with scope, tagged links, artifacted running content, and a role map. Everything runs locally in this browser. It reports how many automated checks pass, but is <strong>not</strong> a veraPDF or certified PDF/UA conformance pass: colour contrast, whether alt text is meaningful, whether table/list detection matched the real layout, and whether the reading order is logically correct all still need a human.
-      </div>
+      <p className="tool-lead">Check whether a PDF works for screen readers, and get a list of what to fix.</p>
+      <ToolNotes summary="What this cannot check">
+        <li>Whether an image's description actually describes it.</li>
+        <li>Whether the reading order makes sense to a person.</li>
+        <li>Colour contrast.</li>
+        <li>These need a human. A formal audit needs a certified tool.</li>
+      </ToolNotes>
       <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
 
       {report && (
@@ -3048,9 +3055,12 @@ function AccessibilityCheckTool({ tool }: { tool: Tool }) {
           <div className={`wabi-card-edge grid gap-2 rounded-2xl border p-4 ${verdictTone(report.verdict.level)}`}>
             <p className="text-xs font-bold uppercase tracking-wide">Accessibility verdict</p>
             <p className="text-lg font-black">{report.verdict.headline}</p>
-            {report.conformance ? <p className="text-sm font-bold">{report.conformance.summary}</p> : null}
+            {/* The screen shows the count and the finding. The full
+                not-certified caveat lives in the downloadable report and in the
+                tool's own "What this cannot check" list — printing it a third
+                time here was the redundancy. */}
+            {report.conformance ? <p className="text-sm font-bold">{report.conformance.passed} of {report.conformance.applicable} automated checks pass</p> : null}
             <p className="text-sm font-semibold leading-6">{report.verdict.summary}</p>
-            {report.conformance ? <p className="text-xs font-semibold leading-5 opacity-80">{report.conformance.caveat}</p> : null}
           </div>
 
           <div className="surface-card wabi-card-edge grid gap-3 p-4">

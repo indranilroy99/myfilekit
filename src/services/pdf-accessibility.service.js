@@ -716,6 +716,10 @@ export async function auditPdfAccessibility(bytes, options = {}) {
   const conformance = {
     passed: summary.pass,
     applicable,
+    // These two feed the DOWNLOADABLE report, which someone may rely on as
+    // evidence, so they stay complete and precise. The on-screen verdict renders
+    // a shorter form — a compliance document and a UI are different audiences,
+    // and trimming the report to tidy the screen would be the wrong trade.
     summary: `${summary.pass} of ${applicable} automated PDF/UA checks pass`,
     caveat:
       "This tallies only machine-verifiable criteria. It is NOT a veraPDF or certified PDF/UA conformance pass: meaningful alt text, correct reading order for complex layouts, and colour contrast still need human review.",
@@ -765,20 +769,20 @@ function buildVerdict({ tagged, summary }) {
     return {
       level: "fail",
       headline: "Not tagged — fails PDF/UA",
-      summary: `This document has no tagged structure tree, so it cannot meet PDF/UA. ${summary.fail} check(s) fail and ${summary.warn} need attention. Run Make Accessible (Auto-Tag) to fix the machine-fixable basics.`,
+      summary: `This document has no structure for a screen reader to follow. ${summary.fail} check(s) fail, ${summary.warn} need attention — Make Accessible fixes the basics.`,
     };
   }
   if (summary.fail > 0) {
     return {
       level: "warn",
       headline: `Tagged, ${summary.fail} issue(s) to fix`,
-      summary: `The document is tagged, but ${summary.fail} check(s) still fail and ${summary.warn} need attention. Fix these, then confirm reading order and alt-text quality by hand.`,
+      summary: `Structured, but ${summary.fail} check(s) still fail and ${summary.warn} need attention.`,
     };
   }
   return {
     level: summary.warn > 0 ? "warn" : "pass",
     headline: summary.warn > 0 ? "Tagged — minor items to review" : "Passes automated checks",
-    summary: `All automated failures are clear${summary.warn > 0 ? `, with ${summary.warn} item(s) to review` : ""}. This does not certify PDF/UA: colour contrast, meaningful alt text, and logical reading order still need a manual audit.`,
+    summary: `Every automated check passes${summary.warn > 0 ? `, with ${summary.warn} item(s) to review` : ""}.`,
   };
 }
 
