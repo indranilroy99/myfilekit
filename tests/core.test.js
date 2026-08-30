@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { tools, categories, categoryGroups } from "../src/registry/tools.registry.js";
 import { filterTools } from "../src/lib/search.js";
 import { csvToJson, jsonToCsv } from "../src/services/csv.service.js";
-import { addPdfPageNumbers, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "../src/services/pdf.service.js";
+import { A4_PAGE, addPdfPageNumbers, addTextToPdf, cleanPdfMetadata, deletePdfPages, extractPdfPages, imagePageLayout, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "../src/services/pdf.service.js";
 import { validateFiles } from "../src/services/file-validator.js";
 import { inspectImageMetadataBuffer } from "../src/services/metadata.service.js";
 import { base64Decode, base64Encode, diffToText, generatePassphrase, generatePassword, jsonToYaml, lineDiff, passwordStrength, textStats, urlDecode, urlEncode } from "../src/services/text-tools.service.js";
@@ -8136,4 +8136,90 @@ test("a rejected page range clears the previous split result", () => {
   assert.ok(parsed > cleared, "and before the range can be rejected — so nothing stale survives");
   assert.match(handler.slice(cleared, validated), /return null/, "the result is dropped, not replaced");
   assert.match(handler.slice(cleared, validated), /revokeObjectURL/, "and its object URL is released");
+});
+
+// --- Images to PDF page geometry ---------------------------------------------
+
+const INCH = 72;
+const longestSideInches = (layout) => Math.max(layout.pageWidth, layout.pageHeight) / INCH;
+
+test("a phone photo becomes a printable page, not a 42-inch one", () => {
+  // The reported defect: 3024x4032 pixels passed to addPage as points.
+  const portrait = imagePageLayout(3024, 4032);
+  assert.equal(Math.round(portrait.pageWidth), Math.round(A4_PAGE.width));
+  assert.equal(Math.round(portrait.pageHeight), Math.round(A4_PAGE.height));
+  assert.ok(longestSideInches(portrait) < 12, `page was ${longestSideInches(portrait).toFixed(1)} inches long`);
+
+  // Every mode, every plausible camera and scanner size, stays printable.
+  const sizes = [[3024, 4032], [4032, 3024], [1920, 1080], [6000, 4000], [8000, 8000], [100, 100], [1, 1]];
+  for (const mode of ["a4", "match"]) {
+    for (const [width, height] of sizes) {
+      const layout = imagePageLayout(width, height, mode);
+      assert.ok(longestSideInches(layout) <= 11.7 + 0.01, `${mode} ${width}x${height} gave ${longestSideInches(layout).toFixed(1)} inches`);
+      assert.ok(layout.pageWidth > 0 && layout.pageHeight > 0);
+    }
+  }
+});
+
+test("a landscape image turns the page instead of letterboxing it", () => {
+  const landscape = imagePageLayout(4032, 3024);
+  assert.ok(landscape.pageWidth > landscape.pageHeight, "expected a landscape A4 page");
+  assert.equal(Math.round(landscape.pageWidth), Math.round(A4_PAGE.height));
+  // A 4:3 image is taller than a turned A4 is proportionally, so it is limited by
+  // the page height and fills it between the margins.
+  assert.ok(Math.abs(landscape.height - (landscape.pageHeight - 36 * 2)) < 0.01);
+  // Turning the page is what makes it big: upright it would be far smaller.
+  assert.ok(landscape.width > imagePageLayout(4032, 3024, "a4", 36).pageHeight * 0.5);
+});
+
+test("images to PDF keeps the image's shape and stays inside the page", () => {
+  for (const mode of ["a4", "match"]) {
+    for (const [width, height] of [[3024, 4032], [4032, 3024], [1600, 1600], [2000, 500]]) {
+      const layout = imagePageLayout(width, height, mode);
+      // Aspect ratio is preserved: no stretched photos.
+      assert.ok(Math.abs((layout.width / layout.height) - (width / height)) < 0.001, `${mode} ${width}x${height} was stretched`);
+      // Nothing is drawn off the page.
+      assert.ok(layout.x >= -0.001 && layout.y >= -0.001);
+      assert.ok(layout.x + layout.width <= layout.pageWidth + 0.001);
+      assert.ok(layout.y + layout.height <= layout.pageHeight + 0.001);
+    }
+  }
+});
+
+test("match mode is borderless and a4 mode is centred with a margin", () => {
+  const match = imagePageLayout(3024, 4032, "match");
+  assert.equal(match.x, 0);
+  assert.equal(match.y, 0);
+  assert.equal(match.width, match.pageWidth);
+  assert.equal(match.height, match.pageHeight);
+  // Same shape as the image.
+  assert.ok(Math.abs((match.pageWidth / match.pageHeight) - (3024 / 4032)) < 0.001);
+
+  const a4 = imagePageLayout(3024, 4032, "a4");
+  assert.ok(a4.x > 0 && a4.y > 0, "expected a margin");
+  // Centred: equal space on both sides.
+  assert.ok(Math.abs(a4.x - (a4.pageWidth - a4.width - a4.x)) < 0.001);
+  assert.ok(Math.abs(a4.y - (a4.pageHeight - a4.height - a4.y)) < 0.001);
+});
+
+test("image page layout survives the sizes a broken decode reports", () => {
+  for (const bad of [0, -5, Number.NaN, undefined, null]) {
+    const layout = imagePageLayout(bad, bad);
+    assert.ok(Number.isFinite(layout.pageWidth) && layout.pageWidth > 0);
+    assert.ok(Number.isFinite(layout.pageHeight) && layout.pageHeight > 0);
+    assert.ok(Number.isFinite(layout.width) && Number.isFinite(layout.height));
+  }
+  // An unknown mode falls back to A4 rather than to raw pixels.
+  const unknown = imagePageLayout(3024, 4032, "pixels");
+  assert.equal(Math.round(unknown.pageHeight), Math.round(A4_PAGE.height));
+});
+
+test("scans and handwriting go through the same A4 geometry", () => {
+  const source = fs.readFileSync(new URL("../src/services/convert.service.js", import.meta.url), "utf8");
+  const start = source.indexOf("export async function canvasesToPdf");
+  const body = source.slice(start, source.indexOf("\n}", start));
+  assert.ok(start >= 0, "canvasesToPdf missing from convert.service.js");
+  assert.match(body, /imagePageLayout\(canvas\.width, canvas\.height, "a4"\)/);
+  // The old bug: canvas pixels used directly as the page box.
+  assert.doesNotMatch(body, /addPage\(\[canvas\.width, canvas\.height\]\)/);
 });

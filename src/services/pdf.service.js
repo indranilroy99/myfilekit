@@ -188,14 +188,63 @@ export async function textToPdf(text) {
   return pdf.save();
 }
 
-export async function imagesToPdf(files) {
+// A4 in PostScript points.
+export const A4_PAGE = { width: 595.28, height: 841.89 };
+const IMAGE_PAGE_MARGIN = 36;
+
+/**
+ * Page box and draw rectangle for one image, in PDF points.
+ *
+ * An image's width and height are PIXELS. A PDF page is measured in points,
+ * one of which is 1/72 inch, so passing pixels straight to addPage made a
+ * 3024x4032 phone photo into a 42x56 INCH page: correct-looking on screen,
+ * unprintable on any paper anyone owns. Neither mode below can do that — both
+ * derive the page from A4, so the pixel count only sets the shape.
+ *
+ * "a4"    every page the same printable size, image centred inside a margin.
+ * "match" borderless page shaped like the image, longest side one A4 length.
+ */
+export function imagePageLayout(imageWidth, imageHeight, mode = "a4", margin = IMAGE_PAGE_MARGIN) {
+  const width = Number(imageWidth) > 0 ? Number(imageWidth) : 1;
+  const height = Number(imageHeight) > 0 ? Number(imageHeight) : 1;
+
+  if (mode === "match") {
+    const scale = A4_PAGE.height / Math.max(width, height);
+    const pageWidth = width * scale;
+    const pageHeight = height * scale;
+    return { pageWidth, pageHeight, x: 0, y: 0, width: pageWidth, height: pageHeight };
+  }
+
+  // Turn the page to the image rather than the image to the page: a landscape
+  // photo on a portrait page would sit in a letterbox with half the page empty.
+  const landscape = width > height;
+  const pageWidth = landscape ? A4_PAGE.height : A4_PAGE.width;
+  const pageHeight = landscape ? A4_PAGE.width : A4_PAGE.height;
+  const boxWidth = Math.max(1, pageWidth - margin * 2);
+  const boxHeight = Math.max(1, pageHeight - margin * 2);
+  const scale = Math.min(boxWidth / width, boxHeight / height);
+  const drawWidth = width * scale;
+  const drawHeight = height * scale;
+  return {
+    pageWidth,
+    pageHeight,
+    x: (pageWidth - drawWidth) / 2,
+    y: (pageHeight - drawHeight) / 2,
+    width: drawWidth,
+    height: drawHeight,
+  };
+}
+
+export async function imagesToPdf(files, options = {}) {
+  const mode = options.pageSize === "match" ? "match" : "a4";
   const { PDFDocument } = getPdfLib();
   const pdf = await PDFDocument.create();
   for (const file of files) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const image = file.type === "image/png" ? await pdf.embedPng(bytes) : await pdf.embedJpg(await canvasJpegBytes(file));
-    const page = pdf.addPage([image.width, image.height]);
-    page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+    const layout = imagePageLayout(image.width, image.height, mode);
+    const page = pdf.addPage([layout.pageWidth, layout.pageHeight]);
+    page.drawImage(image, { x: layout.x, y: layout.y, width: layout.width, height: layout.height });
   }
   return pdf.save();
 }

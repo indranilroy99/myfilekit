@@ -1,4 +1,4 @@
-import { getPdfLib } from "./pdf.service.js";
+import { getPdfLib, imagePageLayout } from "./pdf.service.js";
 import { parseCsv } from "./csv.service.js";
 
 // A4 in PostScript points, shared by every PDF this service builds.
@@ -188,16 +188,21 @@ export async function canvasToPdf(canvas) {
   return pdf.save();
 }
 
-// One page per canvas, page sized to the image (mirrors imagesToPdf). Used by
+// One page per canvas, laid out on A4 (shares imagesToPdf's geometry). Used by
 // Handwriting to PDF and Scan to PDF.
+//
+// These pages used to be sized in canvas pixels, so a 1920x1080 camera frame
+// became a 27x15 inch page. Both tools produce documents people print, so A4 is
+// the only sane page here and there is no option to turn it off.
 export async function canvasesToPdf(canvases) {
   if (!canvases.length) throw new Error("Add at least one page.");
   const { PDFDocument } = getPdfLib();
   const pdf = await PDFDocument.create();
   for (const canvas of canvases) {
     const image = await pdf.embedJpg(await canvasJpegBytes(canvas));
-    const page = pdf.addPage([canvas.width, canvas.height]);
-    page.drawImage(image, { x: 0, y: 0, width: canvas.width, height: canvas.height });
+    const layout = imagePageLayout(canvas.width, canvas.height, "a4");
+    const page = pdf.addPage([layout.pageWidth, layout.pageHeight]);
+    page.drawImage(image, { x: layout.x, y: layout.y, width: layout.width, height: layout.height });
   }
   return pdf.save();
 }

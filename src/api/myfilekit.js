@@ -176,9 +176,9 @@ const pdf = {
   fromText(text) {
     return textToPdf(text);
   },
-  /** Build a PDF from JPG/PNG/WebP images. @returns {Promise<Uint8Array>} */
-  fromImages(files) {
-    return imagesToPdf(Array.from(files || []).map((file) => asFile(file, "image", "image/png")));
+  /** Build a PDF from JPG/PNG/WebP images. @param {{pageSize?:"a4"|"match"}} [options] @returns {Promise<Uint8Array>} */
+  fromImages(files, options) {
+    return imagesToPdf(Array.from(files || []).map((file) => asFile(file, "image", "image/png")), options);
   },
 
   // --- browser-only (canvas / pdf.js) ---------------------------------------

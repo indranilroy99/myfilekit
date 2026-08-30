@@ -43,6 +43,47 @@ function PdfFileTool({ tool, action, run, multiple = false, accept = "applicatio
   </ToolForm>;
 }
 
+/**
+ * Images to PDF.
+ *
+ * Has its own component rather than PdfFileTool because the page size is a real
+ * decision and it used to be made silently and wrongly: pages were sized in
+ * image pixels read as points, so a phone photo produced a 42x56 inch page.
+ */
+function ImagesToPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [pageSize, setPageSize] = useState("a4");
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => {
+    setFiles([]);
+    setPageSize("a4");
+    setStatus(initialStatus);
+  };
+
+  return <ToolForm status={status} onReset={reset}>
+    <FileControl accept="image/jpeg,image/png,image/webp" multiple files={files} setFiles={setFiles} />
+    <Select
+      label="Page size"
+      value={pageSize}
+      onChange={setPageSize}
+      options={["a4", "match"]}
+      labels={["A4 — every page the same, ready to print", "Match each image — borderless, no white edges"]}
+    />
+    <p className="text-xs font-semibold text-neutral-500">
+      A4 centres each image on a standard page, turning the page sideways for a landscape photo.
+      Matching gives each image its own borderless page in the same shape, sized so the longest
+      side is the length of an A4 sheet.
+    </p>
+    <PrimaryButton label="Create PDF" onClick={() => runSafely(setStatus, async () => {
+      const valid = validateFiles(files, tool.file);
+      const bytes = await imagesToPdf(valid, { pageSize });
+      downloadBytes(bytes, "myfilekit-images.pdf", "application/pdf");
+      return `Created a ${valid.length}-page PDF${pageSize === "a4" ? " on A4 pages" : ""}.`;
+    })} />
+  </ToolForm>;
+}
+
 function PageRangeTool({ tool, action, run, suffix }: { tool: Tool; action: string; suffix: string; run: (file: File, pages: number[]) => Promise<Uint8Array> }) {
   const [files, setFiles] = useState<File[]>([]);
   const [ranges, setRanges] = useState("");
@@ -4167,7 +4208,7 @@ export default function PdfTools({ tool }: { tool: Tool }) {
   if (tool.id === "pdf-to-zip-tool") return <PdfToZipTool tool={tool} />;
   if (tool.id === "flatten-pdf-tool") return <FlattenPdfTool tool={tool} />;
   if (tool.id === "invert-pdf-tool") return <InvertPdfTool tool={tool} />;
-  if (tool.id === "images-to-pdf-tool") return <PdfFileTool tool={tool} action="Create PDF" multiple accept="image/jpeg,image/png,image/webp" run={(files) => imagesToPdf(files).then((bytes) => downloadBytes(bytes, "myfilekit-images.pdf", "application/pdf"))} />;
+  if (tool.id === "images-to-pdf-tool") return <ImagesToPdfTool tool={tool} />;
   if (tool.id === "organize-pages-tool") return <OrganizePagesTool tool={tool} />;
   if (tool.id === "crop-resize-pdf-tool") return <CropResizePdfTool tool={tool} />;
   if (tool.id === "headers-footers-tool") return <HeadersFootersTool tool={tool} />;
