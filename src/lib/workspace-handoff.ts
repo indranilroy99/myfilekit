@@ -20,6 +20,15 @@ let pending: Handoff | null = null;
 export function stashWorkspaceFiles(files: File[], toolId: string) {
   if (!files.length || !toolId) return;
   pending = { files: files.slice(), toolId };
+  // A file control only seeds itself on mount, which is enough when the hand-off
+  // precedes navigation. It is NOT enough in the editor, where the document can
+  // be replaced by a tool's own output while that same tool stays mounted —
+  // there the control kept the file the user opened and every further edit was
+  // applied to the original, silently discarding the previous one. The ownership
+  // check in takeWorkspaceFilesFor still decides who may take it.
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("myfilekit:workspace-file", { detail: { toolId } }));
+  }
 }
 
 /**

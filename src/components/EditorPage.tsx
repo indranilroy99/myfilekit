@@ -128,7 +128,12 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
         && editorKindFor(d.filename) !== "none";
       if (!sameKind || !d.blob) return;
       setOriginal((previous) => previous || current);
-      setFile(new File([d.blob], d.filename, { type: d.blob.type || current.type }));
+      const next = new File([d.blob], d.filename, { type: d.blob.type || current.type });
+      setFile(next);
+      // Hand the new document straight back to the tool still on screen, so a
+      // second run builds on the first instead of re-processing the original.
+      const tool = toolRef.current;
+      if (tool) stashWorkspaceFiles([next], tool.id);
     };
     window.addEventListener("myfilekit:download-ready", onReady);
     return () => window.removeEventListener("myfilekit:download-ready", onReady);

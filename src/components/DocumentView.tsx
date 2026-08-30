@@ -132,19 +132,34 @@ export function DocumentView({ file, page, onPageChange, onPageCount, selectMode
         // Fit mode measures the stage and scales the page to it.
         let scale = zoomIndex === FIT ? fitScale : ZOOMS[zoomIndex];
         if (zoomIndex === FIT) {
-          const stageWidth = stage.parentElement?.clientWidth || stage.clientWidth;
+          // Measure the SCROLL CONTAINER, not stage.parentElement: the parent is
+          // an inline-block shrink-wrap sized around the canvas, so it reports
+          // the canvas's own width — or 0 on first paint, which left `scale` at
+          // its initial 1 forever. Fit was measuring the thing it was supposed
+          // to be fitting.
+          const stageWidth = stage.closest(".doc-stage")?.clientWidth || stage.parentElement?.clientWidth || stage.clientWidth;
           if (stageWidth > 0) {
             scale = Math.max(0.2, Math.min(3, (stageWidth - 32) / base.width));
             setFitScale(scale);
           }
         }
+        // 1.5x supersample for crispness on HiDPI. The bitmap is therefore 1.5x
+        // the intended on-screen size, so the CSS size must be set explicitly —
+        // without it the canvas lays out at its bitmap width and the supersample
+        // becomes a 1.5x ZOOM. Combined with the fit bug above, "Fit" rendered
+        // the page at 218% of its stage and cropped it on both sides.
         const canvas = await renderPdfPageToCanvas(doc, current, scale * 1.5);
         // A newer render started while this one was in flight.
         if (token !== renderToken.current) return;
         setPagePoints({ w: base.width, h: base.height });
         canvas.className = "doc-page-canvas";
+        canvas.style.width = `${Math.round(base.width * scale)}px`;
+        canvas.style.height = `${Math.round(base.height * scale)}px`;
         stage.replaceChildren(canvas);
-      } catch {
+      } catch (error) {
+        // Was a bare swallow, so a failed page render left the stage silently
+        // empty with nothing in the console to explain it.
+        console.error("[DocumentView] page render failed", error);
         if (token !== renderToken.current) return;
         stage.replaceChildren();
       }

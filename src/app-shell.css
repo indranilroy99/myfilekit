@@ -1034,7 +1034,7 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
 }
 
 .doc-stage-inner { display: grid; place-items: center; }
-.doc-page-canvas { max-width: none; height: auto; border: 1px solid var(--c-line); background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
+.doc-page-canvas { max-width: 100%; height: auto; border: 1px solid var(--c-line); background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
 
 .doc-loading {
   position: absolute;

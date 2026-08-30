@@ -255,6 +255,17 @@ function FileControl({ accept, multiple = false, files, setFiles, label }: { acc
     if (handed.length) setFiles(multiple ? handed : handed.slice(0, 1));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // ...and again if one is announced later. No dependency array on purpose: the
+  // handler must close over the current setFiles and accept list, and this
+  // component has already shipped two stale-closure bugs.
+  useEffect(() => {
+    const onHandoff = () => {
+      const handed = takeWorkspaceFilesForActive().filter(matchesAccept);
+      if (handed.length) setFiles(multiple ? handed : handed.slice(0, 1));
+    };
+    window.addEventListener("myfilekit:workspace-file", onHandoff);
+    return () => window.removeEventListener("myfilekit:workspace-file", onHandoff);
+  });
   // Publish the PDF this control holds so the page can render it beside the
   // form. Tagged with the control's own id: a tool with two file inputs (the
   // PDF and the .p12 in Digital Signature) must not have one clear the other.
