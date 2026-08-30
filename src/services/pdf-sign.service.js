@@ -1574,9 +1574,28 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes, audit = { pres
   if (s1 + l1 > pdfBytes.length || s2 + l2 > pdfBytes.length) throw new Error("This signature's /ByteRange points outside the file.");
   const signedData = concatBytes([pdfBytes.subarray(s1, s1 + l1), pdfBytes.subarray(s2, s2 + l2)]);
 
-  // The whole file is covered iff the two spans meet exactly at the /Contents
-  // gap and reach the end of the file.
-  const coversWholeDocument = s1 === 0 && (s2 + l2) === pdfBytes.length;
+  // The whole file is covered iff the two spans start at 0, reach the end of the
+  // file, AND the hole between them is exactly the /Contents hex string.
+  //
+  // That last clause used to be a comment rather than a check. Only the two ends
+  // were tested, so a signature could declare an oversized gap and hide arbitrary
+  // unhashed bytes in it — a whole replacement object graph, say — while this
+  // still reported "entire document" and "unchanged since signing". The bytes in
+  // the hole are not part of signedData, so the CMS verifies happily.
+  //
+  // /Contents is a hex string: '<', two hex digits per byte, '>'.
+  const gapStart = s1 + l1;
+  const gapEnd = s2;
+  const gapLength = gapEnd - gapStart;
+  const expectedGap = contentsBytes.length * 2 + 2;
+  const delimitersOk = gapLength >= 2
+    && pdfBytes[gapStart] === 0x3c /* < */
+    && pdfBytes[gapEnd - 1] === 0x3e /* > */;
+  // Whitespace is legal inside a hex string, so allow the gap to be no SMALLER
+  // than the contents and flag only bytes that cannot be accounted for.
+  const unhashedSlack = gapLength - expectedGap;
+  const gapIsContentsOnly = delimitersOk && unhashedSlack === 0;
+  const coversWholeDocument = s1 === 0 && (s2 + l2) === pdfBytes.length && gapIsContentsOnly;
 
   const asn1 = asn1js.fromBER(bufOf(contentsBytes));
   if (asn1.offset === -1) throw new Error("The signature's CMS could not be parsed.");
@@ -1697,6 +1716,15 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes, audit = { pres
   if (auditTrailPresent && !coveredMatches) {
     tamperFindings.push("The audit trail's recorded /Covered range does not match the signature's /ByteRange.");
   }
+  // An oversized or misaligned /ByteRange hole is not the same thing as an
+  // ordinary appended revision, so it gets its own finding rather than being
+  // folded into "valid-partial", whose wording ("bytes were appended after it")
+  // reads as routine.
+  if (!delimitersOk) {
+    tamperFindings.push("The signature's /ByteRange gap does not enclose the /Contents string, so the unsigned hole is not where the signature claims it is.");
+  } else if (unhashedSlack > 0) {
+    tamperFindings.push(`The signature leaves ${unhashedSlack} byte${unhashedSlack === 1 ? "" : "s"} inside its /ByteRange gap that are not part of /Contents and were never hashed. Anything in that hole can be changed without breaking this signature.`);
+  }
 
   // --- Audit-trail identity trust (forgery via incremental redefinition) -----
   // The embedded /MFKAuditTrail is only authoritative when it lived inside the
@@ -1729,7 +1757,9 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes, audit = { pres
     verdict = coversWholeDocument ? "valid" : "valid-partial";
     detail = coversWholeDocument
       ? "Signature cryptographically valid; the document is unchanged since it was signed."
-      : "Signature cryptographically valid for the revision it covers, but bytes were appended after it (a later incremental update or an added signature).";
+      : (!delimitersOk || unhashedSlack > 0)
+        ? "Signature cryptographically valid, but it does not cover the whole file: there are bytes inside its own /ByteRange gap that were never hashed and can be altered without breaking it. Treat this document as unverified."
+        : "Signature cryptographically valid for the revision it covers, but bytes were appended after it (a later incremental update or an added signature).";
   } else if (signatureValid && !integrity) {
     verdict = "modified";
     detail = "The document has been MODIFIED after this signature was applied: the signed message digest no longer matches the document bytes.";

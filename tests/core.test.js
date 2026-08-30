@@ -8334,3 +8334,101 @@ test("redaction boxes stay inside the page at every rotation", async () => {
     assert.ok(rect.w * rect.h < 2000, `/Rotate ${angle}: box covers ${(rect.w * rect.h / 100).toFixed(0)}% of the page`);
   }
 });
+
+// --- /ByteRange gap must be exactly /Contents --------------------------------
+
+/**
+ * Rewrite a signed PDF's /ByteRange so the unsigned hole is `extra` bytes wider
+ * than /Contents, and drop attacker bytes into the slack. The CMS still verifies
+ * because those bytes were never part of signedData — which is precisely the
+ * hole the verifier has to notice.
+ */
+function widenSignatureGap(signedBytes, extra) {
+  const text = Buffer.from(signedBytes).toString("latin1");
+  const brAt = text.indexOf("/ByteRange [");
+  assert.ok(brAt >= 0, "no /ByteRange in the signed file");
+  const close = text.indexOf("]", brAt);
+  const [s1, l1, s2, l2] = text.slice(brAt + "/ByteRange [".length, close).trim().split(/\s+/).map(Number);
+
+  // INSERT slack into the hole rather than overwriting, so both signed spans
+  // still cover byte-identical content: the CMS digest is unchanged and the
+  // signature keeps verifying. Spaces are legal whitespace inside the dict, so
+  // the file stays parseable. This is the shape of the real attack — a hole
+  // wider than /Contents, whose contents nothing hashes.
+  const out = new Uint8Array(signedBytes.length + extra);
+  out.set(signedBytes.subarray(0, s2), 0);
+  out.fill(0x20, s2, s2 + extra);
+  out.set(signedBytes.subarray(s2), s2 + extra);
+
+  // Second span now starts `extra` later; it still ends at the new end of file.
+  const original = text.slice(brAt, close + 1);
+  const replacement = `/ByteRange [${s1} ${l1} ${s2 + extra} ${l2}]`;
+  assert.ok(replacement.length <= original.length, "rewritten /ByteRange must not move file offsets");
+  const padded = replacement + " ".repeat(original.length - replacement.length);
+  for (let i = 0; i < padded.length; i++) out[brAt + i] = padded.charCodeAt(i);
+  return out;
+}
+
+test("widening a signature's /ByteRange gap after the fact is always caught", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("Mallory", "Mallory", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const signed = await signPdf(await buildSamplePdf(false), { p12, password: "pw" });
+
+  const clean = await verifyPdfSignatures(signed.bytes);
+  assert.equal(clean.signatures[0].verdict, "valid");
+  assert.equal(clean.signatures[0].coversWholeDocument, true);
+  assert.deepEqual(clean.signatures[0].tamperFindings, []);
+
+  // Insert 64 unhashed bytes into the hole and re-point the second span at them.
+  const sig = (await verifyPdfSignatures(widenSignatureGap(signed.bytes, 64))).signatures[0];
+
+  // This must never read as an intact document, by whichever route.
+  assert.notEqual(sig.verdict, "valid");
+  assert.equal(sig.coversWholeDocument, false);
+  assert.ok(sig.tamperFindings.length > 0, "a widened gap must raise at least one finding");
+
+  // WHY it is caught matters, and it is not the gap check: /ByteRange lives
+  // INSIDE the first signed span, so editing it changes the hashed bytes and
+  // the digest stops matching. That is the load-bearing defence against
+  // after-the-fact tampering, and this test pins it.
+  assert.equal(sig.integrity, false, "editing /ByteRange must break the digest");
+  assert.equal(sig.verdict, "modified");
+});
+
+test("the gap check rejects a hole that is wider than /Contents", () => {
+  // Guards the case the digest cannot: a signature produced with an oversized
+  // hole from the start, by a signer we do not trust. There the CMS is
+  // internally consistent, so only measuring the gap catches it.
+  const source = fs.readFileSync(new URL("../src/services/pdf-sign.service.js", import.meta.url), "utf8");
+  const verifyAt = source.indexOf("async function verifyOneSignature");
+  assert.ok(verifyAt > 0, "verifyOneSignature not found");
+  const block = source.slice(verifyAt, source.indexOf("const asn1 = asn1js.fromBER", verifyAt));
+  assert.match(block, /const expectedGap = contentsBytes\.length \* 2 \+ 2/);
+  assert.match(block, /pdfBytes\[gapStart\] === 0x3c/);
+  assert.match(block, /pdfBytes\[gapEnd - 1\] === 0x3e/);
+  // coversWholeDocument must depend on the gap, not only on the two outer ends.
+  assert.match(block, /const coversWholeDocument = s1 === 0 && \(s2 \+ l2\) === pdfBytes\.length && gapIsContentsOnly/);
+  // And the condition must actually be reachable as a finding.
+  assert.match(source, /never hashed\. Anything in that hole can be changed/);
+});
+
+test("an ordinary appended revision still reads as valid-partial, not as a gap attack", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("Alice", "Alice", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const signed = await signPdf(await buildSamplePdf(false), { p12, password: "pw" });
+
+  // Append bytes AFTER the signed range — the legitimate incremental-update case.
+  const appended = new Uint8Array(signed.bytes.length + 32);
+  appended.set(signed.bytes, 0);
+  appended.fill(0x0a, signed.bytes.length);
+
+  const sig = (await verifyPdfSignatures(appended)).signatures[0];
+  assert.equal(sig.coversWholeDocument, false);
+  // It must not be mislabelled as the gap attack; the gap itself is still intact.
+  assert.ok(
+    !sig.tamperFindings.some((line) => /never hashed/i.test(line)),
+    `appending must not raise the unhashed-gap finding: ${JSON.stringify(sig.tamperFindings)}`
+  );
+});
