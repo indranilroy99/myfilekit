@@ -1361,7 +1361,9 @@ function ToolPage({ tool }: { tool: Tool }) {
   // so the preview always matches what will actually be applied — an
   // append-only echo silently diverged from it (and could never be undone).
   const [regions, setRegions] = useState<{ page: number; x: number; y: number; w: number; h: number }[]>([]);
-  const activeFile = Object.values(docs)[0] || null;
+  // The result wins over the input when there is one: after a tool runs, the
+  // page shows what the tool produced. Cleared as soon as a new file is chosen.
+  const activeFile = docs.__result || Object.values(docs).find(Boolean) || null;
 
   useEffect(() => {
     saveRecentTool(tool.id);
@@ -1388,15 +1390,36 @@ function ToolPage({ tool }: { tool: Tool }) {
       const detail = (event as CustomEvent<{ source: string; file: File | null }>).detail;
       if (!detail?.source) return;
       setDocs((current) => {
-        if (detail.file) return { ...current, [detail.source]: detail.file };
-        if (!(detail.source in current)) return current;
+        // Any change to the chosen file invalidates a previous result: the pane
+        // must never show document A's output beside document B's name.
         const next = { ...current };
-        delete next[detail.source];
+        delete next.__result;
+        if (detail.file) next[detail.source] = detail.file;
+        else delete next[detail.source];
         return next;
       });
     };
     window.addEventListener("myfilekit:active-file", onActive);
     return () => window.removeEventListener("myfilekit:active-file", onActive);
+  }, []);
+
+  /**
+   * Show the tool's OUTPUT in the preview pane.
+   *
+   * The pane rendered whatever FileControl published, which is always the input
+   * and is never republished. So applying a watermark left the largest surface
+   * on screen showing the un-watermarked original, next to a card reading
+   * "Done — ready to save". A preview that silently shows the wrong document is
+   * worse than no preview: it reads as "the tool did nothing".
+   */
+  useEffect(() => {
+    const onReady = (event: Event) => {
+      const d = (event as CustomEvent<{ filename: string; blob?: Blob }>).detail;
+      if (!d?.blob || !/\.pdf$/i.test(d.filename || "")) return;
+      setDocs((current) => ({ ...current, __result: new File([d.blob!], d.filename, { type: "application/pdf" }) }));
+    };
+    window.addEventListener("myfilekit:download-ready", onReady);
+    return () => window.removeEventListener("myfilekit:download-ready", onReady);
   }, []);
 
   return (

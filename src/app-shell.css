@@ -845,6 +845,20 @@ html.dark .tag-badge, html.dark .new-badge {
 /* Focus visibility, applied once for the whole app. */
 :focus-visible { outline: 2px solid var(--c-accent) !important; outline-offset: 1px !important; }
 
+/* On a route change the router moves focus to the new page's heading so screen
+   readers announce it. That focus is programmatic — the user never tabbed to a
+   heading — so painting a ring drew a 2px indigo box around the 54px landing
+   headline on load, which reads as a rendering fault rather than as a focus
+   state. The heading is not keyboard-operable (tabindex="-1", not 0), so
+   WCAG 2.4.7 does not apply to it; suppressing the ring here costs nothing and
+   every genuinely focusable control above keeps its own. */
+h1[tabindex="-1"]:focus,
+h1[tabindex="-1"]:focus-visible,
+#app-main[tabindex="-1"]:focus,
+#app-main[tabindex="-1"]:focus-visible {
+  outline: none !important;
+}
+
 /* Scrollbars sized like an application, not a document. */
 .sidebar-scroll::-webkit-scrollbar, .worksurface::-webkit-scrollbar, .menu-pop::-webkit-scrollbar { width: 10px; height: 10px; }
 .sidebar-scroll::-webkit-scrollbar-thumb, .worksurface::-webkit-scrollbar-thumb, .menu-pop::-webkit-scrollbar-thumb {
@@ -1282,9 +1296,24 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
 
 .editor-shell {
   display: grid;
-  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr) 240px;
+  /* The document is the subject of a document editor, so it gets the room. The
+     options column was allowed up to 420px against a 1fr canvas, which at 1440
+     left the page barely wider than the form beside it — the smallest pane on
+     screen was the thing being edited. */
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr) 232px;
   align-items: stretch;
-  min-height: calc(100svh - var(--app-menubar-h) - var(--app-status-h) - var(--app-docbar-h));
+  /* height, not min-height: with only a minimum the three panes stack into one
+     long scrolling page, so reaching a tool at the bottom of the rail scrolls
+     the document itself off screen. An editor holds its frame and scrolls its
+     panes. */
+  height: calc(100svh - var(--app-menubar-h) - var(--app-status-h) - var(--app-docbar-h));
+  min-height: 0;
+}
+
+/* Below the reflow breakpoint the shell is allowed to grow and the page scrolls
+   instead, matching the rest of the app's WCAG 1.4.10 behaviour. */
+@media (max-width: 900px), (max-height: 480px) {
+  .editor-shell { height: auto; min-height: 0; grid-template-columns: minmax(0, 1fr); }
 }
 
 .editor-panel {
@@ -1301,7 +1330,12 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
   .editor-panel [class*="grid-cols"] { grid-template-columns: minmax(0, 1fr) !important; }
 }
 
-.editor-canvas { min-width: 0; padding: 12px; overflow: hidden; }
+/* min-height:0 on all three panes: a grid item's default min-height is auto,
+   which lets content push the row taller than the shell and defeats the fixed
+   height above. Each pane then scrolls on its own. */
+.editor-panel, .editor-canvas, .editor-rail { min-height: 0; }
+.editor-canvas { min-width: 0; padding: 12px; overflow: hidden; display: grid; }
+.editor-canvas > * { min-height: 0; }
 
 .editor-image-stage {
   display: grid;
@@ -1387,3 +1421,53 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
 }
 html:not(.dark) .result-card-note { color: #40454d !important; }
 html.dark .result-card-note { color: var(--c-text-dim) !important; }
+
+/* Dropzone, after a file is chosen: one row instead of a 168px panel. Still a
+   drop target and still opens the picker — only the invitation shrinks, since
+   the user has already accepted it. */
+.dropzone-compact {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-height: var(--app-control) !important;
+  padding: 0 10px !important;
+  text-align: left !important;
+}
+.dropzone-compact .dropzone-tile {
+  width: auto !important;
+  height: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+.dropzone-compact .dropzone-title { font-size: 12px !important; font-weight: 500 !important; }
+.dropzone-compact .dropzone-cta {
+  margin-left: auto !important;
+  min-height: 24px !important;
+  padding: 0 10px !important;
+  font-size: 12px !important;
+}
+
+/* Says the canvas is showing an edit rather than the file you opened. Sits in
+   the doc bar next to the filename, where the question "am I looking at my
+   change?" is actually asked. */
+.doc-bar-edited {
+  padding: 2px 7px;
+  border: 1px solid var(--c-accent);
+  border-radius: var(--app-radius);
+  color: var(--c-accent-text);
+  background: var(--c-accent-soft);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The editor already has its own tool rail on the right, so the global sidebar
+   is a second navigation column doing a job nothing needs twice. At 1440 the
+   two of them plus the options panel left 828px of chrome around a 506px
+   document — the smallest pane on screen was the thing being edited. Dropping
+   the sidebar on this route alone gives that width back to the page. Navigation
+   is unaffected: the menubar carries every category and Home / Workspace /
+   Editor. */
+.app[data-route="editor"] .workbench { grid-template-columns: minmax(0, 1fr); }
+.app[data-route="editor"] .sidebar { display: none; }

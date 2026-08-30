@@ -54,9 +54,24 @@ function ToolMetaPanel({ status, onReset, children, sends }: { status: Status; o
       });
     };
 
+    // A new file selection invalidates the previous result. Without this the
+    // card survived the change: run Redact, pick a different PDF, and the panel
+    // still offered "Done — ready to save" with the FIRST document's filename
+    // and a live Download button — one click from saving the wrong document's
+    // redaction. Thirteen tools hand-rolled a per-file reset of their own state
+    // and none could reach this card, because it is private to this component.
+    const handleFileChange = () => {
+      setDownloadReady((current) => {
+        if (current?.url) revokeDownloadUrl(current.url);
+        return null;
+      });
+    };
+
     window.addEventListener("myfilekit:download-ready", handleDownloadReady);
+    window.addEventListener("myfilekit:active-file", handleFileChange);
     return () => {
       window.removeEventListener("myfilekit:download-ready", handleDownloadReady);
+      window.removeEventListener("myfilekit:active-file", handleFileChange);
       setDownloadReady((current) => {
         if (current?.url) revokeDownloadUrl(current.url);
         return null;
@@ -269,8 +284,16 @@ function FileControl({ accept, multiple = false, files, setFiles, label }: { acc
   };
   return (
     <div className="grid gap-3" ref={wrapRef}>
+      {/*
+        Once a file is chosen the big drop target is dead space: it repeats an
+        affordance the user has already used, and pushes the controls they came
+        for below the fold. In the editor, where the panel is a fixed column
+        beside the document, it cost roughly a third of the visible options
+        area. Collapsed to a single row that still accepts a drop and still
+        opens the picker, so replacing the file is one click either way.
+      */}
       <label
-        className={`dropzone ${isDragging ? "dropzone-active" : ""}`}
+        className={`dropzone ${files.length ? "dropzone-compact" : ""} ${isDragging ? "dropzone-active" : ""}`}
         onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
         onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
         onDragLeave={(event) => { event.preventDefault(); setIsDragging(false); }}
@@ -284,10 +307,20 @@ function FileControl({ accept, multiple = false, files, setFiles, label }: { acc
         }}
       >
         <input aria-label={ariaLabel} className="sr-only" type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} />
-        <span className="dropzone-tile" aria-hidden="true"><Upload size={22} /></span>
-        <span className="dropzone-title">{heading}</span>
-        <span className="dropzone-hint">{acceptHint(accept, multiple)}</span>
-        <span className="dropzone-cta">Browse files</span>
+        {files.length ? (
+          <>
+            <span className="dropzone-tile" aria-hidden="true"><Upload size={15} /></span>
+            <span className="dropzone-title">{multiple ? "Add or replace files" : "Replace file"}</span>
+            <span className="dropzone-cta">Browse</span>
+          </>
+        ) : (
+          <>
+            <span className="dropzone-tile" aria-hidden="true"><Upload size={22} /></span>
+            <span className="dropzone-title">{heading}</span>
+            <span className="dropzone-hint">{acceptHint(accept, multiple)}</span>
+            <span className="dropzone-cta">Browse files</span>
+          </>
+        )}
       </label>
       <span className="sr-only" aria-live="polite">{files.length ? `${files.length} file${files.length === 1 ? "" : "s"} selected` : "No files selected"}</span>
       {files.length ? (

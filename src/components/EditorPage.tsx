@@ -58,7 +58,13 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
   const [activeTool, setActiveTool] = useState<Tool | null>(null);
   const [result, setResult] = useState<{ name: string; size: number; url: string; blob?: Blob } | null>(null);
   const [imageUrl, setImageUrl] = useState<string>("");
+  const [original, setOriginal] = useState<File | null>(null);
   const openedRef = useRef(false);
+  // The download-ready listener is registered once, so it must not read `file`
+  // or `kind` from its own closure — it would see the values from first mount.
+  // This project has already shipped two stale-closure bugs; refs here.
+  const fileRef = useRef<File | null>(null);
+  const toolRef = useRef<Tool | null>(null);
 
   // The file handed over from Home or the Workspace.
   useEffect(() => {
@@ -70,6 +76,8 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
   }, []);
 
   const kind = file ? editorKindFor(file.name) : "none";
+  fileRef.current = file;
+  toolRef.current = activeTool;
   const available = useMemo(() => (file ? toolsForFile(file.name) : []), [file]);
   const sections = useMemo(() => groupTools(available), [available]);
 
@@ -96,28 +104,47 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
     setResult(null);
   };
 
-  // A tool finished: offer its output as the next working document.
+  /**
+   * A tool finished. Show the result in the canvas straight away.
+   *
+   * It used to sit in a download card while the canvas kept rendering the
+   * input, so applying a watermark changed nothing on screen: the only way to
+   * see your own edit was to download it and open it elsewhere, or to click
+   * "Keep editing this result", which also closed the tool you were using. In a
+   * document editor the document should show the edit.
+   *
+   * Only adopted when the output is the same kind of document as the input — a
+   * PDF that became a ZIP of images has nothing to show in a PDF canvas, so
+   * that case still just offers the download.
+   */
   useEffect(() => {
     const onReady = (event: Event) => {
       const d = (event as CustomEvent<{ filename: string; size: number; url: string; blob?: Blob }>).detail;
-      if (d?.url) setResult({ name: d.filename, size: d.size, url: d.url, blob: d.blob });
+      if (!d?.url) return;
+      setResult({ name: d.filename, size: d.size, url: d.url, blob: d.blob });
+
+      const current = fileRef.current;
+      const sameKind = current && d.blob && editorKindFor(d.filename) === editorKindFor(current.name)
+        && editorKindFor(d.filename) !== "none";
+      if (!sameKind || !d.blob) return;
+      setOriginal((previous) => previous || current);
+      setFile(new File([d.blob], d.filename, { type: d.blob.type || current.type }));
     };
     window.addEventListener("myfilekit:download-ready", onReady);
     return () => window.removeEventListener("myfilekit:download-ready", onReady);
   }, []);
 
-  const continueWithResult = () => {
-    // Uses the Blob from the event, not fetch(result.url): `connect-src 'self'`
-    // does not permit blob:, so re-fetching the object URL is blocked.
-    if (!result?.blob) return;
-    setFile(new File([result.blob], result.name, { type: result.blob.type }));
+  const revertToOriginal = () => {
+    if (!original) return;
+    setFile(original);
+    setOriginal(null);
     setResult(null);
-    setActiveTool(null);
   };
+
 
   const openFile = (list: FileList | null) => {
     const picked = list && list[0];
-    if (picked) { setFile(picked); setActiveTool(null); setResult(null); }
+    if (picked) { setFile(picked); setActiveTool(null); setResult(null); setOriginal(null); }
   };
 
   if (!file) {
@@ -144,9 +171,13 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
         <h1>{file.name}</h1>
         <span className="doc-bar-sep" aria-hidden="true" />
         <span className="doc-bar-meta">{formatBytes(file.size)} · {available.length} tools available</span>
+        {original ? <span className="doc-bar-edited">Edited — showing the result</span> : null}
         <span className="doc-bar-actions">
+          {original ? <button type="button" className="secondary-button" onClick={revertToOriginal}>
+            <RotateCcw size={15} aria-hidden="true" /> Revert to original
+          </button> : null}
           {activeTool ? <button type="button" className="secondary-button" onClick={() => setActiveTool(null)}>Close tool</button> : null}
-          <button type="button" className="secondary-button" onClick={() => { setFile(null); setActiveTool(null); setResult(null); }}>
+          <button type="button" className="secondary-button" onClick={() => { setFile(null); setActiveTool(null); setResult(null); setOriginal(null); }}>
             <X size={15} aria-hidden="true" /> Close file
           </button>
         </span>
@@ -172,19 +203,6 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
             </>
           )}
 
-          {result ? (
-            <div className="result-card" role="status" aria-live="polite">
-              <div className="result-card-head"><span>Result ready</span></div>
-              <p className="break-words font-semibold">{result.name}</p>
-              <p className="text-xs" style={{ color: "var(--c-text-faint)" }}>{formatBytes(result.size)} · stayed on this device</p>
-              <div className="flex flex-wrap gap-2">
-                <a className="primary-button no-underline" href={result.url} download={result.name}><Download size={15} /> Download</a>
-                <button type="button" className="secondary-button" onClick={continueWithResult} disabled={!result.blob}>
-                  <RotateCcw size={15} /> Keep editing this result
-                </button>
-              </div>
-            </div>
-          ) : null}
         </section>
 
         <section className="editor-canvas" aria-label="Document preview">
