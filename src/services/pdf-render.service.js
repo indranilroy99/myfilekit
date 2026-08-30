@@ -93,6 +93,8 @@ export async function rasterRebuild(file, { dpi = 150, format = "png", quality =
 /**
  * Renders each PDF page to an image blob. Returns one entry per page so the
  * caller can download a single page directly or bundle many into a ZIP.
+ * @param {File} file
+ * @param {{ format?: string, dpi?: number, quality?: number, onProgress?: (page: number, total: number) => void }} [options]
  */
 export async function pdfToImages(file, { format = "jpg", dpi = 150, quality = 0.92, onProgress } = {}) {
   const mime = IMAGE_MIME[format];
@@ -156,6 +158,8 @@ export async function extractPdfText(file, { onProgress, onPage } = {}) {
  * Compresses a PDF by rasterising each page to JPEG at the given quality/DPI and
  * re-embedding it. Returns the new bytes plus before/after sizes so the caller
  * can warn when the result is not actually smaller.
+ * @param {File} file
+ * @param {{ quality?: number, dpi?: number, onProgress?: (page: number, total: number) => void }} [options]
  */
 export async function compressPdf(file, { quality = 0.6, dpi = 120, onProgress } = {}) {
   const bytes = await rasterRebuild(file, { format: "jpg", dpi, quality, onProgress });
@@ -165,6 +169,8 @@ export async function compressPdf(file, { quality = 0.6, dpi = 120, onProgress }
 /**
  * Renders each page to an image and rebuilds a flat, non-interactive PDF. This
  * bakes in (and removes) form fields and annotations.
+ * @param {File} file
+ * @param {{ dpi?: number, onProgress?: (page: number, total: number) => void }} [options]
  */
 export async function flattenPdf(file, { dpi = 150, onProgress } = {}) {
   return rasterRebuild(file, { format: "png", dpi, onProgress });
@@ -173,6 +179,8 @@ export async function flattenPdf(file, { dpi = 150, onProgress } = {}) {
 /**
  * Renders each page, inverts its colours, and rebuilds the PDF (dark-mode /
  * printer-friendly).
+ * @param {File} file
+ * @param {{ dpi?: number, onProgress?: (page: number, total: number) => void }} [options]
  */
 export async function invertPdf(file, { dpi = 150, onProgress } = {}) {
   return rasterRebuild(file, {

@@ -248,7 +248,10 @@ function acceptHint(accept: string, multiple: boolean): string {
     else if (rule.includes("spreadsheet") || rule.includes("excel") || rule === "text/csv") names.add("spreadsheets");
     else if (rule.startsWith("text/")) names.add("text");
     else if (rule.includes("word") || rule.includes("document")) names.add("documents");
-    else names.add(rule.split("/").pop() || rule);
+    // A rule we have no friendly word for. Extensions are readable; a MIME
+    // subtype is not — "x-pkcs12" and "epub+zip" were being printed to users.
+    else if (rule.startsWith(".")) names.add(rule);
+    else if (!rule.includes("/")) names.add(`.${rule}`);
   }
   return [...names].join(", ");
 }
@@ -471,12 +474,39 @@ function MiniField({ label, value, onChange, type = "text", placeholder = "" }: 
   </label>;
 }
 
+/**
+ * Turn a library's own words into a sentence the user can act on.
+ *
+ * pdf-lib's encryption error names a JavaScript parameter the user cannot set
+ * ("You can use PDFDocument.load(..., { ignoreEncryption: true })"), and it
+ * reached the status box verbatim from ~54 call sites. The app ships a Remove
+ * Password tool and none of those messages mentioned it.
+ */
+function friendlyError(error: any): string {
+  const raw = String(error?.message || "");
+  if (/is encrypted|ignoreEncryption|No password given|password is incorrect/i.test(raw)) {
+    return "This PDF is password-protected. Open it with Remove Password first, then try again.";
+  }
+  if (/No PDF header found|Failed to parse PDF/i.test(raw)) {
+    return "This file could not be read as a PDF. If it is damaged, try Repair PDF.";
+  }
+  if (/Failed to fetch/i.test(raw)) {
+    return "That step could not read its own result. Reload the page and try again.";
+  }
+  return raw || "Something went wrong.";
+}
+
 async function runSafely(setStatus: (status: Status) => void, task: () => Promise<string>) {
   try {
     setStatus({ tone: "idle", message: "Processing..." });
     setStatus({ tone: "success", message: await task() });
   } catch (error: any) {
-    setStatus({ tone: "error", message: error?.message || "Something went wrong." });
+    // The message goes to the user; the stack goes to the console. Without this
+    // a failure anywhere in 30k lines of PDF services produced one sentence on
+    // screen and absolutely nothing to debug from — the single biggest obstacle
+    // to maintaining this without help.
+    console.error("[MyFileKit] tool failed", error);
+    setStatus({ tone: "error", message: friendlyError(error) });
   }
 }
 

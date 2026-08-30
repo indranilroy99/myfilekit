@@ -135,7 +135,12 @@ function PageRangeTool({ tool, action, run, suffix }: { tool: Tool; action: stri
             if (previous) URL.revokeObjectURL(previous.url);
             return output;
           });
-          return `Preview ready for ${pages.length} selected page${pages.length === 1 ? "" : "s"}.`;
+          // Count the pages in the OUTPUT, not the pages the user typed. This is
+          // shared with Delete Pages, where `pages` is what was removed: deleting
+          // 2 of 5 reported "2 pages" for a file that correctly had 3.
+          const outputPages = (await loadPdf(new File([blob], output.filename, { type: "application/pdf" }))).getPageCount();
+          output.pages = outputPages;
+          return `Preview ready — ${outputPages} page${outputPages === 1 ? "" : "s"}.`;
         })} />
       </div>
       <ToolMetaPanel status={status} onReset={reset}>
@@ -1799,7 +1804,7 @@ function PdfToImageTool({ tool }: { tool: Tool }) {
     {format !== "png" && <Range label="Quality" value={quality} onChange={setQuality} />}
     <PrimaryButton label="Convert to images" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
-      const images = await pdfToImages(file, { format, dpi: Number(dpi), quality: Number(quality) });
+      const images = await pdfToImages(file, { format, dpi: Number(dpi), quality: Number(quality), onProgress: pageProgress(setStatus, "Rendering") });
       const base = safeFilename(file.name);
       if (images.length === 1) {
         downloadBlob(images[0].blob, withExtension(`${base}-page-1`, format));
@@ -1880,7 +1885,7 @@ function CompressPdfTool({ tool }: { tool: Tool }) {
     <Range label="JPEG quality" value={quality} onChange={setQuality} />
     <PrimaryButton label="Compress PDF" disabled={blocked} onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
-      const { bytes, before, after } = await rasterCompressPdf(file, { quality: Number(quality), dpi: Number(dpi) });
+      const { bytes, before, after } = await rasterCompressPdf(file, { quality: Number(quality), dpi: Number(dpi), onProgress: pageProgress(setStatus, "Compressing") });
       // Never hand back a worse file behind a success message. If the output is
       // larger it is not offered for download at all — it is reported, with both
       // sizes, as the warning it is.
@@ -1928,7 +1933,7 @@ function FlattenPdfTool({ tool }: { tool: Tool }) {
     <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["120", "150", "200", "300"]} labels={["120 · smaller", "150 · default", "200 · high", "300 · print"]} />
     <PrimaryButton label="Flatten PDF" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
-      const bytes = await flattenPdf(file, { dpi: Number(dpi) });
+      const bytes = await flattenPdf(file, { dpi: Number(dpi), onProgress: pageProgress(setStatus, "Flattening") });
       downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-flattened`, "pdf"), "application/pdf");
       return `Flattened ${file.name} into a non-interactive PDF.`;
     })} />
@@ -1944,7 +1949,7 @@ function InvertPdfTool({ tool }: { tool: Tool }) {
     <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["120", "150", "200", "300"]} labels={["120 · smaller", "150 · default", "200 · high", "300 · print"]} />
     <PrimaryButton label="Invert colours" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
-      const bytes = await invertPdf(file, { dpi: Number(dpi) });
+      const bytes = await invertPdf(file, { dpi: Number(dpi), onProgress: pageProgress(setStatus, "Inverting") });
       downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-inverted`, "pdf"), "application/pdf");
       return `Inverted the colours of ${file.name}.`;
     })} />

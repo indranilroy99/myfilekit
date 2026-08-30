@@ -57,14 +57,36 @@ const browseToolsPageSize = 10;
 // dashboard can focus its search input on mount instead of racing a fixed timeout.
 let pendingSearchFocus = false;
 
+/**
+ * Where a bare URL lands.
+ *
+ * This was hard-coded to "#dashboard", overriding the router's own "#home", so
+ * a first-time visitor never saw the landing page at all — the headline, the
+ * reason this exists instead of an upload site, the whole argument — and it was
+ * reachable only by clicking a sidebar link nobody had a reason to click.
+ *
+ * Someone who has already used a tool knows what this is and wants the
+ * workspace, so recentTools is the signal: no new storage key, and it cannot
+ * mark a bouncing first-time visitor as a returning one.
+ */
+function initialHash(): string {
+  if (window.location.hash) return window.location.hash;
+  try {
+    return loadRecentTools().length ? "#dashboard" : "#home";
+  } catch {
+    // Storage unavailable (private mode). Show the pitch — the safer default.
+    return "#home";
+  }
+}
+
 export default function App() {
-  const [hash, setHash] = useState(() => window.location.hash || "#dashboard");
+  const [hash, setHash] = useState(initialHash);
   const [theme, setTheme] = useState<ThemeMode>(() => readThemePreference());
   const isInitialRoute = useRef(true);
 
   useEffect(() => {
     const syncHash = () => {
-      const next = window.location.hash || "#dashboard";
+      const next = window.location.hash || initialHash();
       // A staged hand-off survives exactly one navigation: into its own tool.
       const route = routeForHash(next);
       clearWorkspaceFilesUnless(route.type === "tool" ? route.tool.id : route.type === "editor" ? "editor" : "");
