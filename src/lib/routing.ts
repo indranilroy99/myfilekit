@@ -40,3 +40,18 @@ export const SELECT_MODE_BY_TOOL: Record<string, "rect" | "point"> = {
   // Drag a box where the signature goes: position AND size in one gesture.
   "add-signature-to-pdf-tool": "rect",
 };
+
+/**
+ * Tools that render their own interactive page.
+ *
+ * Each of these already builds a real page surface — clickable text runs, a
+ * pointer-driven annotation canvas, an editable text column — and in the editor
+ * they were mounted inside the 360px options column while an inert copy of the
+ * same page filled the canvas beside them. They take the canvas instead, and
+ * the read-only preview is not mounted at all.
+ */
+export const PAGE_SURFACE_TOOLS = new Set([
+  "edit-pdf-text-tool",
+  "annotate-pdf-tool",
+  "reflow-pdf-tool",
+]);

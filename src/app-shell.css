@@ -1541,3 +1541,21 @@ html.dark .result-card-note { color: var(--c-text-dim) !important; }
   cursor: not-allowed !important;
   opacity: 1 !important;
 }
+
+/* A tool that owns the page gets the document column: its own page surface IS
+   the document view, so there is no separate preview to sit beside. Two columns
+   — the tool and the tool rail. */
+.editor-shell-page-tool { grid-template-columns: minmax(0, 1fr) 232px; }
+
+@media (max-width: 1100px) {
+  .editor-shell-page-tool { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* These tools render their page at a fixed CSS width, so in a wide column they
+   would sit against the left edge. Centre them and let the column scroll,
+   rather than rescaling a canvas whose click targets are positioned against it. */
+.editor-panel-page > * { max-width: 100%; }
+.editor-panel-page [class*="doc-edit-stage"],
+.editor-panel-page canvas {
+  margin-inline: auto;
+}

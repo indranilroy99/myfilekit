@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, FileText, Image as ImageIcon, RotateCcw, X } from "lucide-react";
 import { tools, categoryGroups } from "../registry/tools.registry.js";
 import { takeWorkspaceFilesFor, stashWorkspaceFiles } from "../lib/workspace-handoff";
-import { SELECT_MODE_BY_TOOL } from "../lib/routing";
+import { SELECT_MODE_BY_TOOL, PAGE_SURFACE_TOOLS } from "../lib/routing";
 import { formatBytes } from "../utils/format.js";
 import DocumentView from "./DocumentView";
 
@@ -80,6 +80,8 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
   }, []);
 
   const kind = file ? editorKindFor(file.name) : "none";
+  // Tools that ARE a page surface; their own canvas is the document view.
+  const ownsThePage = Boolean(activeTool && PAGE_SURFACE_TOOLS.has(activeTool.id));
   fileRef.current = file;
   toolRef.current = activeTool;
   const available = useMemo(() => (file ? toolsForFile(file.name) : []), [file]);
@@ -229,15 +231,19 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
         name, size and type — that the doc bar directly above already states,
         while the page beside it was cropped.
       */}
-      <div className={`editor-shell ${activeTool ? "" : "editor-shell-wide"}`}>
+      <div className={`editor-shell ${activeTool ? "" : "editor-shell-wide"} ${ownsThePage ? "editor-shell-page-tool" : ""}`}>
         {activeTool ? (
-          <section className="editor-panel" aria-label={`${activeTool.name} options`}>
+          <section
+            className={`editor-panel ${ownsThePage ? "editor-panel-page" : ""}`}
+            aria-label={ownsThePage ? `${activeTool.name}` : `${activeTool.name} options`}
+          >
             <p className="inspector-title">{activeTool.name}</p>
             <p className="doc-bar-meta" style={{ marginBottom: 10 }}>{activeTool.description}</p>
             {renderTool(activeTool)}
           </section>
         ) : null}
 
+        {ownsThePage ? null : (
         <section className="editor-canvas" aria-label="Document preview">
           {/*
             The editor was strictly WORSE at direct manipulation than the
@@ -246,7 +252,16 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
             map, same round-trip, so Redact and Add Text behave here as they do
             there.
           */}
-          {kind === "pdf" ? (
+          {/*
+            A tool that draws its own interactive page replaces the preview
+            rather than sitting beside it. Edit PDF Text, Annotate and Reflow
+            each render a real page with click targets, pointer handling and
+            undo — and they were doing it inside a 360px options column, showing
+            a fraction of the page through a porthole, while an inert copy of
+            the SAME page occupied the middle of the screen. Two previews, and
+            the one you could actually use was the small one.
+          */}
+          {kind === "pdf" && !ownsThePage ? (
             <DocumentView
               file={file}
               selectMode={activeTool ? SELECT_MODE_BY_TOOL[activeTool.id] || null : null}
@@ -263,6 +278,7 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
             </div>
           ) : null}
         </section>
+        )}
 
         <aside className="editor-rail" aria-label="Tools for this file">
           <p className="inspector-title">Tools</p>
