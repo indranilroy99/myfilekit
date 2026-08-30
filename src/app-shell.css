@@ -479,7 +479,16 @@ body {
   min-height: calc(100svh - var(--app-menubar-h) - var(--app-status-h) - var(--app-docbar-h));
 }
 
-.tool-canvas { min-width: 0; padding: var(--app-gutter); }
+/* A container, not just a column: the tool bodies use Tailwind's sm:/lg: grid
+   utilities, which respond to the VIEWPORT. With the document view taking the
+   middle, a wide viewport kept forcing two columns into a ~360px canvas and the
+   labels collided with their values (measured on PDF Analyser: "Linearized"
+   overlapping "Encrypted"). These layouts must answer to their own width. */
+.tool-canvas { min-width: 0; padding: var(--app-gutter); container-type: inline-size; }
+
+@container (max-width: 560px) {
+  .tool-canvas [class*="grid-cols"] { grid-template-columns: minmax(0, 1fr) !important; }
+}
 
 .tool-inspector {
   grid-column: 3;
@@ -1179,7 +1188,7 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
 /* With a PDF loaded the tool page becomes a workspace: controls on the left,
    the document in the middle, siblings on the right — the Acrobat arrangement,
    where the document is the subject and the form is the instrument. */
-.tool-shell-doc { grid-template-columns: minmax(300px, 360px) minmax(0, 1fr) var(--app-inspector-w); }
+.tool-shell-doc { grid-template-columns: minmax(360px, 460px) minmax(0, 1fr) var(--app-inspector-w); }
 .tool-shell-doc .tool-canvas { max-width: none; }
 
 .tool-document {
