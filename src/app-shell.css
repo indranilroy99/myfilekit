@@ -1055,6 +1055,9 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
   font-weight: 700;
   line-height: 1.08;
   letter-spacing: -.025em;
+  /* The headline wraps on its own rather than on a hard-coded <br/>, so the
+     break stays even across the clamp instead of stranding a single word. */
+  text-wrap: balance;
 }
 
 .landing-lede {

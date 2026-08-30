@@ -27,11 +27,18 @@ export function LandingPage({ featured }: Props) {
   return (
     <div className="landing">
       <section className="landing-hero">
-        <p className="landing-eyebrow">Local-first document tools</p>
-        <h1 className="landing-title">Work on your PDFs<br />without uploading them.</h1>
+        <p className="landing-eyebrow">Local-first file tools</p>
+        {/*
+          The headline carries the one claim competitors cannot make; the lede
+          carries the breadth. It used to be the other way round, which spent the
+          headline on "PDFs" — half the catalogue — and demoted the differentiator
+          to a subordinate clause. No manual line break: 18ch and text-wrap do it
+          at every width, and a <br/> lands mid-phrase once the type scale shifts.
+        */}
+        <h1 className="landing-title">Your files never leave this device.</h1>
         <p className="landing-lede">
-          {tools.length} tools that run entirely in your browser. Your files are never sent to a
-          server — not ours, not anyone's.
+          {tools.length} tools for PDFs, images, spreadsheets and text — all running in this
+          browser tab. No upload, no account, no server to trust.
         </p>
 
         <label
@@ -48,7 +55,9 @@ export function LandingPage({ featured }: Props) {
 
         <ul className="landing-trust">
           <li><WifiOff size={15} aria-hidden="true" /> Works offline</li>
-          <li><FileLock2 size={15} aria-hidden="true" /> Nothing is uploaded</li>
+          {/* Was "Nothing is uploaded", which the headline now says. A trust list
+              should add evidence, not repeat the claim above it. */}
+          <li><FileLock2 size={15} aria-hidden="true" /> Verifiable in your network tab</li>
           <li><EyeOff size={15} aria-hidden="true" /> No account, no tracking</li>
         </ul>
       </section>
