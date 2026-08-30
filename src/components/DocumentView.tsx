@@ -16,11 +16,32 @@ type Props = {
   page?: number;
   onPageChange?: (page: number) => void;
   onPageCount?: (count: number) => void;
+  /**
+   * Let the user mark the page directly: drag a rectangle (Redact) or click a
+   * point (Add Text). The selection is published on `myfilekit:region-selected`
+   * carrying BOTH percentages and PDF points, so each tool takes the units its
+   * own service already expects.
+   */
+  selectMode?: "rect" | "point" | null;
+  /** Regions to draw back onto the page, as percentages. */
+  regions?: { page: number; x: number; y: number; w: number; h: number }[];
 };
 
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 
-export function DocumentView({ file, page, onPageChange, onPageCount }: Props) {
+const round = (value: number) => Math.round(value * 10) / 10;
+
+type Selection = {
+  page: number;
+  percent: { x: number; y: number; w: number; h: number };
+  points: { x: number; y: number; w: number; h: number };
+};
+
+function emitSelection(detail: Selection) {
+  window.dispatchEvent(new CustomEvent("myfilekit:region-selected", { detail }));
+}
+
+export function DocumentView({ file, page, onPageChange, onPageCount, selectMode = null, regions = [] }: Props) {
   const [doc, setDoc] = useState<any>(null);
   const [pageCount, setPageCount] = useState(0);
   const [current, setCurrent] = useState(1);
@@ -30,6 +51,9 @@ export function DocumentView({ file, page, onPageChange, onPageCount }: Props) {
   const [thumbs, setThumbs] = useState<Record<number, string>>({});
   const stageRef = useRef<HTMLDivElement | null>(null);
   const renderToken = useRef(0);
+  const [drag, setDrag] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
+  const [pagePoints, setPagePoints] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
 
   // Load the document whenever the file changes.
   useEffect(() => {
@@ -76,9 +100,12 @@ export function DocumentView({ file, page, onPageChange, onPageCount }: Props) {
     const stage = stageRef.current;
     (async () => {
       try {
+        const sized = await doc.getPage(current);
+        const base = sized.getViewport({ scale: 1 });
         const canvas = await renderPdfPageToCanvas(doc, current, ZOOMS[zoomIndex] * 1.5);
         // A newer render started while this one was in flight.
         if (token !== renderToken.current) return;
+        setPagePoints({ w: base.width, h: base.height });
         canvas.className = "doc-page-canvas";
         stage.replaceChildren(canvas);
       } catch {
@@ -154,7 +181,78 @@ export function DocumentView({ file, page, onPageChange, onPageCount }: Props) {
         {status === "loading" ? (
           <p className="doc-loading"><Loader2 className="animate-spin" size={15} aria-hidden="true" /> Opening…</p>
         ) : null}
-        <div ref={stageRef} className="doc-stage-inner" />
+        <div className="doc-stage-inner-wrap">
+          <div ref={stageRef} className="doc-stage-inner" />
+          {selectMode ? (
+            <div
+              className={`doc-select-layer doc-select-${selectMode}`}
+              role="application"
+              aria-label={selectMode === "rect" ? "Drag on the page to mark an area" : "Click the page to place text"}
+              onPointerDown={(event) => {
+                if (selectMode !== "rect") return;
+                const box = event.currentTarget.getBoundingClientRect();
+                dragStart.current = { x: (event.clientX - box.left) / box.width, y: (event.clientY - box.top) / box.height };
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }}
+              onPointerMove={(event) => {
+                if (selectMode !== "rect" || !dragStart.current) return;
+                const box = event.currentTarget.getBoundingClientRect();
+                const cx = (event.clientX - box.left) / box.width;
+                const cy = (event.clientY - box.top) / box.height;
+                const s0 = dragStart.current;
+                setDrag({ x: Math.min(s0.x, cx), y: Math.min(s0.y, cy), w: Math.abs(cx - s0.x), h: Math.abs(cy - s0.y) });
+              }}
+              onPointerUp={(event) => {
+                if (selectMode !== "rect") return;
+                // Compute from the ref and this event, NOT from `drag` state:
+                // a fast drag can release before React commits the move, which
+                // would silently produce no selection at all.
+                const start = dragStart.current;
+                dragStart.current = null;
+                setDrag(null);
+                if (!start) return;
+                const bounds = event.currentTarget.getBoundingClientRect();
+                const cx = (event.clientX - bounds.left) / bounds.width;
+                const cy = (event.clientY - bounds.top) / bounds.height;
+                const box = {
+                  x: Math.min(start.x, cx),
+                  y: Math.min(start.y, cy),
+                  w: Math.abs(cx - start.x),
+                  h: Math.abs(cy - start.y),
+                };
+                // Ignore a stray click that produced no meaningful area.
+                if (box.w < 0.01 || box.h < 0.01) return;
+                emitSelection({
+                  page: current,
+                  percent: { x: round(box.x * 100), y: round(box.y * 100), w: round(box.w * 100), h: round(box.h * 100) },
+                  points: {
+                    x: round(box.x * pagePoints.w),
+                    y: round((1 - box.y - box.h) * pagePoints.h),
+                    w: round(box.w * pagePoints.w),
+                    h: round(box.h * pagePoints.h),
+                  },
+                });
+              }}
+              onClick={(event) => {
+                if (selectMode !== "point") return;
+                const box = event.currentTarget.getBoundingClientRect();
+                const fx = (event.clientX - box.left) / box.width;
+                const fy = (event.clientY - box.top) / box.height;
+                emitSelection({
+                  page: current,
+                  percent: { x: round(fx * 100), y: round(fy * 100), w: 0, h: 0 },
+                  // PDF origin is bottom-left, the canvas is top-left.
+                  points: { x: round(fx * pagePoints.w), y: round((1 - fy) * pagePoints.h), w: 0, h: 0 },
+                });
+              }}
+            >
+              {regions.filter((r) => r.page === current).map((r, i) => (
+                <span key={i} className="doc-region" style={{ left: `${r.x}%`, top: `${r.y}%`, width: `${r.w}%`, height: `${r.h}%` }} />
+              ))}
+              {drag ? <span className="doc-region doc-region-live" style={{ left: `${drag.x * 100}%`, top: `${drag.y * 100}%`, width: `${drag.w * 100}%`, height: `${drag.h * 100}%` }} /> : null}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div className="doc-controls">

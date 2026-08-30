@@ -1302,12 +1302,21 @@ function CategoryPage({ category }: { category: string }) {
   );
 }
 
+// Tools whose input is a place on the page, so the page itself becomes the
+// control: drag an area to redact, click a point to place text.
+const SELECT_MODE_BY_TOOL: Record<string, "rect" | "point"> = {
+  "redact-pdf-tool": "rect",
+  "add-text-to-pdf-tool": "point",
+};
+
 function ToolPage({ tool }: { tool: Tool }) {
   const related = tools.filter((item: Tool) => item.category === tool.category && item.id !== tool.id);
   const Icon = iconForTool(tool);
   // The PDF currently loaded in this tool, published by FileControl. Keyed by
   // the control that owns it so a second file input cannot clear the first.
   const [docs, setDocs] = useState<Record<string, File>>({});
+  // Areas the user has marked, echoed back onto the page so they can see them.
+  const [regions, setRegions] = useState<{ page: number; x: number; y: number; w: number; h: number }[]>([]);
   const activeFile = Object.values(docs)[0] || null;
 
   useEffect(() => {
@@ -1315,7 +1324,17 @@ function ToolPage({ tool }: { tool: Tool }) {
   }, [tool.id]);
 
   // Tool change starts a clean document context.
-  useEffect(() => { setDocs({}); }, [tool.id]);
+  useEffect(() => { setDocs({}); setRegions([]); }, [tool.id]);
+
+  useEffect(() => {
+    const onRegion = (event: Event) => {
+      const d = (event as CustomEvent<{ page: number; percent: { x: number; y: number; w: number; h: number } }>).detail;
+      if (!d || d.percent.w <= 0) return; // point selections are not drawn as areas
+      setRegions((current) => [...current, { page: d.page, ...d.percent }]);
+    };
+    window.addEventListener("myfilekit:region-selected", onRegion);
+    return () => window.removeEventListener("myfilekit:region-selected", onRegion);
+  }, []);
 
   useEffect(() => {
     const onActive = (event: Event) => {
@@ -1355,7 +1374,7 @@ function ToolPage({ tool }: { tool: Tool }) {
         </div>
         {activeFile ? (
           <section className="tool-document" aria-label={`Preview of ${activeFile.name}`}>
-            <DocumentView file={activeFile} />
+            <DocumentView file={activeFile} selectMode={SELECT_MODE_BY_TOOL[tool.id] || null} regions={regions} />
           </section>
         ) : null}
         <aside className="tool-inspector" aria-label="Related tools">

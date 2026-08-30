@@ -153,11 +153,27 @@ function AddTextToPdfTool({ tool }: { tool: Tool }) {
   const [y, setY] = useState("720");
   const [size, setSize] = useState("18");
   const [status, setStatus] = useState(initialStatus);
+
+  // Clicking the page fills the coordinates. The event carries PDF points
+  // (origin bottom-left), which is exactly what addTextToPdf expects.
+  useEffect(() => {
+    const onRegion = (event: Event) => {
+      const d = (event as CustomEvent<{ page: number; points: { x: number; y: number } }>).detail;
+      if (!d) return;
+      setPage(String(d.page));
+      setX(String(Math.round(d.points.x)));
+      setY(String(Math.round(d.points.y)));
+    };
+    window.addEventListener("myfilekit:region-selected", onRegion);
+    return () => window.removeEventListener("myfilekit:region-selected", onRegion);
+  }, []);
+
   return <ToolForm status={status} onReset={() => { setFiles([]); setText(""); setStatus(initialStatus); }}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
       This places new text on top of the PDF. It does not rewrite existing embedded PDF text.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    {files.length ? <p className="doc-select-hint">Click the page to place the text — or type coordinates below.</p> : null}
     <Input label="Text" value={text} onChange={setText} />
     <div className="grid gap-3 sm:grid-cols-4"><Input label="Page" value={page} onChange={setPage} type="number" /><Input label="X" value={x} onChange={setX} type="number" /><Input label="Y" value={y} onChange={setY} type="number" /><Input label="Size" value={size} onChange={setSize} type="number" /></div>
     <PrimaryButton label="Add text to PDF" onClick={() => runSafely(setStatus, async () => {
@@ -1896,14 +1912,29 @@ function FillPdfFormTool({ tool }: { tool: Tool }) {
 
 function RedactPdfTool({ tool }: { tool: Tool }) {
   const [files, setFiles] = useState<File[]>([]);
-  const [areas, setAreas] = useState("1, 10, 10, 40, 8");
+  const [areas, setAreas] = useState("");
   const [dpi, setDpi] = useState("150");
   const [status, setStatus] = useState(initialStatus);
-  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+
+  // Areas dragged directly on the page arrive here in the same percentage units
+  // the textarea has always used, so both routes feed one parser.
+  useEffect(() => {
+    const onRegion = (event: Event) => {
+      const d = (event as CustomEvent<{ page: number; percent: { x: number; y: number; w: number; h: number } }>).detail;
+      if (!d || d.percent.w <= 0 || d.percent.h <= 0) return;
+      const line = `${d.page}, ${d.percent.x}, ${d.percent.y}, ${d.percent.w}, ${d.percent.h}`;
+      setAreas((current) => (current.trim() ? `${current.trim()}\n${line}` : line));
+    };
+    window.addEventListener("myfilekit:region-selected", onRegion);
+    return () => window.removeEventListener("myfilekit:region-selected", onRegion);
+  }, []);
+
+  return <ToolForm status={status} onReset={() => { setFiles([]); setAreas(""); setStatus(initialStatus); }}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
       Redaction rasterises the whole PDF to images and paints opaque black boxes on the listed areas, so covered content is permanently removed — not just hidden. Selectable text is lost.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    {files.length ? <p className="doc-select-hint">Drag on the page to mark an area — or type coordinates below.</p> : null}
     <Textarea label="Redaction areas — one per line: page, x, y, width, height (in %)" value={areas} onChange={setAreas} rows={5} />
     <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["120", "150", "200", "300"]} labels={["120 · smaller", "150 · default", "200 · high", "300 · print"]} />
     <PrimaryButton label="Redact PDF" onClick={() => runSafely(setStatus, async () => {

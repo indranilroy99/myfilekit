@@ -1193,3 +1193,34 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
   .tool-shell-doc { grid-template-columns: minmax(0, 1fr); }
   .tool-document { grid-column: auto; height: 60vh; padding: 0 12px 12px; }
 }
+
+/* Direct manipulation on the page: drag an area (Redact) or click a point
+   (Add Text). The layer sits exactly over the rendered canvas. */
+.doc-stage-inner-wrap { position: relative; display: inline-block; }
+
+.doc-select-layer { position: absolute; inset: 0; }
+.doc-select-rect { cursor: crosshair; }
+.doc-select-point { cursor: cell; }
+
+.doc-region {
+  position: absolute;
+  border: 1px solid var(--c-accent);
+  background: color-mix(in srgb, var(--c-accent) 26%, transparent);
+  pointer-events: none;
+}
+
+.doc-region-live { border-style: dashed; }
+
+.doc-select-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--c-accent);
+  border-radius: var(--app-radius);
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+  font-size: 13px;
+  font-weight: 600;
+}
