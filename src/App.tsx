@@ -1377,6 +1377,15 @@ function ToolPage({ tool }: { tool: Tool }) {
   // The result wins over the input when there is one: after a tool runs, the
   // page shows what the tool produced. Cleared as soon as a new file is chosen.
   const activeFile = docs.__result || Object.values(docs).find(Boolean) || null;
+  // Does this tool take a file at all? Text-only tools (JSON formatter, password
+  // generator) have nothing to preview and keep the single column.
+  const previewable = (() => {
+    // The registry's `file` shape varies by tool (some declare only maxSize), so
+    // read it defensively rather than asserting a type it does not always have.
+    const spec = tool.file as { extensions?: string[] } | undefined;
+    const exts = Array.isArray(spec?.extensions) ? spec.extensions : [];
+    return exts.some((ext) => ["pdf", "jpg", "jpeg", "png", "webp"].includes(String(ext).toLowerCase()));
+  })();
 
   useEffect(() => {
     saveRecentTool(tool.id);
@@ -1446,7 +1455,7 @@ function ToolPage({ tool }: { tool: Tool }) {
           <a className="secondary-button" href={categoryRoute(tool.category)}>{tool.category.replace(" Tools", "")}</a>
         </span>
       </div>
-      <div className={`tool-shell ${activeFile ? "tool-shell-doc" : ""}`}>
+      <div className={`tool-shell ${activeFile || previewable ? "tool-shell-doc" : ""}`}>
         <div className="tool-canvas">
           <p className="doc-bar-meta" style={{ marginBottom: 12 }}>{tool.description}</p>
           {/* Keyed by tool id: several tools share one renderer (Split/Delete Pages
@@ -1455,9 +1464,22 @@ function ToolPage({ tool }: { tool: Tool }) {
               ranges and result would carry over into the next tool. */}
           <ToolRenderer key={tool.id} tool={tool} />
         </div>
-        {activeFile ? (
-          <section className="tool-document" aria-label={`Preview of ${activeFile.name}`}>
-            <DocumentView file={activeFile} selectMode={SELECT_MODE_BY_TOOL[tool.id] || null} regions={regions} />
+        {/*
+          The document pane is present from the moment you open a file-taking
+          tool, not conjured once a file lands. A layout that rearranges itself
+          mid-task reads as unfinished, and an empty canvas states the shape of
+          the work: settings on the left, your document on the right.
+        */}
+        {previewable ? (
+          <section className="tool-document" aria-label={activeFile ? `Preview of ${activeFile.name}` : "Document preview"}>
+            {activeFile
+              ? <DocumentView file={activeFile} selectMode={SELECT_MODE_BY_TOOL[tool.id] || null} regions={regions} />
+              : (
+                <div className="doc-view doc-view-empty">
+                  <p className="doc-empty-title">Your document appears here</p>
+                  <p className="doc-empty-hint">Choose a file on the left to see it.</p>
+                </div>
+              )}
           </section>
         ) : null}
         <aside className="tool-inspector" aria-label="Related tools">
