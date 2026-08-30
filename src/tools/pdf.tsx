@@ -1,5 +1,6 @@
 // PDF tools. Loaded on demand by ToolRenderer in src/App.tsx.
 import { useEffect, useMemo, useRef, useState } from "react";
+import { approximateTextWidth, parseAreaLines, textOverflowsPage } from "../lib/page-geometry";
 import { zipSync } from "fflate";
 import { ArrowLeft, ArrowRight, Eye, Scissors } from "lucide-react";
 import { formatBytes, parsePageRanges } from "../utils/format.js";
@@ -154,12 +155,26 @@ function AddTextToPdfTool({ tool }: { tool: Tool }) {
   const [size, setSize] = useState("18");
   const [status, setStatus] = useState(initialStatus);
 
+  const loadFiles = (next: File[]) => {
+    const changed = next[0] !== files[0];
+    setFiles(next);
+    if (changed) { setPage("1"); setX("72"); setY("720"); setStatus(initialStatus); }
+  };
+
+  // The click point is the text's bottom-left origin, so text placed near the
+  // right edge used to run off the page and be clipped with no warning.
+  const [pageWidth, setPageWidth] = useState(0);
+  const textWarning = pageWidth && textOverflowsPage(Number(x), approximateTextWidth(text, Number(size)), pageWidth)
+    ? "This text starts too far right and will run off the page. Move it left or reduce the size."
+    : "";
+
   // Clicking the page fills the coordinates. The event carries PDF points
   // (origin bottom-left), which is exactly what addTextToPdf expects.
   useEffect(() => {
     const onRegion = (event: Event) => {
-      const d = (event as CustomEvent<{ page: number; points: { x: number; y: number } }>).detail;
+      const d = (event as CustomEvent<{ page: number; points: { x: number; y: number }; pageWidth?: number }>).detail;
       if (!d) return;
+      if (d.pageWidth) setPageWidth(d.pageWidth);
       setPage(String(d.page));
       setX(String(Math.round(d.points.x)));
       setY(String(Math.round(d.points.y)));
@@ -172,10 +187,11 @@ function AddTextToPdfTool({ tool }: { tool: Tool }) {
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
       This places new text on top of the PDF. It does not rewrite existing embedded PDF text.
     </div>
-    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <FileControl accept="application/pdf" files={files} setFiles={loadFiles} />
     {files.length ? <p className="doc-select-hint">Click the page to place the text — or type coordinates below.</p> : null}
     <Input label="Text" value={text} onChange={setText} />
     <div className="grid gap-3 sm:grid-cols-4"><Input label="Page" value={page} onChange={setPage} type="number" /><Input label="X" value={x} onChange={setX} type="number" /><Input label="Y" value={y} onChange={setY} type="number" /><Input label="Size" value={size} onChange={setSize} type="number" /></div>
+    {textWarning ? <p className="doc-select-hint" role="status">{textWarning}</p> : null}
     <PrimaryButton label="Add text to PDF" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       const bytes = await addTextToPdf(file, text, { page: Number(page), x: Number(x), y: Number(y), size: Number(size) });
@@ -1916,6 +1932,15 @@ function RedactPdfTool({ tool }: { tool: Tool }) {
   const [dpi, setDpi] = useState("150");
   const [status, setStatus] = useState(initialStatus);
 
+  // Marking a new file must not inherit the previous file's areas: this is an
+  // irreversible flattening operation, and applying page 4 of the old document
+  // to a one-page new one used to succeed silently.
+  const loadFiles = (next: File[]) => {
+    const changed = next[0] !== files[0];
+    setFiles(next);
+    if (changed) { setAreas(""); setStatus(initialStatus); }
+  };
+
   // Areas dragged directly on the page arrive here in the same percentage units
   // the textarea has always used, so both routes feed one parser.
   useEffect(() => {
@@ -1929,12 +1954,18 @@ function RedactPdfTool({ tool }: { tool: Tool }) {
     return () => window.removeEventListener("myfilekit:region-selected", onRegion);
   }, []);
 
+  // One source of truth: the page draws what the coordinate list says, so
+  // editing or deleting a line updates the page and a mis-drag can be undone.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("myfilekit:marked-areas", { detail: { areas: parseAreaLines(areas) } }));
+  }, [areas]);
+
   return <ToolForm status={status} onReset={() => { setFiles([]); setAreas(""); setStatus(initialStatus); }}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
       Redaction rasterises the whole PDF to images and paints opaque black boxes on the listed areas, so covered content is permanently removed — not just hidden. Selectable text is lost.
     </div>
-    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
-    {files.length ? <p className="doc-select-hint">Drag on the page to mark an area — or type coordinates below.</p> : null}
+    <FileControl accept="application/pdf" files={files} setFiles={loadFiles} />
+    {files.length ? <p className="doc-select-hint">Drag on the page, or press Enter on it and use the arrow keys — or type coordinates below.</p> : null}
     <Textarea label="Redaction areas — one per line: page, x, y, width, height (in %)" value={areas} onChange={setAreas} rows={5} />
     <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["120", "150", "200", "300"]} labels={["120 · smaller", "150 · default", "200 · high", "300 · print"]} />
     <PrimaryButton label="Redact PDF" onClick={() => runSafely(setStatus, async () => {

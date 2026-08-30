@@ -2273,9 +2273,8 @@ html.dark .category-filter {
 
 .primary-button,
 html.dark .primary-button {
-  border: 1px solid #2563eb !important;
-  border-radius: 8px !important;
-  background: #2563eb !important;
+  /* Fill, border and radius are owned by app-shell.css so the accent and the
+     2-4px radius invariant hold identically in both themes. */
   color: #fafafa !important;
   box-shadow: none !important;
 }

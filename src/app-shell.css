@@ -52,7 +52,7 @@
    light-only marketing page, with dark handled by one-off !important rules).
    Re-point them at the app palette so every older class inherits the correct
    colour in BOTH themes instead of rendering dark-on-dark. */
-:root, html.dark {
+html:not(.dark), html.dark {
   --foreground: var(--c-text);
   --ink: var(--c-text);
   --card-foreground: var(--c-text);
@@ -84,7 +84,7 @@ html.dark {
   --c-accent: #818cf8;      /* accent text/borders ON dark surfaces */
   --c-accent-solid: #4f46e5; /* solid fills carrying white text (~6.3:1) */
   --c-accent-fg: #ffffff;
-  --c-accent-soft: #262a45;
+  --c-accent-soft: #2e3358;
   --c-accent-text: #a5b4fc;  /* accent text ON accent-soft */
   --c-hover: #2e3035;
   --c-active: #35373d;
@@ -157,7 +157,7 @@ body {
 }
 
 .menubar-brand span {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--c-text-faint);
   letter-spacing: .04em;
@@ -239,7 +239,7 @@ body {
 .menu-col-title {
   margin: 6px 0 4px;
   padding: 0 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -272,7 +272,7 @@ body {
   border-radius: 2px;
   background: var(--c-accent-soft);
   color: var(--c-accent-text);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
 }
 /* The label, not the badge, is what truncates. */
@@ -325,7 +325,7 @@ body {
 .sidebar-group {
   margin: 8px 0 2px;
   padding: 0 10px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -383,7 +383,7 @@ body {
   color: var(--c-text);
 }
 
-.doc-bar-meta { font-size: 11px; color: var(--c-text-faint); }
+.doc-bar-meta { font-size: 12px; color: var(--c-text-faint); }
 .doc-bar-sep { width: 1px; height: 16px; background: var(--c-line); }
 .doc-bar-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
@@ -397,7 +397,7 @@ body {
   padding: 0 10px;
   border-top: 1px solid var(--c-line);
   background: var(--c-chrome);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--c-text-faint);
 }
 
@@ -421,14 +421,14 @@ body {
 
 .index-head h2 {
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: .07em;
   text-transform: uppercase;
   color: var(--c-text-dim);
 }
 
-.index-head span { font-size: 11px; color: var(--c-text-faint); }
+.index-head span { font-size: 12px; color: var(--c-text-faint); }
 
 .index-grid {
   display: grid;
@@ -438,11 +438,11 @@ body {
 
 .index-row {
   display: grid;
-  grid-template-columns: 14px minmax(0, 158px) 36px minmax(0, 1fr);
+  grid-template-columns: 14px minmax(158px, max-content) 36px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-height: var(--app-row);
-  padding: 4px 8px;
+  padding: 0 8px;
   border-radius: var(--app-radius);
   color: var(--c-text);
   font-size: 13px;
@@ -454,7 +454,7 @@ body {
 .index-row > svg { flex: 0 0 auto; color: var(--c-text-faint); }
 .index-row:hover > svg { color: var(--c-accent); }
 .index-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.index-row-desc { grid-column: 4; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--c-text-faint); }
+.index-row-desc { grid-column: 4; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--c-text-faint); }
 
 .index-new {
   grid-column: 3;
@@ -464,7 +464,7 @@ body {
   border-radius: 2px;
   background: var(--c-accent-soft);
   color: var(--c-accent-text);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: .03em;
 }
@@ -492,7 +492,7 @@ body {
 
 .inspector-title {
   margin: 0 0 8px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -541,8 +541,10 @@ body {
 }
 
 .primary-button,
+html:not(.dark) .primary-button,
 html.dark .primary-button {
   border: 1px solid var(--c-accent-solid) !important;
+  border-radius: var(--app-radius) !important;
   background: var(--c-accent-solid) !important;
   color: #ffffff !important;
 }
@@ -662,7 +664,6 @@ html.dark .dropzone { background: var(--c-panel) !important; border-color: var(-
   font-weight: 600 !important;
 }
 
-html.dark .dropzone-cta { background: var(--c-accent) !important; }
 
 .file-chip, html.dark .file-chip {
   min-height: 30px !important;
@@ -860,7 +861,7 @@ html.dark .tag-badge, html.dark .new-badge {
 
 .workspace-hint {
   margin-top: 10px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--c-text-faint);
 }
 
@@ -888,7 +889,7 @@ html.dark .tag-badge, html.dark .new-badge {
 .sidebar-foot {
   padding: 8px 10px;
   border-top: 1px solid var(--c-line-soft);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--c-text-faint);
 }
 
@@ -964,7 +965,7 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
 
 .doc-thumb img { width: 100%; border: 1px solid var(--c-line); background: #fff; display: block; }
 .doc-thumb-blank { display: block; width: 100%; aspect-ratio: 1 / 1.414; border: 1px solid var(--c-line); background: var(--c-panel); }
-.doc-thumb-num { font-size: 10px; color: var(--c-text-faint); }
+.doc-thumb-num { font-size: 11px; color: var(--c-text-faint); }
 .doc-thumb:hover { background: var(--c-hover); }
 .doc-thumb-active { border-color: var(--c-accent); background: var(--c-accent-soft); }
 .doc-thumb-active .doc-thumb-num { color: var(--c-accent-text); font-weight: 700; }
@@ -980,7 +981,7 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
 }
 
 .doc-stage-inner { display: grid; place-items: center; }
-.doc-page-canvas { max-width: 100%; height: auto; border: 1px solid var(--c-line); background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
+.doc-page-canvas { max-width: none; height: auto; border: 1px solid var(--c-line); background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
 
 .doc-loading {
   position: absolute;
@@ -1009,7 +1010,7 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
   box-shadow: 0 4px 12px rgba(0, 0, 0, .22);
 }
 
-.doc-controls-page { padding: 0 4px; font-size: 11px; color: var(--c-text-dim); }
+.doc-controls-page { padding: 0 4px; font-size: 12px; color: var(--c-text-dim); }
 
 @media (max-width: 720px) {
   .doc-view { grid-template-columns: minmax(0, 1fr); }
@@ -1198,18 +1199,21 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
    (Add Text). The layer sits exactly over the rendered canvas. */
 .doc-stage-inner-wrap { position: relative; display: inline-block; }
 
-.doc-select-layer { position: absolute; inset: 0; }
-.doc-select-rect { cursor: crosshair; }
+.doc-select-layer { position: absolute; inset: 0; overflow: hidden; }
+.doc-select-layer:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+.doc-select-rect { cursor: crosshair; touch-action: none; }
 .doc-select-point { cursor: cell; }
 
 .doc-region {
   position: absolute;
-  border: 1px solid var(--c-accent);
-  background: color-mix(in srgb, var(--c-accent) 26%, transparent);
+  /* The page is white in BOTH themes, so this uses the solid accent (6.29:1 on
+     white) rather than the lighter chrome accent, which measures 2.98:1. */
+  border: 1px solid var(--c-accent-solid);
+  background: color-mix(in srgb, var(--c-accent-solid) 32%, transparent);
   pointer-events: none;
 }
 
-.doc-region-live { border-style: dashed; }
+.doc-region-live { border-width: 2px; border-style: dashed; }
 
 .doc-select-hint {
   display: flex;

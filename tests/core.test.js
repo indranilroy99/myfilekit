@@ -7650,3 +7650,62 @@ test("the status bar never claims 'offline' for a tool that can reach a network"
     assert.ok(appSource.includes(marker), `expected ${marker} in the source — update this guard if it moved`);
   }
 });
+
+// --- Page marking geometry ----------------------------------------------------
+// These values drive an irreversible, flattening redaction, so the maths is
+// tested directly rather than trusted because a drag "looked right". A review
+// found that releasing a drag outside the page emitted negative percentages,
+// which the redaction service rejects outright — discarding every other marked
+// area with a message naming a coordinate the user never typed.
+
+test("page geometry: drags normalise, clamp to the page, and convert to both unit systems", async () => {
+  const geo = await import("../src/lib/page-geometry.ts").catch(() => import("../src/lib/page-geometry.js"));
+  const { boxFromDrag, boxToPercent, boxToPoints, pointToPdf, isMeaningful } = geo;
+
+  // A drag in any direction yields the same box.
+  const forward = boxFromDrag({ x: 0.2, y: 0.3 }, { x: 0.6, y: 0.5 });
+  const reversed = boxFromDrag({ x: 0.6, y: 0.5 }, { x: 0.2, y: 0.3 });
+  assert.deepEqual(forward, reversed);
+  // Compared as percentages: the raw fractions carry float error (0.6 - 0.2 is
+  // 0.39999999999999997), which both converters round away.
+  assert.deepEqual(boxToPercent(forward), { x: 20, y: 30, w: 40, h: 20 });
+
+  // Overshooting the page edge clamps instead of going negative.
+  const overshoot = boxFromDrag({ x: -0.4, y: 0.5 }, { x: 0.3, y: 1.9 });
+  assert.equal(overshoot.x, 0, "x must never be negative");
+  assert.equal(overshoot.y, 0.5);
+  assert.ok(overshoot.x + overshoot.w <= 1, "box must stay within the page");
+  assert.ok(overshoot.y + overshoot.h <= 1, "box must stay within the page");
+
+  // PDF points flip the y axis: the canvas measures down, a PDF measures up.
+  const pts = boxToPoints({ x: 0, y: 0, w: 1, h: 0.25 }, 595, 842);
+  assert.equal(pts.y, 631.5, "a box at the TOP of the page is high in PDF points");
+  const bottom = boxToPoints({ x: 0, y: 0.75, w: 1, h: 0.25 }, 595, 842);
+  assert.equal(bottom.y, 0, "a box at the BOTTOM of the page is at y=0");
+
+  // Point mode, same flip, and clamped.
+  assert.deepEqual(pointToPdf({ x: 0.25, y: 0.3 }, 595, 842), { x: 148.8, y: 589.4 });
+  assert.deepEqual(pointToPdf({ x: -1, y: 2 }, 595, 842), { x: 0, y: 0 });
+
+  // A stray click is not a mark.
+  assert.equal(isMeaningful({ x: 0.5, y: 0.5, w: 0.001, h: 0.4 }), false);
+  assert.equal(isMeaningful(forward), true);
+});
+
+test("page geometry: the drawn areas are parsed from the coordinate list", async () => {
+  const geo = await import("../src/lib/page-geometry.ts").catch(() => import("../src/lib/page-geometry.js"));
+  const { parseAreaLines, textOverflowsPage, approximateTextWidth } = geo;
+
+  const parsed = parseAreaLines("1, 10, 10, 30, 30\n4, 50, 50, 30, 30\n\n  ");
+  assert.deepEqual(parsed, [
+    { page: 1, x: 10, y: 10, w: 30, h: 30 },
+    { page: 4, x: 50, y: 50, w: 30, h: 30 },
+  ]);
+
+  // Malformed or zero-area lines are skipped rather than drawn as junk.
+  assert.deepEqual(parseAreaLines("nonsense\n1, 2, 3\n1, 10, 10, 0, 5\n0, 1, 1, 5, 5"), []);
+
+  // Text placed near the right edge would be clipped: the tool must warn.
+  assert.equal(textOverflowsPage(536, approximateTextWidth("Approved", 18), 595), true);
+  assert.equal(textOverflowsPage(72, approximateTextWidth("Approved", 18), 595), false);
+});

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Loader2, Minus, Plus } from "lucide-react";
 import { loadPdfDocument, renderPdfPageToCanvas } from "../lib/pdfjs";
+import { boxFromDrag, boxToPercent, boxToPoints, isMeaningful, pointToPdf } from "../lib/page-geometry";
 
 /**
  * A rendered PDF: page canvas, thumbnail rail, page navigation and zoom.
@@ -29,12 +30,12 @@ type Props = {
 
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 
-const round = (value: number) => Math.round(value * 10) / 10;
-
 type Selection = {
   page: number;
   percent: { x: number; y: number; w: number; h: number };
   points: { x: number; y: number; w: number; h: number };
+  /** Page width in points, so a tool can warn when its content will not fit. */
+  pageWidth?: number;
 };
 
 function emitSelection(detail: Selection) {
@@ -52,7 +53,27 @@ export function DocumentView({ file, page, onPageChange, onPageCount, selectMode
   const stageRef = useRef<HTMLDivElement | null>(null);
   const renderToken = useRef(0);
   const [drag, setDrag] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const dragStart = useRef<{ x: number; y: number } | null>(null);
+  // Anchor plus the page it was started on: a drag released after the page
+  // changed must belong to the page it began on, not the one now showing.
+  const dragStart = useRef<{ x: number; y: number; page: number } | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  // Keyboard marking: dragging cannot be the only way to mark an area.
+  // Backed by a ref as well as state — the handler must read the CURRENT box,
+  // not the one from the last committed render, or a quick sequence of key
+  // presses reads a stale value and never commits. (Same class of bug as the
+  // pointerup path.)
+  const [keyBox, setKeyBoxState] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const keyBoxRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const setKeyBox = (next: { x: number; y: number; w: number; h: number } | null) => {
+    keyBoxRef.current = next;
+    setKeyBoxState(next);
+  };
+
+  const commitBox = (page: number, box: { x: number; y: number; w: number; h: number }) => {
+    const percent = boxToPercent(box);
+    emitSelection({ page, percent, points: boxToPoints(box, pagePoints.w, pagePoints.h) });
+    setAnnouncement(`Area marked on page ${page}: ${percent.x}% ${percent.y}%, ${percent.w} by ${percent.h} percent.`);
+  };
   const [pagePoints, setPagePoints] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
 
   // Load the document whenever the file changes.
@@ -186,74 +207,93 @@ export function DocumentView({ file, page, onPageChange, onPageCount, selectMode
           {selectMode ? (
             <div
               className={`doc-select-layer doc-select-${selectMode}`}
-              role="application"
-              aria-label={selectMode === "rect" ? "Drag on the page to mark an area" : "Click the page to place text"}
+              role="group"
+              aria-label={selectMode === "rect"
+                ? "Page area marker. Drag to mark an area, or press Enter then use the arrow keys."
+                : "Click the page to place text"}
+              tabIndex={0}
               onPointerDown={(event) => {
                 if (selectMode !== "rect") return;
                 const box = event.currentTarget.getBoundingClientRect();
-                dragStart.current = { x: (event.clientX - box.left) / box.width, y: (event.clientY - box.top) / box.height };
+                dragStart.current = {
+                  x: (event.clientX - box.left) / box.width,
+                  y: (event.clientY - box.top) / box.height,
+                  page: current,
+                };
                 event.currentTarget.setPointerCapture(event.pointerId);
               }}
               onPointerMove={(event) => {
                 if (selectMode !== "rect" || !dragStart.current) return;
                 const box = event.currentTarget.getBoundingClientRect();
-                const cx = (event.clientX - box.left) / box.width;
-                const cy = (event.clientY - box.top) / box.height;
-                const s0 = dragStart.current;
-                setDrag({ x: Math.min(s0.x, cx), y: Math.min(s0.y, cy), w: Math.abs(cx - s0.x), h: Math.abs(cy - s0.y) });
+                setDrag(boxFromDrag(dragStart.current, {
+                  x: (event.clientX - box.left) / box.width,
+                  y: (event.clientY - box.top) / box.height,
+                }));
               }}
               onPointerUp={(event) => {
                 if (selectMode !== "rect") return;
-                // Compute from the ref and this event, NOT from `drag` state:
-                // a fast drag can release before React commits the move, which
-                // would silently produce no selection at all.
+                // Computed from the ref and this event, NOT from `drag` state:
+                // a fast drag can release before React commits the move.
                 const start = dragStart.current;
                 dragStart.current = null;
                 setDrag(null);
                 if (!start) return;
                 const bounds = event.currentTarget.getBoundingClientRect();
-                const cx = (event.clientX - bounds.left) / bounds.width;
-                const cy = (event.clientY - bounds.top) / bounds.height;
-                const box = {
-                  x: Math.min(start.x, cx),
-                  y: Math.min(start.y, cy),
-                  w: Math.abs(cx - start.x),
-                  h: Math.abs(cy - start.y),
-                };
-                // Ignore a stray click that produced no meaningful area.
-                if (box.w < 0.01 || box.h < 0.01) return;
-                emitSelection({
-                  page: current,
-                  percent: { x: round(box.x * 100), y: round(box.y * 100), w: round(box.w * 100), h: round(box.h * 100) },
-                  points: {
-                    x: round(box.x * pagePoints.w),
-                    y: round((1 - box.y - box.h) * pagePoints.h),
-                    w: round(box.w * pagePoints.w),
-                    h: round(box.h * pagePoints.h),
-                  },
+                const box = boxFromDrag(start, {
+                  x: (event.clientX - bounds.left) / bounds.width,
+                  y: (event.clientY - bounds.top) / bounds.height,
                 });
+                if (!isMeaningful(box)) return;
+                commitBox(start.page, box);
+              }}
+              // A cancelled gesture (touch pan, window blur) must not strand the
+              // anchor, or the next stray pointerup emits a box nobody drew.
+              onPointerCancel={() => { dragStart.current = null; setDrag(null); }}
+              onLostPointerCapture={() => { dragStart.current = null; setDrag(null); }}
+              onKeyDown={(event) => {
+                if (selectMode !== "rect") return;
+                const step = event.shiftKey ? 0.05 : 0.02;
+                const active = keyBoxRef.current;
+                const box = active || { x: 0.4, y: 0.4, w: 0.2, h: 0.1 };
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  if (!active) { setKeyBox(box); setAnnouncement("Marking started. Arrow keys move, Shift with arrows resizes, Enter confirms, Escape cancels."); return; }
+                  if (isMeaningful(active)) commitBox(current, active);
+                  setKeyBox(null);
+                  return;
+                }
+                if (event.key === "Escape") { setKeyBox(null); setAnnouncement("Marking cancelled."); return; }
+                if (!active) return;
+                const moves: Record<string, [number, number]> = {
+                  ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step],
+                };
+                const delta = moves[event.key];
+                if (!delta) return;
+                event.preventDefault();
+                setKeyBox(event.shiftKey
+                  ? { ...box, w: Math.max(0.02, Math.min(1 - box.x, box.w + delta[0])), h: Math.max(0.02, Math.min(1 - box.y, box.h + delta[1])) }
+                  : { ...box, x: Math.min(1 - box.w, Math.max(0, box.x + delta[0])), y: Math.min(1 - box.h, Math.max(0, box.y + delta[1])) });
               }}
               onClick={(event) => {
                 if (selectMode !== "point") return;
                 const box = event.currentTarget.getBoundingClientRect();
-                const fx = (event.clientX - box.left) / box.width;
-                const fy = (event.clientY - box.top) / box.height;
-                emitSelection({
-                  page: current,
-                  percent: { x: round(fx * 100), y: round(fy * 100), w: 0, h: 0 },
-                  // PDF origin is bottom-left, the canvas is top-left.
-                  points: { x: round(fx * pagePoints.w), y: round((1 - fy) * pagePoints.h), w: 0, h: 0 },
-                });
+                const point = { x: (event.clientX - box.left) / box.width, y: (event.clientY - box.top) / box.height };
+                const pdf = pointToPdf(point, pagePoints.w, pagePoints.h);
+                emitSelection({ page: current, percent: { x: Math.round(point.x * 1000) / 10, y: Math.round(point.y * 1000) / 10, w: 0, h: 0 }, points: { ...pdf, w: 0, h: 0 }, pageWidth: pagePoints.w });
+                setAnnouncement(`Point placed on page ${current}.`);
               }}
             >
               {regions.filter((r) => r.page === current).map((r, i) => (
                 <span key={i} className="doc-region" style={{ left: `${r.x}%`, top: `${r.y}%`, width: `${r.w}%`, height: `${r.h}%` }} />
               ))}
               {drag ? <span className="doc-region doc-region-live" style={{ left: `${drag.x * 100}%`, top: `${drag.y * 100}%`, width: `${drag.w * 100}%`, height: `${drag.h * 100}%` }} /> : null}
+              {keyBox ? <span className="doc-region doc-region-live" style={{ left: `${keyBox.x * 100}%`, top: `${keyBox.y * 100}%`, width: `${keyBox.w * 100}%`, height: `${keyBox.h * 100}%` }} /> : null}
             </div>
           ) : null}
         </div>
       </div>
+
+      <span className="sr-only" aria-live="polite">{announcement}</span>
 
       <div className="doc-controls">
         <button type="button" className="icon-button" aria-label="Previous page" disabled={current <= 1} onClick={() => go(current - 1)}><ChevronUp size={15} /></button>

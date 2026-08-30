@@ -1315,7 +1315,9 @@ function ToolPage({ tool }: { tool: Tool }) {
   // The PDF currently loaded in this tool, published by FileControl. Keyed by
   // the control that owns it so a second file input cannot clear the first.
   const [docs, setDocs] = useState<Record<string, File>>({});
-  // Areas the user has marked, echoed back onto the page so they can see them.
+  // Areas drawn on the page. Published by the tool from its OWN coordinate list,
+  // so the preview always matches what will actually be applied — an
+  // append-only echo silently diverged from it (and could never be undone).
   const [regions, setRegions] = useState<{ page: number; x: number; y: number; w: number; h: number }[]>([]);
   const activeFile = Object.values(docs)[0] || null;
 
@@ -1327,14 +1329,17 @@ function ToolPage({ tool }: { tool: Tool }) {
   useEffect(() => { setDocs({}); setRegions([]); }, [tool.id]);
 
   useEffect(() => {
-    const onRegion = (event: Event) => {
-      const d = (event as CustomEvent<{ page: number; percent: { x: number; y: number; w: number; h: number } }>).detail;
-      if (!d || d.percent.w <= 0) return; // point selections are not drawn as areas
-      setRegions((current) => [...current, { page: d.page, ...d.percent }]);
+    const onAreas = (event: Event) => {
+      const d = (event as CustomEvent<{ areas: { page: number; x: number; y: number; w: number; h: number }[] }>).detail;
+      setRegions(Array.isArray(d?.areas) ? d.areas : []);
     };
-    window.addEventListener("myfilekit:region-selected", onRegion);
-    return () => window.removeEventListener("myfilekit:region-selected", onRegion);
+    window.addEventListener("myfilekit:marked-areas", onAreas);
+    return () => window.removeEventListener("myfilekit:marked-areas", onAreas);
   }, []);
+
+  // A different document starts with a clean page: stale marks must never be
+  // shown over, or applied to, a file they were not drawn on.
+  useEffect(() => { setRegions([]); }, [activeFile]);
 
   useEffect(() => {
     const onActive = (event: Event) => {
