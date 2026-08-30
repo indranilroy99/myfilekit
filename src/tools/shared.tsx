@@ -7,8 +7,7 @@ import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { tools } from "../registry/tools.registry.js";
 import { formatBytes } from "../utils/format.js";
 import { revokeDownloadUrl } from "../services/download.service.js";
-import { takeWorkspaceFilesFor } from "../lib/workspace-handoff";
-import { routeForHash } from "../lib/routing";
+import { takeWorkspaceFilesForActive } from "../lib/workspace-handoff";
 
 type Tool = (typeof tools)[number];
 type Status = { tone: "idle" | "success" | "error"; message: string; progress?: { value: number; total: number; label: string } };
@@ -203,9 +202,7 @@ function FileControl({ accept, multiple = false, files, setFiles, label }: { acc
   // several tools accept any file type, including the P2P sender.
   useEffect(() => {
     if (files.length) return;
-    const route = routeForHash(window.location.hash);
-    if (route.type !== "tool") return;
-    const handed = takeWorkspaceFilesFor(route.tool.id).filter(matchesAccept);
+    const handed = takeWorkspaceFilesForActive().filter(matchesAccept);
     if (handed.length) setFiles(multiple ? handed : handed.slice(0, 1));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

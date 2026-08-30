@@ -6,6 +6,7 @@ import {
 
 export type Route =
   | { type: "home" }
+  | { type: "editor" }
   | { type: "dashboard" }
   | { type: "browse"; ext?: string }
   | { type: "category"; category: string }

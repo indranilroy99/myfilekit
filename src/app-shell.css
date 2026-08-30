@@ -1237,3 +1237,101 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
   font-size: 13px;
   font-weight: 600;
 }
+
+/* ---------- Editor: options / document / tool rail ---------------------------
+   The document is the subject and stays open; the left panel carries whichever
+   tool is selected, the right rail picks the tool. Same three-zone grammar as
+   the rest of the app, so nothing here is a special case. */
+
+.editor-shell {
+  display: grid;
+  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr) 240px;
+  align-items: stretch;
+  min-height: calc(100svh - var(--app-menubar-h) - var(--app-status-h) - var(--app-docbar-h));
+}
+
+.editor-panel {
+  min-width: 0;
+  padding: var(--app-gutter);
+  border-right: 1px solid var(--c-line);
+  overflow-y: auto;
+  /* Tool bodies use viewport-keyed grid utilities; make them answer to this
+     column's width instead, exactly as .tool-canvas does. */
+  container-type: inline-size;
+}
+
+@container (max-width: 560px) {
+  .editor-panel [class*="grid-cols"] { grid-template-columns: minmax(0, 1fr) !important; }
+}
+
+.editor-canvas { min-width: 0; padding: 12px; overflow: hidden; }
+
+.editor-image-stage {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 16px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--app-radius);
+  background: var(--c-bg);
+  overflow: auto;
+}
+
+.editor-image-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  border: 1px solid var(--c-line);
+  background: #fff;
+}
+
+.editor-rail {
+  min-width: 0;
+  padding: 8px;
+  border-left: 1px solid var(--c-line);
+  background: var(--c-chrome);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.editor-tool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--app-row);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--app-radius);
+  background: transparent;
+  color: var(--c-text-dim);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: default;
+}
+
+.editor-tool:hover { background: var(--c-hover); color: var(--c-text); }
+
+.editor-tool-active {
+  background: var(--c-accent-soft);
+  color: var(--c-text);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--c-accent);
+}
+
+.editor-tool .index-new { margin-left: auto; }
+
+.editor-empty { display: grid; place-items: center; padding: 48px 24px; }
+.editor-empty .workspace-drop { width: min(520px, 100%); }
+
+.editor-facts { display: grid; gap: 6px; margin: 0 0 10px; font-size: 13px; }
+.editor-facts > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
+.editor-facts dt { color: var(--c-text-faint); }
+.editor-facts dd { margin: 0; color: var(--c-text); overflow-wrap: anywhere; }
+
+@media (max-width: 1100px) {
+  .editor-shell { grid-template-columns: minmax(0, 1fr); }
+  .editor-panel { border-right: 0; border-bottom: 1px solid var(--c-line); }
+  .editor-canvas { height: 60vh; }
+  .editor-rail { border-left: 0; border-top: 1px solid var(--c-line); }
+}

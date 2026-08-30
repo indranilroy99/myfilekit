@@ -19,9 +19,9 @@ export function LandingPage({ featured }: Props) {
   const open = (list: FileList | null) => {
     const files = Array.from(list || []);
     if (!files.length) return;
-    // Hand the file to the workspace, which decides what can act on it.
-    stashWorkspaceFiles(files, "workspace");
-    window.location.hash = "#dashboard";
+    // Straight into the editor for the file's own type.
+    stashWorkspaceFiles(files, "editor");
+    window.location.hash = "#editor";
   };
 
   return (

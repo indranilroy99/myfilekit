@@ -4,9 +4,10 @@ import { Icons } from "@/components/ui/icons";
 import { NumberedPagination } from "@/components/ui/pagination";
 import { SpotlightCard } from "@/components/ui/spotlight-card";
 import { categories, categoryGroups, tools } from "./registry/tools.registry.js";
-import { stashWorkspaceFiles, clearWorkspaceFilesUnless } from "./lib/workspace-handoff";
+import { stashWorkspaceFiles, clearWorkspaceFilesUnless, setActiveTool } from "./lib/workspace-handoff";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import LandingPage from "./components/LandingPage";
+import EditorPage from "./components/EditorPage";
 import DocumentView from "./components/DocumentView";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { filterTools, searchableText } from "./lib/search.js";
@@ -62,7 +63,7 @@ export default function App() {
       const next = window.location.hash || "#dashboard";
       // A staged hand-off survives exactly one navigation: into its own tool.
       const route = routeForHash(next);
-      clearWorkspaceFilesUnless(route.type === "tool" ? route.tool.id : "");
+      clearWorkspaceFilesUnless(route.type === "tool" ? route.tool.id : route.type === "editor" ? "editor" : "");
       setHash(next);
     };
     window.addEventListener("hashchange", syncHash);
@@ -82,6 +83,7 @@ export default function App() {
 
   const route = routeForHash(hash);
   const routeTitle = route.type === "home" ? "MyFileKit"
+    : route.type === "editor" ? "Editor"
     : route.type === "dashboard" ? "Workspace"
     : route.type === "browse" ? "Browse tools"
     : route.type === "category" ? route.category
@@ -110,6 +112,7 @@ export default function App() {
         <SideBar hash={hash} />
         <main className="worksurface" id="app-main" tabIndex={-1}>
           {route.type === "home" && <LandingPage featured={popularToolIds.map(findToolById).filter(Boolean).slice(0, 6) as any} />}
+          {route.type === "editor" && <EditorPage renderTool={(tool: Tool) => <ToolRenderer key={tool.id} tool={tool} />} />}
           {route.type === "dashboard" && <WorkspaceHome />}
           {route.type === "browse" && <ToolIndex ext={route.ext} />}
           {route.type === "category" && <ToolIndex category={route.category} />}
@@ -342,6 +345,9 @@ function SideBar({ hash }: { hash: string }) {
         <a className={`sidebar-link ${route.type === "dashboard" ? "sidebar-link-active" : ""}`} href="#dashboard" aria-current={route.type === "dashboard" ? "page" : undefined}>
           <LayoutDashboard size={14} aria-hidden="true" />Workspace
         </a>
+        <a className={`sidebar-link ${route.type === "editor" ? "sidebar-link-active" : ""}`} href="#editor" aria-current={route.type === "editor" ? "page" : undefined}>
+          <FileText size={14} aria-hidden="true" />Editor
+        </a>
         <a className={`sidebar-link ${route.type === "browse" ? "sidebar-link-active" : ""}`} href="#browse-tools" aria-current={route.type === "browse" ? "page" : undefined}>
           <FolderSearch size={14} aria-hidden="true" />All tools
         </a>
@@ -408,6 +414,7 @@ function StatusBar({ route }: { route: ReturnType<typeof routeForHash> }) {
   const label = route.type === "tool" ? route.tool.name
     : route.type === "category" ? route.category
     : route.type === "home" ? "Home"
+    : route.type === "editor" ? "Editor"
     : route.type === "dashboard" ? "Workspace"
     : route.type === "browse" ? "All tools"
     : "Not found";
@@ -1580,6 +1587,9 @@ const toolModuleById: Record<string, keyof typeof toolModules> = {
 };
 
 function ToolRenderer({ tool }: { tool: Tool }) {
+  // Declared before the lazy module mounts, so its FileControl can adopt a file
+  // staged for this tool whether we are on a tool route or inside the editor.
+  setActiveTool(tool.id);
   const moduleId = toolModuleById[tool.id];
   if (!moduleId) return <StatusBox status={{ tone: "error", message: "This tool renderer is missing." }} />;
   const ToolModule = toolModules[moduleId];

@@ -42,3 +42,22 @@ export function clearWorkspaceFilesUnless(toolId: string) {
 export function pendingWorkspaceToolId(): string | null {
   return pending ? pending.toolId : null;
 }
+
+/**
+ * Which tool is being rendered right now.
+ *
+ * A file control cannot work this out from the URL: on a tool route the route
+ * IS the tool, but inside the editor the route is the editor and the tool is
+ * whichever one the rail has selected. Whoever renders a tool declares it here,
+ * so the control only ever adopts files staged for the tool it belongs to.
+ */
+let activeToolId = "";
+
+export function setActiveTool(toolId: string) {
+  activeToolId = toolId || "";
+}
+
+/** Take files staged for the tool currently being rendered. */
+export function takeWorkspaceFilesForActive(): File[] {
+  return activeToolId ? takeWorkspaceFilesFor(activeToolId) : [];
+}

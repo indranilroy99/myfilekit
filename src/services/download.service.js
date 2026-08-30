@@ -17,6 +17,10 @@ export function downloadBlob(blob, filename) {
       mimeType: blob.type || "application/octet-stream",
       size: blob.size || 0,
       url,
+      // The Blob itself, so a consumer can reuse the result as the next input
+      // without re-fetching the object URL — `connect-src 'self'` does not
+      // cover blob:, so fetch() on it is blocked by our own CSP.
+      blob,
     },
   }));
   const link = document.createElement("a");
