@@ -1312,7 +1312,10 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
 
 /* Below the reflow breakpoint the shell is allowed to grow and the page scrolls
    instead, matching the rest of the app's WCAG 1.4.10 behaviour. */
-@media (max-width: 900px), (max-height: 480px) {
+/* Matches the column-collapse breakpoint below. When these disagreed, 900-1100px
+   kept the fixed height while already stacked to one column, so the options form
+   scrolled inside a 110px porthole and the tool rail inside a 98px one. */
+@media (max-width: 1100px), (max-height: 480px) {
   .editor-shell { height: auto; min-height: 0; grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -1471,3 +1474,12 @@ html.dark .result-card-note { color: var(--c-text-dim) !important; }
    Editor. */
 .app[data-route="editor"] .workbench { grid-template-columns: minmax(0, 1fr); }
 .app[data-route="editor"] .sidebar { display: none; }
+
+/* Editor with no tool open: two columns, document and rail. The options column
+   is not rendered at all, so the page gets its width instead of a panel
+   restating the filename the doc bar already shows. */
+.editor-shell-wide { grid-template-columns: minmax(0, 1fr) 232px; }
+
+@media (max-width: 1100px) {
+  .editor-shell-wide { grid-template-columns: minmax(0, 1fr); }
+}

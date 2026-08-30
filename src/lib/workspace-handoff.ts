@@ -26,7 +26,9 @@ export function stashWorkspaceFiles(files: File[], toolId: string) {
   // there the control kept the file the user opened and every further edit was
   // applied to the original, silently discarding the previous one. The ownership
   // check in takeWorkspaceFilesFor still decides who may take it.
-  if (typeof window !== "undefined") {
+  // The Node test harness stubs `window` as a plain object, so check for the
+  // method rather than the global.
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
     window.dispatchEvent(new CustomEvent("myfilekit:workspace-file", { detail: { toolId } }));
   }
 }

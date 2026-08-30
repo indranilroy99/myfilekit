@@ -139,6 +139,19 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
     return () => window.removeEventListener("myfilekit:download-ready", onReady);
   }, []);
 
+  /** Save the document currently open, edits included. */
+  const downloadCurrent = () => {
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = file.name;
+    link.click();
+    // Revoked on a turn of the event loop: revoking synchronously can cancel the
+    // download in some browsers before it has read the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  };
+
   const revertToOriginal = () => {
     if (!original) return;
     setFile(original);
@@ -178,6 +191,11 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
         <span className="doc-bar-meta">{formatBytes(file.size)} · {available.length} tools available</span>
         {original ? <span className="doc-bar-edited">Edited — showing the result</span> : null}
         <span className="doc-bar-actions">
+          {/* Save whatever is on screen, at any point — including after an edit,
+              without hunting for the tool's own result card. */}
+          <button type="button" className="primary-button" onClick={downloadCurrent}>
+            <Download size={15} aria-hidden="true" /> Download
+          </button>
           {original ? <button type="button" className="secondary-button" onClick={revertToOriginal}>
             <RotateCcw size={15} aria-hidden="true" /> Revert to original
           </button> : null}
@@ -188,27 +206,20 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
         </span>
       </div>
 
-      <div className="editor-shell">
-        <section className="editor-panel" aria-label={activeTool ? `${activeTool.name} options` : "Document"}>
-          {activeTool ? (
-            <>
-              <p className="inspector-title">{activeTool.name}</p>
-              <p className="doc-bar-meta" style={{ marginBottom: 10 }}>{activeTool.description}</p>
-              {renderTool(activeTool)}
-            </>
-          ) : (
-            <>
-              <p className="inspector-title">Document</p>
-              <dl className="editor-facts">
-                <div><dt>Name</dt><dd>{file.name}</dd></div>
-                <div><dt>Size</dt><dd>{formatBytes(file.size)}</dd></div>
-                <div><dt>Type</dt><dd>{kind === "pdf" ? "PDF" : kind === "image" ? "Image" : "Document"}</dd></div>
-              </dl>
-              <p className="doc-bar-meta">Pick a tool on the right to work on this file. It stays open as you go.</p>
-            </>
-          )}
-
-        </section>
+      {/*
+        No tool open means no options to show, so the column is not drawn at all
+        and the document takes the width. It was spending 360px on three facts —
+        name, size and type — that the doc bar directly above already states,
+        while the page beside it was cropped.
+      */}
+      <div className={`editor-shell ${activeTool ? "" : "editor-shell-wide"}`}>
+        {activeTool ? (
+          <section className="editor-panel" aria-label={`${activeTool.name} options`}>
+            <p className="inspector-title">{activeTool.name}</p>
+            <p className="doc-bar-meta" style={{ marginBottom: 10 }}>{activeTool.description}</p>
+            {renderTool(activeTool)}
+          </section>
+        ) : null}
 
         <section className="editor-canvas" aria-label="Document preview">
           {kind === "pdf" ? <DocumentView file={file} /> : null}
