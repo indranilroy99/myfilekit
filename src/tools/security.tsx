@@ -7,7 +7,7 @@ import { downloadBytes, downloadText } from "../services/download.service.js";
 import { cleanPdfMetadata, textToPdf } from "../services/pdf.service.js";
 import { fingerprintPdf, redactPdf } from "../services/pdf-edit.service.js";
 import { ALL_PERMISSIONS_ALLOWED, PDF_ENCRYPTION_ALGORITHMS, PDF_PERMISSION_LABELS, decryptPdf, encryptPdf, unlockPdf } from "../services/pdf-crypto.service.js";
-import { CONFIDENCE as PII_CONFIDENCE, PII_TYPE_LABELS, buildPrivacyReportText, confidenceLabel, extractPdfPiiHits, isPersonalType, scanPdfStructure } from "../services/pii.service.js";
+import { CONFIDENCE as PII_CONFIDENCE, PII_TYPE_LABELS, buildPrivacyReportText, confidenceLabel, describeUnreadablePages, extractPdfPiiHits, isPersonalType, scanPdfStructure } from "../services/pii.service.js";
 import { analyzePdfBytes, buildAnalyzerReportText } from "../services/pdf-analyzer.service.js";
 import { sanitizePdf, buildSanitizeReportText, residualActiveContent } from "../services/pdf-sanitize.service.js";
 import { backendOrigin, clearEsignSettings, getEnvelopeStatus, isEsignConfigured, maskApiKey as maskEsignApiKey, parseSigners, readEsignSettings, requestEnvelope, saveEsignSettings } from "../services/esign.service.js";
@@ -37,11 +37,47 @@ type PiiHit = { id: string; page: number; type: string; value: string; masked: s
 type PiiScan = {
   pages: number;
   pagesWithText: number;
+  pagesWithoutText: Array<{ page: number; characters: number }>;
   hasTextLayer: boolean;
   offPageItems: number;
   hits: PiiHit[];
   summary: { total: number; high: number; types: Array<{ type: string; label: string; count: number; high: number }> };
 };
+type TextCoverage = {
+  pages: number;
+  unreadablePages: number[];
+  readablePages: number;
+  unreadable: boolean;
+  allUnreadable: boolean;
+  headline: string;
+  advice: string;
+};
+const readCoverage = describeUnreadablePages as (scan: PiiScan | null) => TextCoverage;
+
+/**
+ * The page-level "this was not scanned" banner.
+ *
+ * Redaction rasterises pages, so the scanners routinely see a page with no text
+ * layer. Reporting "no known patterns matched" for such a page is a false clean
+ * bill of health: the result is identical whether the redaction box landed on
+ * the account number or missed it by 5mm. Both scanners render this, in colour,
+ * above their findings.
+ */
+function UnreadablePagesNotice({ coverage }: { coverage: TextCoverage }) {
+  if (!coverage.unreadable) return null;
+  return (
+    <div className="wabi-card-edge grid gap-2 rounded-2xl border border-[var(--danger)] bg-[var(--danger-bg)] p-4 text-sm font-semibold leading-6 text-[var(--danger-fg)]">
+      <p className="text-xs font-bold uppercase tracking-wide">This file was not fully scanned</p>
+      <p className="text-base font-black">{coverage.headline}</p>
+      <p>{coverage.advice}</p>
+      <p>
+        {coverage.unreadablePages.length} of {coverage.pages} page{coverage.pages === 1 ? "" : "s"} had no readable text
+        {coverage.readablePages ? ` · ${coverage.readablePages} page${coverage.readablePages === 1 ? " was" : "s were"} scanned` : ""}.
+        {" "}Add a text layer with <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a>, or cover regions by eye with <a className="underline" href="#redact-pdf-tool">Redact PDF</a>.
+      </p>
+    </div>
+  );
+}
 type PdfStructureScan = {
   pages: number;
   encrypted: boolean;
@@ -126,12 +162,16 @@ function AutoRedactPiiTool({ tool }: { tool: Tool }) {
       const result = (await extractPdfPiiHits(file, { onProgress: pageProgress(setStatus, "Scanning") })) as PiiScan;
       if (cancelled) return "Ready.";
       setScan(result);
-      if (!result.hasTextLayer) {
-        return `No selectable text was found on any of the ${result.pages} page${result.pages === 1 ? "" : "s"}. This looks like a scan, so there is nothing to match patterns against — run OCR / Searchable PDF first, then come back.`;
+      const coverage = readCoverage(result);
+      if (coverage.allUnreadable) {
+        return `${coverage.headline} ${coverage.advice}`;
       }
       const preselect = result.hits.filter((hit) => hit.confidence >= PII_CONFIDENCE.HIGH && isPersonalType(hit.type) && hit.rects.length > 0);
       setSelected(new Set(preselect.map((hit) => hit.id)));
-      return `Scanned ${result.pages} page${result.pages === 1 ? "" : "s"}: ${result.summary.total} pattern match${result.summary.total === 1 ? "" : "es"}, ${result.summary.high} high confidence. ${preselect.length} high-confidence personal value${preselect.length === 1 ? " is" : "s are"} pre-selected — review every box before redacting.`;
+      // The unreadable-page warning leads the message: a match count read first
+      // would be taken as covering the whole document.
+      const unread = coverage.unreadable ? `${coverage.headline} ` : "";
+      return `${unread}Scanned ${coverage.readablePages} of ${result.pages} page${result.pages === 1 ? "" : "s"}: ${result.summary.total} pattern match${result.summary.total === 1 ? "" : "es"}, ${result.summary.high} high confidence. ${preselect.length} high-confidence personal value${preselect.length === 1 ? " is" : "s are"} pre-selected — review every box before redacting.`;
     });
 
     return () => {
@@ -139,6 +179,7 @@ function AutoRedactPiiTool({ tool }: { tool: Tool }) {
     };
   }, [files, tool.file]);
 
+  const coverage = useMemo(() => readCoverage(scan), [scan]);
   const groups = useMemo(() => groupHitsByType(scan?.hits || []), [scan]);
   const selectedHits = useMemo(() => (scan?.hits || []).filter((hit) => selected.has(hit.id)), [scan, selected]);
   const selectedRects = useMemo(() => selectedHits.flatMap((hit) => hit.rects), [selectedHits]);
@@ -167,16 +208,11 @@ function AutoRedactPiiTool({ tool }: { tool: Tool }) {
   return (
     <ToolForm status={status} onReset={reset}>
       <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-        Finds Aadhaar (Verhoeff-checked), PAN, payment cards (Luhn-checked), GSTIN, IFSC, account numbers, passport numbers, emails, phone numbers, dates of birth, IPs and URLs in the PDF's text layer, then permanently removes the ones you tick. Redaction rasterises every page to an image and paints opaque boxes over the matches, so the text underneath is genuinely gone — the honest trade is that the output is flattened: selectable text, links, and form fields are lost for the whole document. Nothing leaves this browser.
+        Finds Aadhaar (Verhoeff-checked), PAN, payment cards (Luhn-checked), GSTIN, IFSC, account numbers (including grouped forms like 4419-8827-6634), US routing numbers (ABA-checked), passport numbers, emails, phone numbers, dates of birth, IPs and URLs in the PDF's text layer, then permanently removes the ones you tick. It reads the text layer only, so a scanned or already-rasterised page is reported as unreadable rather than clean — add a text layer with <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a> first. Redaction rasterises every page to an image and paints opaque boxes over the matches, so the text underneath is genuinely gone — the honest trade is that the output is flattened: selectable text, links, and form fields are lost for the whole document. Nothing leaves this browser.
       </div>
       <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
 
-      {scan && !scan.hasTextLayer && (
-        <div className="surface-card wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-          <p className="font-black text-[var(--foreground)]">No text layer</p>
-          <p className="mt-1">This PDF has no extractable text, so pattern detection has nothing to read. Run <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a> to add a text layer, then scan the OCR'd copy here. If you only need to cover regions you can see, use <a className="underline" href="#redact-pdf-tool">Redact PDF</a> with manual coordinates.</p>
-        </div>
-      )}
+      {scan && <UnreadablePagesNotice coverage={coverage} />}
 
       {scan && scan.hasTextLayer && (
         <div className="surface-card wabi-card-edge grid gap-4 p-4">
@@ -217,7 +253,11 @@ function AutoRedactPiiTool({ tool }: { tool: Tool }) {
               })}
             </div>
           ) : (
-            <p className="text-sm font-semibold text-neutral-500">No known patterns matched. That is not proof the document is clean — names, addresses, and free-text details are not detectable by pattern.</p>
+            <p className="text-sm font-semibold text-neutral-500">
+              {coverage.unreadable
+                ? `No known patterns matched on the ${coverage.readablePages} page${coverage.readablePages === 1 ? "" : "s"} that could be read. The page${coverage.unreadablePages.length === 1 ? "" : "s"} listed above ${coverage.unreadablePages.length === 1 ? "was" : "were"} not scanned at all, so this is not a clean result.`
+                : "No known patterns matched. That is not proof the document is clean — names, addresses, and free-text details are not detectable by pattern."}
+            </p>
           )}
           <div className="surface-muted wabi-card-edge p-3 text-sm font-semibold leading-6 text-neutral-600">
             A match is located through pdf.js text items, and one item can hold more characters than the match itself. When a match covers only part of an item the WHOLE item rectangle is painted, so neighbouring characters on that run are lost too. That is deliberate: over-redacting beats leaving half an Aadhaar number visible. Check every page of the output before you share it.
@@ -273,12 +313,15 @@ function PrivacyScannerTool({ tool }: { tool: Tool }) {
       if (cancelled) return "Ready.";
       setScan(textScan);
       setStructure(documentScan);
+      const textCoverage = readCoverage(textScan);
       const notes: string[] = [];
-      if (!textScan.hasTextLayer) notes.push("no text layer (scanned document — pattern scanning needs OCR first)");
       if (documentScan.encrypted) notes.push("encrypted");
       if (documentScan.attachments.length || documentScan.embeddedFileStreams) notes.push("carries embedded files");
       if (documentScan.invisibleText.length) notes.push("contains hidden or invisible text");
-      return `Scanned ${documentScan.pages} page${documentScan.pages === 1 ? "" : "s"}: ${textScan.summary.high} high-confidence personal-data match${textScan.summary.high === 1 ? "" : "es"} of ${textScan.summary.total} total${notes.length ? `; ${notes.join("; ")}` : ""}. Nothing was uploaded and no file was modified.`;
+      // Leading with the unreadable pages, because a match count read first is
+      // taken as a statement about the whole document.
+      const unread = textCoverage.unreadable ? `${textCoverage.headline} ` : "";
+      return `${unread}Read ${textCoverage.readablePages} of ${documentScan.pages} page${documentScan.pages === 1 ? "" : "s"}: ${textScan.summary.high} high-confidence personal-data match${textScan.summary.high === 1 ? "" : "es"} of ${textScan.summary.total} total${notes.length ? `; ${notes.join("; ")}` : ""}. Nothing was uploaded and no file was modified.`;
     });
 
     return () => {
@@ -286,6 +329,7 @@ function PrivacyScannerTool({ tool }: { tool: Tool }) {
     };
   }, [files, tool.file]);
 
+  const coverage = useMemo(() => readCoverage(scan), [scan]);
   const groups = useMemo(() => groupHitsByType(scan?.hits || []), [scan]);
   const destinations = useMemo(() => (scan?.hits || []).filter((hit) => hit.type === "url" || hit.type === "ipv4" || hit.type === "ipv6"), [scan]);
   const reportText = useMemo(() => {
@@ -302,6 +346,7 @@ function PrivacyScannerTool({ tool }: { tool: Tool }) {
 
       {scan && structure && (
         <>
+          <UnreadablePagesNotice coverage={coverage} />
           <div className="surface-card wabi-card-edge grid gap-3 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="font-black">Overview</p>
@@ -309,7 +354,7 @@ function PrivacyScannerTool({ tool }: { tool: Tool }) {
             </div>
             <dl className="grid gap-2 text-sm font-semibold text-neutral-600 lg:grid-cols-2">
               <InfoRow label="Pages" value={String(structure.pages)} />
-              <InfoRow label="Pages with text" value={`${scan.pagesWithText}${scan.hasTextLayer ? "" : " (no text layer — run OCR to scan a scan)"}`} />
+              <InfoRow label="Pages with readable text" value={`${coverage.readablePages} of ${structure.pages}${coverage.unreadable ? ` — page${coverage.unreadablePages.length === 1 ? "" : "s"} ${coverage.unreadablePages.join(", ")} could not be read` : ""}`} />
               <InfoRow label="Pattern matches" value={`${scan.summary.total} total · ${scan.summary.high} high confidence`} />
               <InfoRow label="Encrypted" value={structure.encrypted ? "Yes" : "No"} />
               <InfoRow label="Signature entries" value={String(structure.signatures.length)} />
@@ -355,7 +400,11 @@ function PrivacyScannerTool({ tool }: { tool: Tool }) {
                 ))}
               </div>
             ) : (
-              <p className="text-sm font-semibold text-neutral-500">No known patterns matched.</p>
+              <p className="text-sm font-semibold text-neutral-500">
+                {coverage.unreadable
+                  ? `No known patterns matched on the ${coverage.readablePages} page${coverage.readablePages === 1 ? "" : "s"} that could be read. ${coverage.headline} Treat this as "not scanned", not as "clean".`
+                  : "No known patterns matched."}
+              </p>
             )}
           </div>
 
@@ -428,6 +477,7 @@ function PrivacyScannerTool({ tool }: { tool: Tool }) {
 
           <div className="surface-card wabi-card-edge grid gap-2 p-4 text-sm font-semibold leading-6 text-neutral-600">
             <p className="font-black text-[var(--foreground)]">6 · What this means</p>
+            {coverage.unreadable && <p className="text-[var(--danger-fg)]">{coverage.headline} {coverage.advice}</p>}
             <p>{scan.summary.high} match{scan.summary.high === 1 ? "" : "es"} passed a checksum or a context rule, so treat those as real findings. The other {scan.summary.total - scan.summary.high} are medium or low confidence and need your judgement.</p>
             <p>There is no risk score here on purpose: a single number would hide what actually matters. The findings above are the report.</p>
             <p className="font-black text-[var(--foreground)]">Limits, plainly stated</p>

@@ -35,6 +35,7 @@ export const PII_TYPE_LABELS = {
   gstin: "GSTIN",
   ifsc: "IFSC code",
   account: "Bank account number",
+  routing: "Bank routing number (US)",
   passport: "Passport number (India)",
   email: "Email address",
   phone: "Phone number",
@@ -47,7 +48,7 @@ export const PII_TYPE_LABELS = {
 // Types that identify a person or an account. These are masked everywhere by
 // default. URLs and IP addresses are document destinations the reader has to be
 // able to read, so they are reported verbatim (documented in the UI + report).
-const PERSONAL_TYPES = new Set(["aadhaar", "pan", "card", "gstin", "ifsc", "account", "passport", "email", "phone", "dob"]);
+const PERSONAL_TYPES = new Set(["aadhaar", "pan", "card", "gstin", "ifsc", "account", "routing", "passport", "email", "phone", "dob"]);
 
 export function isPersonalType(type) {
   return PERSONAL_TYPES.has(type);
@@ -199,6 +200,28 @@ export function validateIfsc(value) {
   return { valid: true, reason: "" };
 }
 
+/**
+ * US bank routing number (ABA / RTN): 9 digits, an issued Federal Reserve
+ * routing symbol in the first two digits, and the weighted mod-10 checksum.
+ *
+ * This exists because a routing number identifies the BANK, not the customer's
+ * account. Reporting one as a "Bank account number" — which the generic 9-18
+ * digit account rule used to do — is a factual error in a redaction tool, and
+ * it hides the fact that the actual account number was never found.
+ */
+export function validateAbaRouting(value) {
+  const digits = String(value || "").replace(/[\s-]/g, "");
+  if (!/^\d{9}$/.test(digits)) return { valid: false, reason: "A routing number is 9 digits." };
+  const prefix = Number(digits.slice(0, 2));
+  // 00-12 Federal Reserve, 21-32 thrift, 61-72 electronic, 80 traveller's cheque.
+  const issued = prefix <= 12 || (prefix >= 21 && prefix <= 32) || (prefix >= 61 && prefix <= 72) || prefix === 80;
+  if (!issued) return { valid: false, reason: `${digits.slice(0, 2)} is not an issued Federal Reserve routing symbol.` };
+  const d = [...digits].map(Number);
+  const sum = 3 * (d[0] + d[3] + d[6]) + 7 * (d[1] + d[4] + d[7]) + (d[2] + d[5] + d[8]);
+  if (sum % 10 !== 0) return { valid: false, reason: "ABA checksum failed." };
+  return { valid: true, reason: "" };
+}
+
 /** Indian passport: one letter (no Q, no X, no Z) then 7 digits. */
 export function validateIndianPassport(value) {
   const passport = String(value || "").trim().toUpperCase();
@@ -307,7 +330,9 @@ const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "
 const DOB_KEYWORDS = /\b(?:d\.?o\.?b\.?|date of birth|birth ?date|born(?: on)?|birthday)\b\s*[:=-]?\s*$/i;
 const PHONE_KEYWORDS = /\b(phone|mobile|tel|telephone|contact|whatsapp|cell|mob)\b/i;
 const ACCOUNT_KEYWORDS = /\b(a\/c|acct|account)\b/i;
+const ROUTING_KEYWORDS = /\b(routing|aba|rtn|transit)\b/i;
 const PASSPORT_KEYWORDS = /\bpassport\b/i;
+const IFSC_SHAPE = /(?<![A-Z0-9])[A-Z]{4}0[A-Z0-9]{6}(?![A-Z0-9])/;
 
 function contextBefore(text, start, span = 40) {
   return text.slice(Math.max(0, start - span), start);
@@ -422,6 +447,27 @@ export function detectPii(text, options = {}) {
   for (const match of source.matchAll(/(?<![\d+])\+[1-9]\d{7,14}(?![\d])/g)) {
     add("phone", match.index, match.index + match[0].length, CONFIDENCE.HIGH, "E.164 international format.");
   }
+  // North American (NANP) 3-3-4: "(415) 555-0142", "415-555-0142", "+1 415.555.0142".
+  // Previously only Indian mobiles and E.164 were detected, so every US-style
+  // number on a document went unreported despite "phone numbers" being claimed.
+  // A separator between the exchange and the line number is REQUIRED: a bare
+  // 10-digit run is an order or reference number far more often than a phone
+  // number, and the bare case is already covered by the Indian rule above.
+  for (const match of source.matchAll(/(?<![\d+.])(?:\+1[ .-]?)?(?:\(([2-9]\d{2})\)[ .-]?|([2-9]\d{2})[ .-])([2-9]\d{2})[ .-](\d{4})(?![\d])(?!\.\d)/g)) {
+    const prefixed = match[0].startsWith("+1");
+    const parenthesised = Boolean(match[1]);
+    const keyword = PHONE_KEYWORDS.test(contextBefore(source, match.index));
+    add(
+      "phone",
+      match.index,
+      match.index + match[0].length,
+      prefixed || parenthesised || keyword ? CONFIDENCE.HIGH : CONFIDENCE.MEDIUM,
+      prefixed ? "North American number with the +1 country code."
+        : keyword ? "Phone keyword nearby."
+        : parenthesised ? "Parenthesised area code — North American phone convention."
+        : "North American 3-3-4 phone shape with separators."
+    );
+  }
 
   // Date of birth — keyword-adjacent dates, plus standalone plausible birthdates.
   for (const date of findDates(source)) {
@@ -461,18 +507,59 @@ export function detectPii(text, options = {}) {
     add("passport", match.index, match.index + match[0].length, keyword ? CONFIDENCE.HIGH : CONFIDENCE.LOW, keyword ? "Passport keyword nearby." : "Shape only — one letter plus 7 digits is a very common reference-number shape.");
   }
 
-  // Bank account numbers — 9-18 digits. Weak alone; an IFSC or an account
-  // keyword in the surrounding window lifts it to medium.
-  for (const match of source.matchAll(/(?<![\d])\d{9,18}(?![\d])/g)) {
-    const around = contextAround(source, match.index, match.index + match[0].length);
-    const nearIfsc = /(?<![A-Z0-9])[A-Z]{4}0[A-Z0-9]{6}(?![A-Z0-9])/.test(around);
-    const nearKeyword = ACCOUNT_KEYWORDS.test(around);
+  // US routing numbers — run before the account rule and outrank it, so a
+  // checksum-valid RTN is never reported as somebody's account number.
+  for (const match of source.matchAll(/(?<![\d])\d{9}(?![\d])/g)) {
+    if (!validateAbaRouting(match[0]).valid) continue;
+    const end = match.index + match[0].length;
+    const keyword = ROUTING_KEYWORDS.test(contextAround(source, match.index, end, 40));
+    add(
+      "routing",
+      match.index,
+      end,
+      keyword ? CONFIDENCE.HIGH : CONFIDENCE.MEDIUM,
+      keyword
+        ? "ABA checksum valid and a routing/ABA keyword sits beside it. This identifies the bank, not an account."
+        : "9 digits with a valid ABA checksum and an issued Federal Reserve prefix — most likely a routing number, which identifies a bank rather than an account."
+    );
+  }
+
+  // Bank account numbers — 9-18 digits, either as one unbroken run or written in
+  // hyphen/space separated groups ("4419-8827-6634", "4419 8827 6634"). The
+  // grouped forms used to be invisible here: a hyphen ends a `\d{9,18}` run, so
+  // a labelled 12-digit account number split 4-4-4 produced three 4-digit runs
+  // and no match at all. Groups are capped at 6 digits so the grouped pass only
+  // recognises numbers actually written in groups; unbroken runs stay with the
+  // rule they always had.
+  const accountRuns = [];
+  const pushRun = (start, end) => {
+    const digits = source.slice(start, end).replace(/[ -]/g, "");
+    if (digits.length < 9 || digits.length > 18) return;
+    const around = contextAround(source, start, end);
+    accountRuns.push({ start, end, digits, nearIfsc: IFSC_SHAPE.test(around), nearKeyword: ACCOUNT_KEYWORDS.test(around) });
+  };
+  for (const match of source.matchAll(/(?<![\d])\d{9,18}(?![\d])/g)) pushRun(match.index, match.index + match[0].length);
+  for (const match of source.matchAll(/(?<![\d])\d{2,6}(?:-\d{2,6})+(?![\d])/g)) pushRun(match.index, match.index + match[0].length);
+  for (const match of source.matchAll(/(?<![\d])\d{2,6}(?: \d{2,6})+(?![\d])/g)) pushRun(match.index, match.index + match[0].length);
+
+  // An account number is usually labelled once (in a header) and then repeated
+  // bare in a table or a footer. Those later repeats carry no keyword of their
+  // own, so without this they would be reported as anonymous digit runs and a
+  // reviewer would skip them — leaving the same number unredacted further down
+  // the page. Evidence found anywhere in this text block is applied to every
+  // occurrence of the same digits.
+  const labelledAccounts = new Set(accountRuns.filter((run) => run.nearIfsc || run.nearKeyword).map((run) => run.digits));
+  for (const run of accountRuns) {
+    const labelledElsewhere = !run.nearIfsc && !run.nearKeyword && labelledAccounts.has(run.digits);
     add(
       "account",
-      match.index,
-      match.index + match[0].length,
-      nearIfsc || nearKeyword ? CONFIDENCE.MEDIUM : CONFIDENCE.LOW,
-      nearIfsc ? "An IFSC code appears next to this number." : nearKeyword ? "Account keyword nearby." : "Digit run only — no account context found."
+      run.start,
+      run.end,
+      run.nearIfsc || run.nearKeyword || labelledElsewhere ? CONFIDENCE.MEDIUM : CONFIDENCE.LOW,
+      run.nearIfsc ? "An IFSC code appears next to this number."
+        : run.nearKeyword ? "Account keyword nearby."
+        : labelledElsewhere ? "The same number is labelled as an account elsewhere on this page."
+        : "Digit run only — no account context found."
     );
   }
 
@@ -480,7 +567,9 @@ export function detectPii(text, options = {}) {
 }
 
 // Earlier types win when two hits cover the same characters.
-const TYPE_PRIORITY = ["gstin", "card", "aadhaar", "email", "url", "ifsc", "pan", "phone", "ipv4", "ipv6", "dob", "passport", "account"];
+// "routing" sits above "account": both can claim the same 9 digits, and the one
+// backed by a checksum wins so the label is right.
+const TYPE_PRIORITY = ["gstin", "card", "aadhaar", "email", "url", "ifsc", "pan", "phone", "ipv4", "ipv6", "dob", "passport", "routing", "account"];
 
 function resolveOverlaps(candidates) {
   const accepted = [];
@@ -511,6 +600,66 @@ export function summarisePii(matches) {
     total: (matches || []).length,
     high: types.reduce((sum, entry) => sum + entry.high, 0),
     types,
+  };
+}
+
+// --- unreadable pages ---------------------------------------------------------
+
+/**
+ * A page with fewer extractable characters than this is treated as unreadable.
+ * A rasterised page yields exactly 0; the small allowance covers a page whose
+ * only text layer is a stamp or a page number, which tells a reader nothing
+ * about the page content either.
+ */
+export const MIN_PAGE_TEXT_CHARS = 12;
+
+function formatPageList(pages, limit = 10) {
+  const shown = pages.slice(0, limit);
+  const rest = pages.length - shown.length;
+  const joined = shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}` : String(shown[0]);
+  return rest > 0 ? `${shown.join(", ")} and ${rest} more` : joined;
+}
+
+/**
+ * Turns a scan into an explicit statement about the pages nothing could be read
+ * from.
+ *
+ * This exists because "no known patterns matched" reads as a clean bill of
+ * health, and on a rasterised page it is nothing of the kind: the scanner would
+ * say exactly the same thing whether a redaction box landed correctly or missed
+ * and left an account number sitting in plain sight. A page with no text layer
+ * has not been scanned, and the UI has to say so in those words.
+ *
+ * Accepts a scan from `extractPdfPiiHits`; an older scan without
+ * `pagesWithoutText` falls back to the whole-document `hasTextLayer` flag.
+ */
+export function describeUnreadablePages(scan) {
+  const pages = Number(scan?.pages) || 0;
+  let entries = Array.isArray(scan?.pagesWithoutText) ? scan.pagesWithoutText : null;
+  if (!entries) {
+    entries = scan && scan.hasTextLayer === false && pages > 0
+      ? Array.from({ length: pages }, (unused, index) => ({ page: index + 1, characters: 0 }))
+      : [];
+  }
+  const unreadablePages = entries.map((entry) => Number(entry.page)).filter((page) => Number.isFinite(page));
+  const unreadable = unreadablePages.length > 0;
+  const allUnreadable = unreadable && pages > 0 && unreadablePages.length >= pages;
+  const empty = entries.every((entry) => !Number(entry.characters));
+  const plural = unreadablePages.length !== 1;
+  const headline = !unreadable
+    ? ""
+    : `${plural ? "Pages" : "Page"} ${formatPageList(unreadablePages)} of this file ${plural ? "are images" : "is an image"}. ${empty ? "No text could be read" : "Almost no text could be read"} from ${plural ? "them" : "it"}, so this scan cannot tell you what ${plural ? "they contain" : "it contains"}.`;
+  const advice = !unreadable
+    ? ""
+    : `Open ${plural ? "those pages" : "that page"} and read ${plural ? "them" : "it"} yourself, or run OCR / Searchable PDF to add a text layer and scan the OCR'd copy. A "no matches" result means nothing here.`;
+  return {
+    pages,
+    unreadablePages,
+    readablePages: Math.max(0, pages - unreadablePages.length),
+    unreadable,
+    allUnreadable,
+    headline,
+    advice,
   };
 }
 
@@ -593,6 +742,7 @@ export async function extractPdfPiiHits(file, { onProgress, now } = {}) {
   let charactersWithText = 0;
   let pagesWithText = 0;
   let offPageItems = 0;
+  const pagesWithoutText = [];
   try {
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
       const page = await pdf.getPage(pageNumber);
@@ -613,10 +763,14 @@ export async function extractPdfPiiHits(file, { onProgress, now } = {}) {
         else if (item.str && !item.str.endsWith(" ")) text += " ";
       }
       const pageText = text;
-      if (pageText.trim()) {
+      const characters = pageText.trim().length;
+      if (characters) {
         pagesWithText += 1;
-        charactersWithText += pageText.trim().length;
+        charactersWithText += characters;
       }
+      // Recorded per page, not just counted: a five-page file where page 3 is a
+      // scan must be able to say "page 3", not "one page had no text".
+      if (characters < MIN_PAGE_TEXT_CHARS) pagesWithoutText.push({ page: pageNumber, characters });
       const matches = detectPii(pageText, { now });
       for (const match of matches) {
         hits.push({
@@ -636,6 +790,7 @@ export async function extractPdfPiiHits(file, { onProgress, now } = {}) {
     return {
       pages: pdf.numPages,
       pagesWithText,
+      pagesWithoutText,
       hasTextLayer: charactersWithText > 0,
       offPageItems,
       hits,
@@ -988,6 +1143,14 @@ export function buildPrivacyReportText(options = {}) {
 
   rows.push("== 1. Personal data patterns ==");
   const summary = scan?.summary || summarisePii(scan?.hits || []);
+  const coverage = describeUnreadablePages(scan);
+  // The unreadable-page warning comes before the counts on purpose: a "0
+  // matches" line above it would be read as a clean result.
+  if (coverage.unreadable) {
+    rows.push(`NOT SCANNED — ${coverage.headline}`);
+    rows.push(`  ${coverage.advice}`);
+    rows.push(`  Pages with no readable text: ${coverage.unreadablePages.length} of ${coverage.pages || "unknown"}${coverage.readablePages ? ` (${coverage.readablePages} page(s) were scanned)` : ""}.`);
+  }
   rows.push(`Total matches: ${summary.total} (high confidence: ${summary.high})`);
   if (!scan?.hasTextLayer) rows.push("No extractable text layer was found — a scanned document cannot be pattern-scanned without OCR.");
   for (const entry of summary.types) rows.push(`  ${entry.label}: ${entry.count} (high: ${entry.high})`);
@@ -996,7 +1159,9 @@ export function buildPrivacyReportText(options = {}) {
     const shown = reveal ? sanitiseForReport(hit.value) : hit.masked;
     rows.push(`  p${hit.page} · ${PII_TYPE_LABELS[hit.type] || hit.type} · ${confidenceLabel(hit.confidence)} · ${shown}${hit.note ? ` · ${sanitiseForReport(hit.note)}` : ""}`);
   }
-  if (!(scan?.hits || []).length) rows.push("  No pattern matches.");
+  if (!(scan?.hits || []).length) {
+    rows.push(coverage.allUnreadable ? "  Nothing was matched because nothing could be read. This is not a clean result." : "  No pattern matches.");
+  }
   rows.push("");
 
   rows.push("== 2. Document metadata ==");
@@ -1037,6 +1202,7 @@ export function buildPrivacyReportText(options = {}) {
   rows.push("");
 
   rows.push("== 7. What this means ==");
+  if (coverage.unreadable) rows.push(`  ${coverage.headline} ${coverage.advice}`);
   rows.push(`  ${summary.high} high-confidence personal-data match(es) survived checksum/context validation.`);
   rows.push(`  ${summary.total - summary.high} further match(es) are medium or low confidence and need a human decision.`);
   rows.push("  Limits — read this: this scan finds COMMON patterns only. It cannot guarantee it found every piece of");

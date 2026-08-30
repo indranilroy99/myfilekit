@@ -2855,6 +2855,7 @@ import {
   buildPrivacyReportText,
   cardBrand,
   confidenceLabel,
+  describeUnreadablePages,
   detectPii,
   isValidIpv4,
   isValidIpv6,
@@ -2862,12 +2863,14 @@ import {
   maskPii,
   maskValue,
   parseXmpFields,
+  PII_TYPE_LABELS,
   rectsForMatch,
   sanitiseForReport,
   scanContentForInvisibleText,
   scanPdfStructure,
   summarisePii,
   validateAadhaar,
+  validateAbaRouting,
   validateIfsc,
   validateIndianPassport,
   validatePan,
@@ -3000,6 +3003,179 @@ test("IFSC, passport, and account-number context rules behave", () => {
   assert.equal(withIfsc.confidence, CONFIDENCE.MEDIUM);
   const alone = detectPii("Reference 000123456789012 logged.", { now: PII_NOW }).find((match) => match.type === "account");
   assert.equal(alone.confidence, CONFIDENCE.LOW);
+});
+
+// --- regression: the bank statement a paralegal redacted by hand ---------------
+//
+// Reported from real client work. The scanner found ONLY the routing number,
+// called it a "Bank account number", and never flagged the actual account
+// number 4419-8827-6634 — because the account rule matched unbroken digit runs
+// only, and a hyphen ends a `\d{9,18}` run. The customer-service phone number
+// was missed too: only Indian mobiles and E.164 had detectors.
+const BANK_STATEMENT = [
+  "FIRST NATIONAL BANK — Statement of account",
+  "Account number: 4419-8827-6634        Period: 01 Jul 2026 to 31 Jul 2026",
+  "Routing number: 011000138",
+  "Customer service: (415) 555-0142",
+  "",
+  "Please quote 4419-8827-6634 on every remittance advice sent to the branch.",
+  "Direct debits are collected from 4419 8827 6634 on the second business day.",
+].join("\n");
+
+test("a labelled account number is found at every occurrence, hyphen- or space-grouped", () => {
+  const matches = detectPii(BANK_STATEMENT, { now: PII_NOW });
+  const accounts = matches.filter((match) => match.type === "account");
+
+  // All three occurrences, in both written forms.
+  assert.deepEqual(accounts.map((match) => match.value), ["4419-8827-6634", "4419-8827-6634", "4419 8827 6634"]);
+  // Every one lands on the real offset of that text, so a redaction box can be
+  // placed over it — a hit that cannot be located is not a hit.
+  assert.deepEqual(
+    accounts.map((match) => match.start),
+    [BANK_STATEMENT.indexOf("4419-8827-6634"), BANK_STATEMENT.indexOf("4419-8827-6634", BANK_STATEMENT.indexOf("4419-8827-6634") + 1), BANK_STATEMENT.indexOf("4419 8827 6634")],
+  );
+  for (const match of accounts) {
+    assert.equal(match.value, BANK_STATEMENT.slice(match.start, match.end));
+    assert.ok(match.confidence >= CONFIDENCE.MEDIUM, `${match.value} must not be dismissed as a bare digit run`);
+  }
+  // The header occurrence is carried by its keyword; the later bare repeats are
+  // carried by the same digits having been labelled once on the page.
+  assert.match(accounts[0].note, /Account keyword nearby/);
+  assert.match(accounts[1].note, /labelled as an account elsewhere/);
+  assert.match(accounts[2].note, /labelled as an account elsewhere/);
+
+  // No other rule is allowed to swallow the account number under a wrong label:
+  // the 4-4-4 shape is also Aadhaar-shaped, and 12 digits is card-adjacent.
+  assert.equal(matches.some((match) => match.type === "aadhaar"), false);
+  assert.equal(matches.some((match) => match.type === "card"), false);
+
+  // Grouped detection is not a digit hoover: the groups must look like an
+  // account number, and a grouped run with no account context stays low.
+  const looseRun = detectPii("Lot 4419 8827 6634 shipped from bay 12.", { now: PII_NOW }).find((match) => match.type === "account");
+  assert.equal(looseRun.confidence, CONFIDENCE.LOW);
+  assert.equal(detectPii("Bay 60-11-11 holds crates.", { now: PII_NOW }).some((match) => match.type === "account"), false, "under 9 digits is not an account number");
+});
+
+test("a US routing number is reported as a routing number, never as a bank account number", () => {
+  assert.equal(validateAbaRouting("011000138").valid, true);
+  assert.equal(validateAbaRouting("011000139").valid, false, "the ABA checksum must be real");
+  assert.match(validateAbaRouting("011000139").reason, /checksum/i);
+  assert.equal(validateAbaRouting("991000138").valid, false, "99 is not an issued Federal Reserve prefix");
+  assert.equal(validateAbaRouting("01100013").valid, false, "a routing number is 9 digits");
+
+  // The label itself must not claim the number is an account.
+  assert.equal(PII_TYPE_LABELS.routing, "Bank routing number (US)");
+  assert.equal(/account/i.test(PII_TYPE_LABELS.routing), false);
+
+  const matches = detectPii(BANK_STATEMENT, { now: PII_NOW });
+  const routing = matches.filter((match) => match.type === "routing");
+  assert.deepEqual(routing.map((match) => match.value), ["011000138"]);
+  assert.equal(routing[0].confidence, CONFIDENCE.HIGH, "checksum plus an adjacent routing keyword");
+  assert.match(routing[0].note, /identifies the bank, not an account/);
+  // The bug being fixed: this value used to come back typed "account".
+  assert.equal(matches.some((match) => match.type === "account" && match.value.includes("011000138")), false);
+  assert.equal(maskPii("routing", "011000138").includes("011000138"), false, "a routing number is masked like the other bank fields");
+
+  // A 9-digit run that fails the checksum is not promoted to a routing number;
+  // the generic account rule still handles it exactly as before.
+  const notRouting = detectPii("Account 011000139 was closed.", { now: PII_NOW });
+  assert.equal(notRouting.some((match) => match.type === "routing"), false);
+  assert.equal(notRouting.find((match) => match.type === "account").value, "011000139");
+});
+
+test("North American phone numbers are detected, and bare digit runs are not mistaken for them", () => {
+  const statement = detectPii(BANK_STATEMENT, { now: PII_NOW }).filter((match) => match.type === "phone");
+  assert.deepEqual(statement.map((match) => match.value), ["(415) 555-0142"]);
+  assert.equal(statement[0].confidence, CONFIDENCE.HIGH);
+
+  const written = detectPii("Call +1 415-555-0142, fax 415.555.0143, or try 415-555-0144.", { now: PII_NOW }).filter((match) => match.type === "phone");
+  assert.deepEqual(written.map((match) => [match.value, match.confidence]), [
+    ["+1 415-555-0142", CONFIDENCE.HIGH],
+    ["415.555.0143", CONFIDENCE.MEDIUM],
+    ["415-555-0144", CONFIDENCE.MEDIUM],
+  ]);
+  // Precision: separators are required, and area/exchange codes cannot start
+  // with 0 or 1, so ordinary reference numbers are not swept up as phones.
+  assert.equal(detectPii("Serial 4155550142 shipped.", { now: PII_NOW }).some((match) => match.type === "phone"), false);
+  assert.equal(detectPii("Clause 105-555-0142 of the contract.", { now: PII_NOW }).some((match) => match.type === "phone"), false);
+  assert.equal(detectPii("Server 10.20.30.40 responded.", { now: PII_NOW }).some((match) => match.type === "phone"), false);
+  assert.equal(detectPii("Upgraded to v10.20.30.40 today.", { now: PII_NOW }).some((match) => match.type === "phone"), false);
+});
+
+test("FALSE POSITIVE suite: the grouped-account, routing and NANP rules stay high-precision", () => {
+  // The pre-existing prose suite above is run unmodified. This one is aimed at
+  // the shapes the three new rules could plausibly over-claim.
+  const prose = [
+    "Purchase order 2026-004821 covers lot 4419 8827 6634 held in warehouse 7.",
+    "Reference 123456789 and batch 011000138 were logged by the packing line.",
+    "Rack 415-555-0142 was relabelled, pallet 60-11-11 moved, bin 12 34 56 emptied.",
+    "Release 10.20.30.40 shipped on 05/06/2026 under ticket #7654321.",
+  ].join("\n");
+  const matches = detectPii(prose, { now: PII_NOW });
+  const high = highConfidence(matches);
+  assert.deepEqual(high, [], `no high-confidence PII expected, got: ${JSON.stringify(high.map((match) => [match.type, match.value]))}`);
+  assert.equal(matches.every((match) => match.confidence <= CONFIDENCE.MEDIUM), true);
+});
+
+test("a page with no extractable text is reported as unreadable, never as a clean scan", () => {
+  // What a rasterised (redacted or scanned) page looks like coming out of
+  // extractPdfPiiHits: zero characters, so zero matches.
+  const scan = { pages: 1, pagesWithText: 0, pagesWithoutText: [{ page: 1, characters: 0 }], hasTextLayer: false, offPageItems: 0, hits: [], summary: summarisePii([]) };
+  const coverage = describeUnreadablePages(scan);
+  assert.equal(coverage.unreadable, true);
+  assert.equal(coverage.allUnreadable, true);
+  assert.equal(coverage.readablePages, 0);
+  assert.deepEqual(coverage.unreadablePages, [1]);
+  assert.match(coverage.headline, /Page 1 of this file is an image/);
+  assert.match(coverage.headline, /No text could be read from it/);
+  assert.match(coverage.headline, /cannot tell you what it contains/);
+  assert.match(coverage.advice, /OCR/);
+
+  // Per page, not per document: page 4 of a five-page file must be named.
+  const partial = describeUnreadablePages({ pages: 5, hasTextLayer: true, pagesWithoutText: [{ page: 2, characters: 0 }, { page: 4, characters: 6 }] });
+  assert.deepEqual(partial.unreadablePages, [2, 4]);
+  assert.equal(partial.readablePages, 3);
+  assert.equal(partial.allUnreadable, false);
+  assert.match(partial.headline, /Pages 2 and 4 of this file are images/);
+  assert.match(partial.headline, /Almost no text could be read from them/, "6 characters is not 'no text'");
+
+  // A file that reads fine says nothing at all.
+  const readable = describeUnreadablePages({ pages: 2, hasTextLayer: true, pagesWithoutText: [] });
+  assert.equal(readable.unreadable, false);
+  assert.equal(readable.headline, "");
+  assert.equal(readable.advice, "");
+
+  // And the downloadable report leads with it instead of reporting a clean bill
+  // of health for a page it never read.
+  const structure = { pages: 1, encrypted: false, info: {}, xmp: { present: false, bytes: 0, fields: [] }, attachments: [], embeddedFileStreams: 0, embeddedFileBytes: 0, signatures: [], links: [], invisibleText: [], contentTruncated: false };
+  const report = buildPrivacyReportText({ fileName: "redacted.pdf", fileSize: 4096, scan, structure, generatedAt: PII_NOW });
+  assert.match(report, /NOT SCANNED/);
+  assert.match(report, /Page 1 of this file is an image/);
+  assert.match(report, /This is not a clean result/);
+  assert.equal(/^ {2}No pattern matches\.$/m.test(report), false, "'No pattern matches' must never stand alone for an unreadable page");
+  assert.ok(report.indexOf("NOT SCANNED") < report.indexOf("Total matches:"), "the warning must come before the match count");
+
+  // A readable document keeps the ordinary wording.
+  const readScan = { pages: 1, pagesWithText: 1, pagesWithoutText: [], hasTextLayer: true, offPageItems: 0, hits: [], summary: summarisePii([]) };
+  const readReport = buildPrivacyReportText({ fileName: "clean.pdf", fileSize: 4096, scan: readScan, structure, generatedAt: PII_NOW });
+  assert.equal(/NOT SCANNED/.test(readReport), false);
+  assert.match(readReport, /No pattern matches\./);
+});
+
+test("both privacy tools show the unreadable-page state instead of a bare 'no matches'", () => {
+  const section = sourceOfComponents(["UnreadablePagesNotice", "AutoRedactPiiTool", "PrivacyScannerTool"]);
+  assert.match(section, /This file was not fully scanned/);
+  assert.match(section, /coverage\.headline/);
+  // Rendered by BOTH tools, not just one of them.
+  assert.equal((section.match(/<UnreadablePagesNotice coverage=\{coverage\} \/>/g) || []).length, 2);
+  // No "no known patterns matched" line may be reachable without the
+  // unreadable-page state being considered first.
+  const claims = [...section.matchAll(/No known patterns matched/g)];
+  assert.ok(claims.length >= 2, "both tools have a no-match branch");
+  for (const claim of claims) {
+    const before = section.slice(Math.max(0, claim.index - 400), claim.index);
+    assert.match(before, /coverage\.unreadable/, "a 'no matches' message must be guarded by the unreadable-page check");
+  }
 });
 
 test("IP address validation enforces octet bounds and IPv6 grammar", () => {
@@ -7708,4 +7884,127 @@ test("page geometry: the drawn areas are parsed from the coordinate list", async
   // Text placed near the right edge would be clipped: the tool must warn.
   assert.equal(textOverflowsPage(536, approximateTextWidth("Approved", 18), 595), true);
   assert.equal(textOverflowsPage(72, approximateTextWidth("Approved", 18), 595), false);
+});
+
+// --- Defects found by an accountant doing real work ---------------------------
+// 1) Compress PDF made a 15 KB text PDF 66x LARGER, destroyed every character of
+//    selectable text, and called it "Done — ready to save".
+// 2) Excel to PDF silently rasterised a ledger (0 fonts, 2 JPEGs) with no warning.
+// 3) Search ignored conversion direction: "jpg to pdf" ranked PDF to Image first.
+// 4) A rejected page range left the previous split on screen, downloadable.
+
+test("Compress PDF reports a larger-than-input result as a warning, never as a success", () => {
+  const section = sourceOfComponents(["CompressPdfTool"]);
+
+  // The decision is made on the real before/after sizes the service reports.
+  assert.match(section, /const \{ bytes, before, after \} = await rasterCompressPdf/);
+  const guard = section.indexOf("if (after >= before)");
+  const download = section.indexOf("downloadBytes(");
+  assert.ok(guard > 0, "the output size must be compared against the input size");
+  assert.ok(download > guard, "the comparison must happen before the file is handed back");
+
+  // A bigger output is never resolved as a success, so the 'Done — ready to
+  // save' card cannot appear for it.
+  const refusal = section.slice(guard, download);
+  assert.match(refusal, /throw new Error/, "a bigger output must not resolve as a success");
+  assert.match(refusal, /got bigger/i, "it says plainly that this file got bigger");
+  assert.match(refusal, /formatBytes\(before\)/, "the original size is quoted");
+  assert.match(refusal, /formatBytes\(after\)/, "the output size is quoted");
+  assert.match(refusal, /rasteris/i, "it explains why: rasterising text inflates it");
+  assert.match(refusal, /instead/i, "it tells the user what to do instead");
+
+  // The savings message belongs only to the path that actually saved bytes.
+  const saved = section.indexOf("Saved about");
+  assert.ok(saved > download, "'Saved about' may only be claimed after a real download");
+});
+
+test("Compress PDF flags a text-heavy PDF before it rasterises anything", () => {
+  const source = readAppSource();
+  const section = sourceOfComponents(["inspectPdfForCompression", "CompressPdfTool"]);
+
+  // The check reads a real text layer and counts real embedded images.
+  assert.match(section, /await extractPdfText\(file\)/, "the text layer is measured");
+  assert.match(section, /"\/Image"/, "embedded images are counted");
+  const rule = /textHeavy: ([^}]+)\}/.exec(section);
+  assert.ok(rule, "the preflight returns a textHeavy verdict");
+  assert.match(rule[1], /charsPerPage/, "text density decides");
+  assert.match(rule[1], /images/, "so does the image count — a scan must stay compressible");
+  const threshold = Number(/TEXT_HEAVY_CHARS_PER_PAGE = (\d+)/.exec(source)[1]);
+  assert.ok(threshold >= 100, "a page carrying real prose counts as text-based");
+
+  // It runs on file selection — before the button, not after the damage.
+  assert.match(section, /useEffect\(/, "the preflight runs when a file is chosen");
+  assert.match(section, /inspectPdfForCompression\(file\)/);
+
+  // The warning states the consequence and gates the action behind consent.
+  const warning = section.slice(section.indexOf("preflight?.textHeavy"));
+  assert.match(warning, /larger/i, "the warning says the file will probably get larger");
+  assert.match(warning, /selectable/i, "and that the selectable text is destroyed");
+  assert.match(warning, /instead/i, "and what to do instead");
+  assert.match(warning, /#split-pdf-tool/, "with a real alternative to go to");
+  assert.match(section, /<Checkbox/, "rasterising anyway is an explicit, deliberate choice");
+  assert.match(section, /disabled=\{blocked\}/, "until then the action is not available");
+});
+
+test("Excel to PDF warns that its output is a picture, and points at CSV to PDF", () => {
+  const section = sourceOfComponents(["ExcelToPdfTool"]);
+  assert.match(section, /no selectable/i, "the UI warns the output has no selectable text");
+  assert.match(section, /rasteris/i, "and names what actually happens");
+  assert.match(section, /#csv-to-pdf-tool/, "and cross-references the text-output sibling");
+
+  // The descriptions stop over-promising and cross-reference each other, the way
+  // Compress PDF, Split, and Add Text already do.
+  const byId = (id) => tools.find((tool) => tool.id === id).description;
+  assert.match(byId("excel-to-pdf-tool"), /no selectable/i);
+  assert.match(byId("excel-to-pdf-tool"), /CSV to PDF/);
+  assert.match(byId("csv-to-pdf-tool"), /selectable/i);
+  assert.match(byId("csv-to-pdf-tool"), /Excel to PDF/);
+
+  // And the reciprocal pointer, so the accountant who lands on the wrong one
+  // can get to the right one from either side.
+  const csvSection = sourceOfComponents(["CsvToPdfTool"]);
+  assert.match(csvSection, /#excel-to-pdf-tool/);
+  assert.match(csvSection, /selectable/i);
+});
+
+test("search respects conversion direction — X-to-Y and Y-to-X are different queries", () => {
+  const rank = (query, id) => {
+    const index = filterTools(query).findIndex((tool) => tool.id === id);
+    assert.ok(index >= 0, `"${query}" should still return ${id} somewhere`);
+    return index;
+  };
+
+  assert.equal(filterTools("jpg to pdf")[0].id, "images-to-pdf-tool", "jpg to pdf makes a PDF from images");
+  assert.ok(rank("jpg to pdf", "images-to-pdf-tool") < rank("jpg to pdf", "pdf-to-image-tool"));
+
+  assert.equal(filterTools("pdf to jpg")[0].id, "pdf-to-image-tool", "pdf to jpg renders pages to images");
+  assert.ok(rank("pdf to jpg", "pdf-to-image-tool") < rank("pdf to jpg", "images-to-pdf-tool"));
+
+  // The words real people use for their photos land on the same tool.
+  for (const query of ["photos to pdf", "photo to pdf", "picture to pdf", "pictures to pdf", "images to pdf"]) {
+    assert.equal(filterTools(query)[0].id, "images-to-pdf-tool", `"${query}" should rank Images to PDF first`);
+  }
+
+  // Direction must not disturb the other conversion pairs.
+  const pairs = [
+    ["word to pdf", "word-to-pdf-tool"], ["pdf to word", "pdf-to-word-tool"],
+    ["excel to pdf", "excel-to-pdf-tool"], ["pdf to excel", "pdf-to-excel-tool"],
+    ["csv to pdf", "csv-to-pdf-tool"], ["pdf to html", "pdf-to-html-tool"],
+    ["epub to pdf", "ebook-to-pdf-tool"], ["pdf to epub", "pdf-to-epub-tool"],
+  ];
+  for (const [query, id] of pairs) assert.equal(filterTools(query)[0].id, id, `"${query}" -> ${id}`);
+});
+
+test("a rejected page range clears the previous split result", () => {
+  const section = sourceOfComponents(["PageRangeTool"]);
+  const handler = section.slice(section.indexOf("runSafely(setStatus"));
+  const cleared = handler.indexOf("setResult((previous)");
+  const validated = handler.indexOf("validateFiles(");
+  const parsed = handler.indexOf("parsePageRanges(");
+
+  assert.ok(cleared >= 0, "the run clears the previous result");
+  assert.ok(validated > cleared, "before the file is validated");
+  assert.ok(parsed > cleared, "and before the range can be rejected — so nothing stale survives");
+  assert.match(handler.slice(cleared, validated), /return null/, "the result is dropped, not replaced");
+  assert.match(handler.slice(cleared, validated), /revokeObjectURL/, "and its object URL is released");
 });

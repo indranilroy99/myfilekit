@@ -69,6 +69,13 @@ function PageRangeTool({ tool, action, run, suffix }: { tool: Tool; action: stri
         <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
         <Input label="Pages" value={ranges} onChange={setRanges} placeholder="Example: 1-3,5,8" helper="Use comma-separated pages or ranges." />
         <PrimaryButton label={action} onClick={() => runSafely(setStatus, async () => {
+          // Clear the previous output before validating anything: a rejected run
+          // must not leave the last result on screen with a live Download button,
+          // or the user saves the wrong pages.
+          setResult((previous) => {
+            if (previous) URL.revokeObjectURL(previous.url);
+            return null;
+          });
           const [file] = validateFiles(files, tool.file);
           const pdf = await loadPdf(file);
           const pages = parsePageRanges(ranges, pdf.getPageCount());
@@ -1744,26 +1751,86 @@ function PdfToImageTool({ tool }: { tool: Tool }) {
   </ToolForm>;
 }
 
+// Compressing rasterises every page to JPEG. On a genuinely text-based PDF that
+// both destroys the selectable text and inflates the file — a 15 KB text PDF
+// comes back at 1 MB. So we look before we leap: a substantial text layer with
+// far fewer embedded images than pages means "this is text, don't rasterise it".
+// A scan (or an OCR'd scan) carries a full-page image per page, so it is never
+// flagged and keeps compressing as before.
+const TEXT_HEAVY_CHARS_PER_PAGE = 200;
+type CompressPreflight = { pages: number; chars: number; images: number; textHeavy: boolean };
+
+async function inspectPdfForCompression(file: File): Promise<CompressPreflight> {
+  const text = await extractPdfText(file);
+  const pdf = await loadPdf(file, { ignoreEncryption: true, throwOnInvalidObject: false, updateMetadata: false });
+  const { PDFName, PDFRawStream } = getPdfLib();
+  const pages = pdf.getPageCount();
+  let images = 0;
+  for (const [, object] of pdf.context.enumerateIndirectObjects()) {
+    if (object instanceof PDFRawStream && object.dict && String(object.dict.get(PDFName.of("Subtype"))) === "/Image") images += 1;
+  }
+  const chars = text.replace(/\s+/g, " ").trim().length;
+  const charsPerPage = pages > 0 ? chars / pages : 0;
+  return { pages, chars, images, textHeavy: charsPerPage >= TEXT_HEAVY_CHARS_PER_PAGE && images * 2 < pages };
+}
+
 function CompressPdfTool({ tool }: { tool: Tool }) {
   const [files, setFiles] = useState<File[]>([]);
   const [quality, setQuality] = useState("0.6");
   const [dpi, setDpi] = useState("120");
   const [status, setStatus] = useState(initialStatus);
-  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+  const [preflight, setPreflight] = useState<CompressPreflight | null>(null);
+  const [rasteriseAnyway, setRasteriseAnyway] = useState(false);
+
+  // Inspect the chosen PDF up front so the warning arrives before the damage,
+  // not after. The check is advisory: if it fails, compressing still works.
+  useEffect(() => {
+    const file = files[0];
+    setPreflight(null);
+    setRasteriseAnyway(false);
+    if (!file) return;
+    let cancelled = false;
+    inspectPdfForCompression(file)
+      .then((result) => { if (!cancelled) setPreflight(result); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [files]);
+
+  const blocked = Boolean(preflight?.textHeavy) && !rasteriseAnyway;
+
+  return <ToolForm status={status} onReset={() => { setFiles([]); setPreflight(null); setRasteriseAnyway(false); setStatus(initialStatus); }}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      This rasterises each page to a JPEG image, so selectable text becomes part of the image. Best for image-heavy or scanned PDFs.
+      This rasterises each page to a JPEG image, so selectable text becomes part of the image. Best for image-heavy or scanned PDFs. On a text-based PDF it destroys the text and usually makes the file <strong>bigger</strong>.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    {preflight?.textHeavy && (
+      <div className="surface-card wabi-card-edge grid gap-2 border-[var(--warning)] p-4 text-sm font-semibold leading-6 text-neutral-600">
+        <p className="text-xs font-bold uppercase text-[var(--warning)]">This is a text-based PDF — compressing will probably make it larger</p>
+        <p className="text-[var(--foreground)]">It carries about {preflight.chars.toLocaleString()} characters of selectable text across {preflight.pages} page{preflight.pages === 1 ? "" : "s"}, with {preflight.images === 0 ? "no" : preflight.images} embedded image{preflight.images === 1 ? "" : "s"}. Text is already tiny to store; a photograph of that text is not — so rasterising it typically inflates the file many times over <em>and</em> leaves you with no selectable, searchable, or copyable text.</p>
+        <p>What to do instead: keep this file as it is, drop pages you don't need with <a className="underline" href="#split-pdf-tool">Split / Extract PDF Pages</a>, pull out the heavy artwork with <a className="underline" href="#extract-images-tool">Extract Images &amp; Attachments</a>, or re-save it with <a className="underline" href="#repair-pdf-tool">Repair PDF</a> to drop unused objects.</p>
+        <Checkbox label="Rasterise it anyway — I accept a bigger file with no selectable text" checked={rasteriseAnyway} onChange={setRasteriseAnyway} />
+      </div>
+    )}
     <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["96", "120", "150", "200"]} labels={["96 · smallest", "120 · default", "150 · sharp", "200 · sharpest"]} />
     <Range label="JPEG quality" value={quality} onChange={setQuality} />
-    <PrimaryButton label="Compress PDF" onClick={() => runSafely(setStatus, async () => {
+    <PrimaryButton label="Compress PDF" disabled={blocked} onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       const { bytes, before, after } = await rasterCompressPdf(file, { quality: Number(quality), dpi: Number(dpi) });
+      // Never hand back a worse file behind a success message. If the output is
+      // larger it is not offered for download at all — it is reported, with both
+      // sizes, as the warning it is.
+      if (after >= before) {
+        throw new Error([
+          `Not compressed — this file got bigger, so nothing was saved.`,
+          `Original: ${formatBytes(before)}`,
+          `Rasterised output: ${formatBytes(after)}`,
+          `Why: compressing rasterises every page to a JPEG. This PDF's pages are mostly text, and a picture of text costs far more to store than the text itself — so the output grew instead of shrinking, and it would have had no selectable text.`,
+          `What to do instead: keep the original, remove pages you don't need with Split / Extract PDF Pages, or re-save it with Repair PDF. Compression only pays off on scans and image-heavy PDFs.`,
+        ].join("\n"));
+      }
       downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-compressed`, "pdf"), "application/pdf");
-      const saved = before > 0 ? Math.round((1 - after / before) * 100) : 0;
-      return after >= before
-        ? `Original: ${formatBytes(before)}\nOutput: ${formatBytes(after)}\nNote: the output is not smaller — this PDF may already be optimised. Try a lower DPI or quality.`
-        : `Original: ${formatBytes(before)}\nOutput: ${formatBytes(after)}\nSaved about ${saved}%.`;
+      const saved = Math.round((1 - after / before) * 100);
+      return `Original: ${formatBytes(before)}\nOutput: ${formatBytes(after)}\nSaved about ${saved}%.`;
     })} />
   </ToolForm>;
 }
@@ -3173,7 +3240,12 @@ function ExcelToPdfTool({ tool }: { tool: Tool }) {
   const [status, setStatus] = useState(initialStatus);
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Reads .xlsx, .xls, or .csv locally with SheetJS and renders every sheet as a table in one PDF. Wide sheets are scaled to fit the page width, so very large tables render smaller.
+      Reads .xlsx, .xls, or .csv locally with SheetJS, lays every sheet out as a table, then renders those pages to the PDF. Wide sheets are scaled to fit the page width, so very large tables render smaller.
+    </div>
+    <div className="surface-card wabi-card-edge grid gap-2 border-[var(--warning)] p-4 text-sm font-semibold leading-6 text-neutral-600">
+      <p className="text-xs font-bold uppercase text-[var(--warning)]">The output is a picture of your sheet, not selectable text</p>
+      <p className="text-[var(--foreground)]">The table is laid out and then <strong>rasterised</strong>, so the PDF contains images rather than text. It looks exactly like your spreadsheet, but nobody can select, copy, search, or extract the figures from it — and the file is much larger than a text PDF of the same data.</p>
+      <p>If you need a ledger whose rows stay real, selectable text, paste the sheet's CSV into <a className="underline" href="#csv-to-pdf-tool">CSV to PDF</a> instead. To turn a rasterised PDF back into searchable text afterwards, run <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a>.</p>
     </div>
     <FileControl accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" files={files} setFiles={setFiles} label="Choose or drop a spreadsheet" />
     <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
@@ -3183,7 +3255,7 @@ function ExcelToPdfTool({ tool }: { tool: Tool }) {
       setStatus({ tone: "idle", message: `Rendering ${sheets.length} sheet${sheets.length === 1 ? "" : "s"}…` });
       const canvas = await renderHtmlToCanvas(sheetsToHtml(sheets));
       downloadBytes(await canvasToPdf(canvas), withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
-      return `Converted ${sheets.length} sheet${sheets.length === 1 ? "" : "s"} to PDF.`;
+      return `Converted ${sheets.length} sheet${sheets.length === 1 ? "" : "s"} to PDF as a rendered image — the pages have no selectable text. For selectable rows, use CSV to PDF.`;
     })} />
   </ToolForm>;
 }

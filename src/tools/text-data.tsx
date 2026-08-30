@@ -511,7 +511,10 @@ function CsvToPdfTool() {
   const [status, setStatus] = useState(initialStatus);
   return <ToolForm status={status} onReset={() => { setCsv(""); setStatus(initialStatus); }}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      The first row becomes a bold header. Long cells wrap and the table paginates across pages. Supports Latin-1 characters only.
+      The first row becomes a bold header. Long cells wrap and the table paginates across pages. Supports Latin-1 characters only. The table is drawn as <strong>real, selectable text</strong>, so the figures stay copyable and searchable.
+    </div>
+    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
+      This tool takes pasted CSV text. To open an .xlsx or .xls file directly, use <a className="underline" href="#excel-to-pdf-tool">Excel to PDF</a> — but note it renders each sheet as an image, so its output has no selectable text. For a ledger you can still copy from, export the sheet as CSV and paste it here.
     </div>
     <Textarea label="CSV" value={csv} onChange={setCsv} rows={12} />
     <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {

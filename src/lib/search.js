@@ -39,13 +39,74 @@ export const SEARCH_SYNONYMS = {
   embedded: ["extract images"],
 };
 
+// Conversion queries are directional, but "jpg to pdf" and "pdf to jpg" reduce
+// to the same two tokens once "to" is stripped as a stopword — so token scoring
+// alone ranked the wrong converter first. These families let a query term and a
+// tool's own wording be compared as formats rather than as literal strings, so
+// "photos", "jpg" and "image" all mean the same thing on either side of "to".
+export const FORMAT_FAMILIES = {
+  image: ["image", "images", "img", "imgs", "photo", "photos", "picture", "pictures", "pic", "pics", "jpg", "jpeg", "png", "webp"],
+  pdf: ["pdf", "pdfs"],
+  word: ["word", "doc", "docx"],
+  excel: ["excel", "xls", "xlsx", "spreadsheet", "sheet", "sheets"],
+  powerpoint: ["powerpoint", "ppt", "pptx", "slides", "presentation"],
+  text: ["text", "txt", "plaintext"],
+  ebook: ["ebook", "epub", "book"],
+};
+
+const FORMAT_FAMILY_BY_TERM = new Map();
+for (const [family, terms] of Object.entries(FORMAT_FAMILIES)) {
+  for (const term of terms) FORMAT_FAMILY_BY_TERM.set(term, family);
+}
+
+/** The format family a single term belongs to, or the term itself when it is not a known format. */
+export function formatFamily(term) {
+  return FORMAT_FAMILY_BY_TERM.get(term) || term;
+}
+
+const DIRECTION_PATTERN = /([a-z0-9+.#]+)\s+(?:to|into|as)\s+([a-z0-9+.#]+)/g;
+
+/** Every "A to B" conversion direction stated in a piece of text, as format families. */
+export function conversionDirections(text) {
+  const directions = [];
+  for (const match of String(text).toLowerCase().matchAll(DIRECTION_PATTERN)) {
+    directions.push({ from: formatFamily(match[1]), to: formatFamily(match[2]) });
+  }
+  return directions;
+}
+
+/** The single direction a user's query asks for, or null when the query isn't a conversion. */
+export function queryDirection(query) {
+  return conversionDirections(query)[0] || null;
+}
+
+// A tool states its directions in its name ("Images to PDF") and its keywords
+// ("jpg to pdf", "photos to pdf"). Cached per tool object — the registry is a
+// module-level constant, so this is computed once per tool per session.
+const directionCache = new WeakMap();
+export function toolDirections(tool) {
+  const cached = directionCache.get(tool);
+  if (cached) return cached;
+  const directions = conversionDirections([tool.name, ...(tool.keywords || [])].join(" ; "));
+  directionCache.set(tool, directions);
+  return directions;
+}
+
+// A tool that converts the way the user asked wins outright; one that converts
+// the opposite way is demoted below the generic matches rather than removed,
+// because a mis-typed direction should still be recoverable from the results.
+const DIRECTION_MATCH_BOOST = 150;
+const DIRECTION_REVERSE_PENALTY = 60;
+
 export function searchableText(tool) {
   return [tool.name, tool.category, tool.description, ...(tool.keywords || []), ...(tool.badges || []), ...(tool.acceptedTypes || [])].join(" ").toLowerCase();
 }
 
 export function filterTools(query) {
+  const rawPhrase = query.toLowerCase().trim().replace(/\s+/g, " ");
   const parts = query.toLowerCase().trim().split(/\s+/).filter(Boolean).filter((part) => !SEARCH_STOPWORDS.has(part));
   if (!parts.length) return tools;
+  const direction = queryDirection(rawPhrase);
   const scored = [];
   for (const tool of tools) {
     const name = tool.name.toLowerCase();
@@ -72,17 +133,31 @@ export function filterTools(query) {
     // name exactly, or a keyword phrase contains it, that tool is the intended
     // one — it must beat generic single-token ties that otherwise fall back to
     // registry order (e.g. "extract images from pdf" vs "Extract Text from PDF").
+    // The raw query is matched too, not only the stopword-stripped one: a tool
+    // whose keyword is literally "jpg to pdf" should be credited for it, and
+    // stripping "to" hid that phrase from this boost entirely.
     if (score > 0 && parts.length > 1) {
-      const phrase = parts.join(" ");
-      if (name === phrase) score += 200;
-      else if (name.includes(phrase)) score += 120;
-      else {
-        for (const keyword of tool.keywords || []) {
-          const kw = keyword.toLowerCase();
-          if (kw === phrase) { score += 120; break; }
-          if (kw.includes(phrase)) { score += 80; break; }
+      const strippedPhrase = parts.join(" ");
+      const phrases = rawPhrase === strippedPhrase ? [strippedPhrase] : [strippedPhrase, rawPhrase];
+      let best = 0;
+      for (const phrase of phrases) {
+        if (name === phrase) best = Math.max(best, 200);
+        else if (name.includes(phrase)) best = Math.max(best, 120);
+        else {
+          for (const keyword of tool.keywords || []) {
+            const kw = keyword.toLowerCase();
+            if (kw === phrase) { best = Math.max(best, 120); break; }
+            if (kw.includes(phrase)) { best = Math.max(best, 80); break; }
+          }
         }
       }
+      score += best;
+    }
+    // Direction decides between the two halves of a conversion pair.
+    if (score > 0 && direction && direction.from !== direction.to) {
+      const directions = toolDirections(tool);
+      if (directions.some((entry) => entry.from === direction.from && entry.to === direction.to)) score += DIRECTION_MATCH_BOOST;
+      else if (directions.some((entry) => entry.from === direction.to && entry.to === direction.from)) score = Math.max(1, score - DIRECTION_REVERSE_PENALTY);
     }
     if (score > 0) scored.push({ tool, score });
   }
