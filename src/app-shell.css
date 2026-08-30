@@ -220,10 +220,11 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   align-content: start;
   gap: 0 22px;
+  max-height: min(70vh, 560px);
+  /* Longhands only: an `overflow` shorthand here would reset overflow-x and let
+     the panel spill sideways again. */
   overflow-x: hidden;
   overflow-y: auto;
-  max-height: min(70vh, 560px);
-  overflow: auto;
   padding: 14px 16px 16px;
   border: 1px solid var(--c-line);
   border-radius: var(--app-radius);

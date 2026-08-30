@@ -287,7 +287,7 @@ function GlobalSearch() {
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && matches[0]) { window.location.hash = matches[0].route; setQuery(""); }
-            if (event.key === "Escape") { setQuery(""); event.currentTarget.blur(); }
+            if (event.key === "Escape") { setQuery(""); } // keep focus in the field
           }}
           style={{ flex: "1 1 160px", minWidth: 0, maxWidth: 210 }}
         />
@@ -1647,6 +1647,8 @@ function iconForTool(tool: Tool) {
   if (tool.category === "Signature Tools") return PenLine;
   if (tool.category === "Security & Privacy") return ShieldCheck;
   if (tool.category === "Sharing & Collaboration") return Share2;
+  if (tool.category === "Text & Data Tools") return FileText;
+  if (tool.category === "Developer Utilities") return Hash;
   return Sparkles;
 }
 
