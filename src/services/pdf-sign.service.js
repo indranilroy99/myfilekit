@@ -1748,6 +1748,39 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes, audit = { pres
     }
   }
 
+  // --- Certificate validity window ------------------------------------------
+  // Expiry is fully checkable offline, unlike revocation and unlike a trust
+  // chain — so the tool's disclaimer, which excuses only those two, implied this
+  // WAS checked. It was not: notBefore/notAfter were read for display and never
+  // compared to anything, so a signature made with a certificate that expired
+  // last week reported "Valid — document unchanged since signing".
+  //
+  // It does not change the cryptography, so it does not change signatureValid.
+  // It changes what we are entitled to claim about the signer.
+  const now = new Date();
+  const notBefore = signerCert.notBefore.value;
+  const notAfter = signerCert.notAfter.value;
+  const certExpired = notAfter instanceof Date && notAfter < now;
+  const certNotYetValid = notBefore instanceof Date && notBefore > now;
+  // If the signing time is attested by a TSA we can also say whether the
+  // certificate was still valid at the moment of signing, which is the question
+  // that actually matters for an old but legitimately signed document.
+  const attestedTime = timestamp?.present && timestamp?.imprintMatches && timestamp?.tokenSignatureValid
+    ? timestamp.genTime
+    : null;
+  const certValidAtSigning = attestedTime instanceof Date && notBefore instanceof Date && notAfter instanceof Date
+    ? attestedTime >= notBefore && attestedTime <= notAfter
+    : null;
+
+  if (certExpired) {
+    tamperFindings.push(certValidAtSigning === true
+      ? `The signing certificate expired on ${notAfter.toISOString().slice(0, 10)}. A trusted timestamp shows it was still valid when the document was signed, so the signature remains meaningful, but the certificate can no longer be checked for revocation.`
+      : `The signing certificate expired on ${notAfter.toISOString().slice(0, 10)}. Nothing here proves the document was signed before that date, so this signature does not establish who signed it.`);
+  }
+  if (certNotYetValid) {
+    tamperFindings.push(`The signing certificate is not valid until ${notBefore.toISOString().slice(0, 10)}, which is in the future. Treat this signature as untrustworthy.`);
+  }
+
   let verdict;
   let detail;
   if (unsupported) {
@@ -1756,7 +1789,9 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes, audit = { pres
   } else if (signatureValid && integrity) {
     verdict = coversWholeDocument ? "valid" : "valid-partial";
     detail = coversWholeDocument
-      ? "Signature cryptographically valid; the document is unchanged since it was signed."
+      ? (certExpired || certNotYetValid
+          ? `Signature cryptographically valid and the document is unchanged since signing, but the signing certificate ${certExpired ? "has expired" : "is not valid yet"} — see the findings below before relying on who signed it.`
+          : "Signature cryptographically valid; the document is unchanged since it was signed.")
       : (!delimitersOk || unhashedSlack > 0)
         ? "Signature cryptographically valid, but it does not cover the whole file: there are bytes inside its own /ByteRange gap that were never hashed and can be altered without breaking it. Treat this document as unverified."
         : "Signature cryptographically valid for the revision it covers, but bytes were appended after it (a later incremental update or an added signature).";
@@ -1775,6 +1810,9 @@ async function verifyOneSignature(pdfBytes, range, contentsBytes, audit = { pres
     serialHex: certSerialHex(signerCert),
     notBefore: signerCert.notBefore.value,
     notAfter: signerCert.notAfter.value,
+    certExpired,
+    certNotYetValid,
+    certValidAtSigning,
     selfSigned: signerCert.issuer.isEqual(signerCert.subject),
     signingTime,
     hashName,

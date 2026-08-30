@@ -963,7 +963,7 @@ function SignatureCard({ sig, index }: { sig: any; index: number }) {
         <InfoRow label="Signer (CN)" value={sig.subjectCommonName || "—"} />
         <InfoRow label="Issuer (CN)" value={`${sig.issuerCommonName || "—"}${sig.selfSigned ? " · self-signed" : ""}`} />
         <InfoRow label="Serial" value={sig.serialHex || "—"} />
-        <InfoRow label="Certificate valid" value={`${fmtDate(sig.notBefore)} → ${fmtDate(sig.notAfter)}`} />
+        <InfoRow label="Certificate valid" value={`${fmtDate(sig.notBefore)} → ${fmtDate(sig.notAfter)}${sig.certExpired ? " · EXPIRED" : sig.certNotYetValid ? " · NOT YET VALID" : ""}`} />
         <InfoRow label="Signing time" value={sig.signingTime ? fmtDate(sig.signingTime) : (sig.declaredSigningTime || "—")} />
         <InfoRow label="Timestamp" value={sig.timestamp?.present
           ? (sig.timestamp.imprintMatches === false
@@ -976,6 +976,19 @@ function SignatureCard({ sig, index }: { sig: any; index: number }) {
         <InfoRow label="Coverage" value={sig.coversWholeDocument ? "entire document" : "part of the document (additions after signing)"} />
         <InfoRow label="Type" value={sig.subFilter || "adbe.pkcs7.detached"} />
       </dl>
+      {/*
+        The service has always computed these — an expired certificate, an
+        unhashed hole in the /ByteRange, an audit trail redefined after signing —
+        and nothing rendered them. A verifier that works out exactly why a
+        signature cannot be trusted and then shows a green badge is worse than
+        one that never checked.
+      */}
+      {Array.isArray(sig.tamperFindings) && sig.tamperFindings.length > 0 && (
+        <div className={`grid gap-1 rounded-2xl border p-3 text-sm font-semibold leading-6 ${verdictTone("caution")}`}>
+          <p className="text-xs font-bold uppercase tracking-wide">Findings</p>
+          {sig.tamperFindings.map((line: string, i: number) => <p key={i}>{line}</p>)}
+        </div>
+      )}
     </div>
   );
 }

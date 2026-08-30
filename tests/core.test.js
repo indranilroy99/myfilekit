@@ -4790,14 +4790,14 @@ async function genRsaKeyPair() {
   return signEngine.generateKey(alg.algorithm, true, alg.usages);
 }
 
-async function makeSelfSignedCert(commonName, issuerName, keyPair, signingKey) {
+async function makeSelfSignedCert(commonName, issuerName, keyPair, signingKey, validity) {
   const cert = new pkijs.Certificate();
   cert.version = 2;
   cert.serialNumber = new asn1js.Integer({ value: Math.floor(Math.random() * 1e9) + 1 });
   cert.subject.typesAndValues.push(new pkijs.AttributeTypeAndValue({ type: "2.5.4.3", value: new asn1js.Utf8String({ value: commonName }) }));
   cert.issuer.typesAndValues.push(new pkijs.AttributeTypeAndValue({ type: "2.5.4.3", value: new asn1js.Utf8String({ value: issuerName }) }));
-  cert.notBefore.value = new Date(Date.now() - 3600_000);
-  cert.notAfter.value = new Date(Date.now() + 3600_000 * 24 * 365);
+  cert.notBefore.value = validity?.notBefore || new Date(Date.now() - 3600_000);
+  cert.notAfter.value = validity?.notAfter || new Date(Date.now() + 3600_000 * 24 * 365);
   await cert.subjectPublicKeyInfo.importKey(keyPair.publicKey, signEngine);
   await cert.sign(signingKey, "SHA-256", signEngine);
   return cert;
@@ -8431,4 +8431,43 @@ test("an ordinary appended revision still reads as valid-partial, not as a gap a
     !sig.tamperFindings.some((line) => /never hashed/i.test(line)),
     `appending must not raise the unhashed-gap finding: ${JSON.stringify(sig.tamperFindings)}`
   );
+});
+
+test("a signature made with an expired certificate is not presented as simply valid", async () => {
+  const keyPair = await genRsaKeyPair();
+  // Expired a week ago. Expiry is fully checkable offline, unlike revocation.
+  const expired = await makeSelfSignedCert("Stale Signer", "Stale Signer", keyPair, keyPair.privateKey, {
+    notBefore: new Date(Date.now() - 3600_000 * 24 * 400),
+    notAfter: new Date(Date.now() - 3600_000 * 24 * 7),
+  });
+  const p12 = await makePkcs12(keyPair.privateKey, [expired], "pw");
+  const signed = await signPdf(await buildSamplePdf(false), { p12, password: "pw" });
+  const sig = (await verifyPdfSignatures(signed.bytes)).signatures[0];
+
+  assert.ok(new Date(sig.notAfter) < new Date(), "precondition: the certificate must be expired");
+  assert.ok(
+    sig.verdict !== "valid" || sig.tamperFindings.some((line) => /expir/i.test(line)) || /expir/i.test(sig.detail || ""),
+    `an expired signing certificate must be surfaced. verdict=${sig.verdict} detail=${sig.detail} findings=${JSON.stringify(sig.tamperFindings)}`
+  );
+});
+
+test("the verify UI renders the findings the service computes", () => {
+  const source = fs.readFileSync(new URL("../src/tools/security.tsx", import.meta.url), "utf8");
+  const card = source.slice(source.indexOf("function SignatureCard"), source.indexOf("function VerifySignatureTool"));
+  // The whole point: findings must reach the screen, not just the object.
+  assert.match(card, /sig\.tamperFindings/);
+  assert.match(card, /sig\.tamperFindings\.map/);
+  assert.match(card, /certExpired/);
+});
+
+test("a valid signature on a live certificate raises no certificate findings", async () => {
+  const keyPair = await genRsaKeyPair();
+  const cert = await makeSelfSignedCert("Live Signer", "Live Signer", keyPair, keyPair.privateKey);
+  const p12 = await makePkcs12(keyPair.privateKey, [cert], "pw");
+  const signed = await signPdf(await buildSamplePdf(false), { p12, password: "pw" });
+  const sig = (await verifyPdfSignatures(signed.bytes)).signatures[0];
+  assert.equal(sig.verdict, "valid");
+  assert.equal(sig.certExpired, false);
+  assert.equal(sig.certNotYetValid, false);
+  assert.deepEqual(sig.tamperFindings, [], "an ordinary valid signature must stay quiet");
 });
