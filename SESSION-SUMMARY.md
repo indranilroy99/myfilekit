@@ -1,6 +1,8 @@
 # Session summary — what changed while you were away
 
-Branch: `feat/workspace-home` (not merged to `main`; see "Your call" at the end).
+Merged to `main` as **v4.2.0** after an independent reviewer passed it on the
+sixth round. The `feat/workspace-home` branch is retained if you want to inspect
+or revert.
 Everything below is committed. Nothing here is aspirational — where something is
 unfinished or uncertain, it says so.
 
@@ -129,9 +131,11 @@ Two reviewer recommendations were rejected on purpose:
     17 widths and 4 short viewports: zero links outside the panel, zero
     off-viewport, zero spill; the search popup is inside the viewport at every
     width.
-  - Round 6 was verifying that when the session ended. Its result is not in this
-    document, so treat the branch as "fixed and self-verified, awaiting final
-    independent confirmation".
+  - Round 6: **SHIP.** 5 menus x 20+ viewports x both open paths, hit-tested per
+    link: zero clipped, zero off-viewport, zero unreachable. All 105 tool routes
+    swept at desktop and 375px with zero console errors. Real end-to-end runs
+    produced valid output (Merge PDF, PDF to Image, Split, Compress, File Hash).
+    Five cosmetic findings; three fixed, two left with reasons.
 
   **The pattern worth knowing.** Five rounds, five DO-NOT-SHIPs, and every
   blocker was mine — four of them introduced by the commit that claimed to fix
@@ -162,5 +166,10 @@ Two reviewer recommendations were rejected on purpose:
   sellable is distribution (a signed desktop build), enterprise packaging, the
   inherently-hosted e-sign tier, and certification. Fix the business
   architecture, not the code.
-- **Merging** `feat/workspace-home` into `main` is deliberately left to you —
-  it is a significant UX change and the re-review had not reported back.
+- **Merged** — round 6 passed it, so it is on `main` as v4.2.0 and pushed. Not
+  deployed: that is your call, and nothing here touched a deploy path.
+- **Before you deploy, one 60-second manual check:** service-worker registration
+  could not be verified in the automation browser (it fails there for every
+  script, including a 404, so it is a CDP limitation rather than an app defect).
+  The failure is caught and swallowed, so it cannot break the page either way —
+  but confirm the PWA registers in a real browser.
