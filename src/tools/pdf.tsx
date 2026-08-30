@@ -876,10 +876,34 @@ function AddSignatureToPdfTool({ tool }: { tool: Tool }) {
   const [width, setWidth] = useState("180");
   const [status, setStatus] = useState(initialStatus);
   const imageOptions = { maxFiles: 1, types: ["image/jpeg", "image/png", "image/webp"], extensions: ["jpg", "jpeg", "png", "webp"] };
+
+  // Draw the signature box on the page instead of typing four numbers with no
+  // units. A dragged rectangle carries position AND width, which is exactly what
+  // addSignatureImageToPdf takes (PDF points, origin bottom-left).
+  useEffect(() => {
+    const onRegion = (event: Event) => {
+      const d = (event as CustomEvent<{ page: number; points: { x: number; y: number; w: number; h: number } }>).detail;
+      if (!d || d.points.w <= 0) return;
+      setPage(String(d.page));
+      setX(String(Math.round(d.points.x)));
+      setY(String(Math.round(d.points.y)));
+      setWidth(String(Math.max(24, Math.round(d.points.w))));
+    };
+    window.addEventListener("myfilekit:region-selected", onRegion);
+    return () => window.removeEventListener("myfilekit:region-selected", onRegion);
+  }, []);
+
+  const loadPdfFiles = (next: File[]) => {
+    const changed = next[0] !== files[0];
+    setFiles(next);
+    if (changed) { setPage("1"); setX("72"); setY("96"); setWidth("180"); setStatus(initialStatus); }
+  };
+
   return <ToolForm status={status} onReset={() => { setFiles([]); setSignatures([]); setStatus(initialStatus); }}>
-    <FileControl accept="application/pdf" files={files} setFiles={setFiles} label="Choose PDF" />
+    <FileControl accept="application/pdf" files={files} setFiles={loadPdfFiles} label="Choose PDF" />
+    {files.length ? <p className="doc-select-hint">Drag a box on the page where the signature should sit — or type the numbers below.</p> : null}
     <FileControl accept="image/jpeg,image/png,image/webp" files={signatures} setFiles={setSignatures} label="Choose signature image" />
-    <div className="grid gap-3 sm:grid-cols-4"><Input label="Page" value={page} onChange={setPage} type="number" /><Input label="X" value={x} onChange={setX} type="number" /><Input label="Y" value={y} onChange={setY} type="number" /><Input label="Width" value={width} onChange={setWidth} type="number" /></div>
+    <div className="grid gap-3 sm:grid-cols-4"><Input label="Page" value={page} onChange={setPage} type="number" /><Input label="X (pt from left)" value={x} onChange={setX} type="number" /><Input label="Y (pt from bottom)" value={y} onChange={setY} type="number" /><Input label="Width (pt)" value={width} onChange={setWidth} type="number" /></div>
     <PrimaryButton label="Add signature to PDF" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       const [signature] = validateFiles(signatures, imageOptions);

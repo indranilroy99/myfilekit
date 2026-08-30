@@ -27,11 +27,15 @@ const categoryIcons: Record<string, any> = {
   "Sharing & Collaboration": Share2,
 };
 
-const categoryDetails: Record<string, { description: string; accent: string }> = {
+const categoryDetails: Record<string, { description: string; accent: string; related?: string[] }> = {
   "PDF Tools": { description: "Merge, split, rotate, and create PDFs in your browser.", accent: "PDF" },
   "Image Tools": { description: "Compress, resize, convert, crop, and rotate everyday images.", accent: "Image" },
   "Business Tools": { description: "Invoices, Indian GST tax invoices, counter billing, and GSTR-1 filing prep.", accent: "Business" },
-  "Signature Tools": { description: "Draw or type signatures and export them as PNG files.", accent: "Signature" },
+  "Signature Tools": {
+    description: "Draw or type signatures and export them as PNG files.",
+    accent: "Signature",
+    related: ["add-signature-to-pdf-tool", "sign-pdf-tool", "verify-signature-tool", "request-signature-tool"],
+  },
   "Text & Data Tools": { description: "Format JSON, convert CSV, preview Markdown, and create PDFs from text.", accent: "Data" },
   "Security & Privacy": { description: "Redact PII, run a privacy audit, and triage suspicious PDFs for malware — plus encrypt, unlock, and clean metadata, all locally in your browser.", accent: "Security" },
   "Developer Utilities": { description: "Handle hashes, Base64, and small file checks without leaving the page.", accent: "Utility" },
@@ -590,6 +594,9 @@ function ToolIndex({ category, ext }: { category?: string; ext?: string } = {}) 
   }, [category, ext]);
 
   const toolCount = sections.reduce((sum, section) => sum + section.items.length, 0);
+  const relatedElsewhere = (category ? categoryDetails[category]?.related || [] : [])
+    .map(findToolById)
+    .filter(Boolean) as Tool[];
 
   return (
     <>
@@ -625,6 +632,27 @@ function ToolIndex({ category, ext }: { category?: string; ext?: string } = {}) 
             </div>
           </section>
         ))}
+        {relatedElsewhere.length ? (
+          <section className="index-section">
+            <div className="index-head">
+              <h2>Related tools in other categories</h2>
+              <span>{relatedElsewhere.length}</span>
+            </div>
+            <div className="index-grid">
+              {relatedElsewhere.map((tool: Tool) => {
+                const Icon = iconForTool(tool);
+                return (
+                  <a className="index-row" key={tool.id} href={tool.route}>
+                    <Icon size={14} aria-hidden="true" />
+                    <span className="index-row-name">{tool.name}</span>
+                    {tool.isNew ? <span className="index-new">NEW</span> : null}
+                    <span className="index-row-desc">{tool.description}</span>
+                  </a>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
       </div>
     </>
   );
@@ -1314,6 +1342,8 @@ function CategoryPage({ category }: { category: string }) {
 const SELECT_MODE_BY_TOOL: Record<string, "rect" | "point"> = {
   "redact-pdf-tool": "rect",
   "add-text-to-pdf-tool": "point",
+  // Drag a box where the signature goes: position AND size in one gesture.
+  "add-signature-to-pdf-tool": "rect",
 };
 
 function ToolPage({ tool }: { tool: Tool }) {
