@@ -25,18 +25,75 @@ export function textStats(text) {
   return { words, characters, charactersNoSpaces, lines, readingMinutes };
 }
 
+// Above this many LCS cells (~16 MB at 4 bytes each) the table is not worth
+// building in a browser tab. Reached only after the shared head and tail have
+// been trimmed, so it takes two genuinely large and genuinely different files.
+const MAX_DIFF_CELLS = 4_000_000;
+
+/**
+ * Line diff by longest common subsequence.
+ *
+ * This used to compare a[i] against b[i] — position by position — which is not
+ * a diff. Inserting one line at the top of a five-line file reported every
+ * original line as both removed and added: "+6 / -5" for a one-line change.
+ * On a contract redline that is a materially wrong answer delivered with
+ * confidence, and the same function backs both Compare PDFs and Diff Checker.
+ *
+ * The shared head and tail are trimmed before the table is built, which is what
+ * makes real documents cheap: two versions of a contract usually differ in a few
+ * places, so the quadratic part only ever sees the changed middle.
+ */
 export function lineDiff(left, right) {
   const a = String(left || "").split(/\r?\n/);
   const b = String(right || "").split(/\r?\n/);
+
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head += 1;
+  let tail = 0;
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail += 1;
+
   const rows = [];
-  const max = Math.max(a.length, b.length);
-  for (let index = 0; index < max; index += 1) {
-    if (a[index] === b[index]) rows.push({ type: "same", left: a[index] ?? "", right: b[index] ?? "" });
-    else {
-      if (a[index] !== undefined) rows.push({ type: "removed", left: a[index], right: "" });
-      if (b[index] !== undefined) rows.push({ type: "added", left: "", right: b[index] });
+  for (let i = 0; i < head; i += 1) rows.push({ type: "same", left: a[i], right: b[i] });
+
+  const midA = a.slice(head, a.length - tail);
+  const midB = b.slice(head, b.length - tail);
+
+  if (midA.length * midB.length > MAX_DIFF_CELLS) {
+    // Degrade to a coarser diff rather than a wrong one: still a correct
+    // description of the change, just not the minimal one.
+    for (const line of midA) rows.push({ type: "removed", left: line, right: "" });
+    for (const line of midB) rows.push({ type: "added", left: "", right: line });
+  } else {
+    // lcs[i][j] = length of the LCS of midA[i..] and midB[j..], flattened.
+    const width = midB.length + 1;
+    const lcs = new Uint32Array((midA.length + 1) * width);
+    for (let i = midA.length - 1; i >= 0; i -= 1) {
+      for (let j = midB.length - 1; j >= 0; j -= 1) {
+        lcs[i * width + j] = midA[i] === midB[j]
+          ? lcs[(i + 1) * width + (j + 1)] + 1
+          : Math.max(lcs[(i + 1) * width + j], lcs[i * width + (j + 1)]);
+      }
     }
+    let i = 0;
+    let j = 0;
+    while (i < midA.length && j < midB.length) {
+      if (midA[i] === midB[j]) {
+        rows.push({ type: "same", left: midA[i], right: midB[j] });
+        i += 1;
+        j += 1;
+      } else if (lcs[(i + 1) * width + j] >= lcs[i * width + (j + 1)]) {
+        rows.push({ type: "removed", left: midA[i], right: "" });
+        i += 1;
+      } else {
+        rows.push({ type: "added", left: "", right: midB[j] });
+        j += 1;
+      }
+    }
+    for (; i < midA.length; i += 1) rows.push({ type: "removed", left: midA[i], right: "" });
+    for (; j < midB.length; j += 1) rows.push({ type: "added", left: "", right: midB[j] });
   }
+
+  for (let k = tail; k > 0; k -= 1) rows.push({ type: "same", left: a[a.length - k], right: b[b.length - k] });
   return rows;
 }
 

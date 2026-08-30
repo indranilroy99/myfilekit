@@ -4148,9 +4148,11 @@ test("advanced PDF tools are registered, routed, and rendered", () => {
 
 test("comparePdfText: reports per-page added/removed/changed lines and flags differing pages", async () => {
   const { comparePdfText } = await import("../src/services/pdf-review.service.js");
-  // lineDiff aligns by line index, so each scenario is kept end-anchored to stay
-  // clean: page 1 = a changed line (1 removed + 1 added), page 2 = an added
-  // trailing line, page 3 = a removed trailing line.
+  // Page 1 = a changed line (1 removed + 1 added), page 2 = an added trailing
+  // line, page 3 = a removed trailing line. These were originally kept
+  // end-anchored to work around lineDiff aligning by line index; it now computes
+  // a real LCS, so the anchoring is no longer load-bearing and the same
+  // expectations hold for a change anywhere on the page.
   const a = ["keep\nold\nfoot", "one\ntwo", "x\ny\nz"];
   const b = ["keep\nnew\nfoot", "one\ntwo\nthree", "x\ny"];
   const result = comparePdfText(a, b);
@@ -8470,4 +8472,67 @@ test("a valid signature on a live certificate raises no certificate findings", a
   assert.equal(sig.certExpired, false);
   assert.equal(sig.certNotYetValid, false);
   assert.deepEqual(sig.tamperFindings, [], "an ordinary valid signature must stay quiet");
+});
+
+// --- lineDiff is a real diff, not a positional compare -----------------------
+
+const diffCounts = (rows) => ({
+  added: rows.filter((row) => row.type === "added").length,
+  removed: rows.filter((row) => row.type === "removed").length,
+  same: rows.filter((row) => row.type === "same").length,
+});
+
+test("inserting one line reports one addition, not a rewrite of the file", () => {
+  // The reported defect: this returned +6/-5 for a single inserted line.
+  const before = "One\nTwo\nThree\nFour\nFive";
+  const after = "INSERTED\nOne\nTwo\nThree\nFour\nFive";
+  const counts = diffCounts(lineDiff(before, after));
+  assert.deepEqual(counts, { added: 1, removed: 0, same: 5 });
+});
+
+test("deleting a line in the middle reports one removal", () => {
+  const counts = diffCounts(lineDiff("a\nb\nc\nd\ne", "a\nb\nd\ne"));
+  assert.deepEqual(counts, { added: 0, removed: 1, same: 4 });
+});
+
+test("a changed line is one removal and one addition, and its neighbours stay same", () => {
+  const rows = lineDiff("alpha\nbravo\ncharlie", "alpha\nBRAVO\ncharlie");
+  assert.deepEqual(diffCounts(rows), { added: 1, removed: 1, same: 2 });
+  assert.equal(rows[0].type, "same");
+  assert.equal(rows[rows.length - 1].type, "same");
+});
+
+test("identical input produces no changes at all", () => {
+  const text = "one\ntwo\nthree";
+  assert.deepEqual(diffCounts(lineDiff(text, text)), { added: 0, removed: 0, same: 3 });
+});
+
+test("the diff reconstructs both documents exactly", () => {
+  const cases = [
+    ["a\nb\nc", "x\na\nb\nc\ny"],
+    ["1\n2\n3\n4\n5\n6", "1\n3\n5\n7"],
+    ["", "only"],
+    ["only", ""],
+    ["same", "same"],
+    ["a\nb", "b\na"],
+  ];
+  for (const [left, right] of cases) {
+    const rows = lineDiff(left, right);
+    // Left = everything not added; right = everything not removed. If this
+    // holds, the diff cannot be silently dropping or inventing a line.
+    const rebuiltLeft = rows.filter((r) => r.type !== "added").map((r) => r.left).join("\n");
+    const rebuiltRight = rows.filter((r) => r.type !== "removed").map((r) => r.right).join("\n");
+    assert.equal(rebuiltLeft, left, `left not reconstructed for ${JSON.stringify([left, right])}`);
+    assert.equal(rebuiltRight, right, `right not reconstructed for ${JSON.stringify([left, right])}`);
+  }
+});
+
+test("a large pair of documents differing in one place stays cheap and exact", () => {
+  const body = Array.from({ length: 4000 }, (_, i) => `line ${i}`);
+  const changed = body.slice();
+  changed.splice(2000, 0, "INSERTED IN THE MIDDLE");
+  const counts = diffCounts(lineDiff(body.join("\n"), changed.join("\n")));
+  // 4000x4001 cells would blow the cap; trimming the shared head and tail is
+  // what keeps this exact rather than degrading to a block replacement.
+  assert.deepEqual(counts, { added: 1, removed: 0, same: 4000 });
 });

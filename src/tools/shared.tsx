@@ -422,6 +422,31 @@ async function canvasToBlob(canvas: HTMLCanvasElement, type: string) {
   return blob;
 }
 
+/**
+ * Turn a data: URL into a Blob WITHOUT fetch().
+ *
+ * `fetch(dataUrl)` is the obvious way to do this and it does not work here: the
+ * app ships `connect-src 'self'`, which covers data: and blob: URLs too, so the
+ * request is blocked by our own policy. It fails as a bare "Failed to fetch",
+ * which looks like a network problem and is not one — there is no network.
+ *
+ * This has now caught three separate features (the editor's "keep editing this
+ * result", the QR download, and the invoice export path), so it lives here with
+ * the reason attached rather than being rediscovered a fourth time.
+ */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(",");
+  if (!dataUrl.startsWith("data:") || comma < 0) throw new Error("That is not a data URL.");
+  const header = dataUrl.slice(5, comma);
+  const mimeType = header.replace(/;base64$/i, "") || "application/octet-stream";
+  const payload = dataUrl.slice(comma + 1);
+  if (!/;base64$/i.test(header)) return new Blob([decodeURIComponent(payload)], { type: mimeType });
+  const binary = atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType });
+}
+
 function requireOutput(value: string) {
   if (!value.trim()) throw new Error("Generate a result before downloading.");
   return value;
@@ -439,4 +464,4 @@ function imageExt(type: string) {
 
 
 export type { Tool, Status, DownloadReady };
-export { initialStatus, printDownloadUrl, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, acceptHint, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, usePendingHandler, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, canvasToBlob, requireOutput, copyText, imageExt };
+export { initialStatus, printDownloadUrl, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, acceptHint, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, usePendingHandler, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, canvasToBlob, dataUrlToBlob, requireOutput, copyText, imageExt };

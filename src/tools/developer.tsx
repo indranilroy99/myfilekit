@@ -5,7 +5,7 @@ import { validateFiles } from "../services/file-validator.js";
 import { downloadBlob, downloadBytes } from "../services/download.service.js";
 import { MyFileKit } from "../api/myfilekit.js";
 import { base64Decode, base64Encode, generatePassphrase, generatePassword, passwordStrength } from "../services/text-tools.service.js";
-import { initialStatus, ToolForm, StatusBox, FileControl, Input, Textarea, Checkbox, PrimaryButton, SecondaryButton, runSafely, requireOutput, copyText } from "./shared";
+import { initialStatus, ToolForm, StatusBox, FileControl, Input, Textarea, Checkbox, PrimaryButton, SecondaryButton, runSafely, dataUrlToBlob, requireOutput, copyText } from "./shared";
 import type { Tool } from "./shared";
 
 // Developer API playground. Documents the local, client-side MyFileKit API and
@@ -230,7 +230,7 @@ function QrCodeTool() {
     {dataUrl && <img className="surface-card wabi-card-edge mx-auto aspect-square w-full max-w-xs p-4" src={dataUrl} alt="Generated QR code" />}
     <div className="flex flex-wrap gap-2">
       <PrimaryButton label="Generate QR code" onClick={() => runSafely(setStatus, async () => { if (!input.trim()) throw new Error("Enter text or a link first."); setDataUrl(await QRCode.toDataURL(input, { width: 720, margin: 2, errorCorrectionLevel: "M" })); return "QR code generated locally."; })} />
-      {dataUrl && <SecondaryButton label="Download PNG" onClick={() => runSafely(setStatus, async () => { const blob = await (await fetch(dataUrl)).blob(); downloadBlob(blob, "myfilekit-qr-code.png"); return "QR code downloaded."; })} />}
+      {dataUrl && <SecondaryButton label="Download PNG" onClick={() => runSafely(setStatus, async () => { downloadBlob(dataUrlToBlob(dataUrl), "myfilekit-qr-code.png"); return "QR code saved as a PNG."; })} />}
     </div>
   </ToolForm>;
 }
