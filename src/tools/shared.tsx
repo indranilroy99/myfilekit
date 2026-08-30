@@ -1,7 +1,7 @@
 // Shared tool primitives: form chrome, inputs, buttons and small helpers used by
 // more than one tool module (and by the app shell). Kept free of tool-specific
 // logic so it stays small — this module loads with the entry chunk.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronUp, Download, GripVertical, Eye, Printer, ShieldCheck, Loader2, Upload, X, Zap } from "lucide-react";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { tools } from "../registry/tools.registry.js";
@@ -187,6 +187,7 @@ function acceptHint(accept: string, multiple: boolean): string {
 
 function FileControl({ accept, multiple = false, files, setFiles, label }: { accept: string; multiple?: boolean; files: File[]; setFiles: (files: File[]) => void; label?: string }) {
   const [isDragging, setIsDragging] = useState(false);
+  const controlId = useId();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const heading = label || `Drag & drop ${multiple ? "files" : "a file"} here`;
@@ -208,6 +209,17 @@ function FileControl({ accept, multiple = false, files, setFiles, label }: { acc
     if (handed.length) setFiles(multiple ? handed : handed.slice(0, 1));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Publish the PDF this control holds so the page can render it beside the
+  // form. Tagged with the control's own id: a tool with two file inputs (the
+  // PDF and the .p12 in Digital Signature) must not have one clear the other.
+  useEffect(() => {
+    const first = files[0];
+    const isPdf = Boolean(first && (first.type === "application/pdf" || /\.pdf$/i.test(first.name)));
+    window.dispatchEvent(new CustomEvent("myfilekit:active-file", {
+      detail: { source: controlId, file: isPdf ? first : null },
+    }));
+  }, [files, controlId]);
+
   const removeAt = (index: number) => {
     setFiles(files.filter((_, i) => i !== index));
     // Keep keyboard focus inside the control after the removed row unmounts.

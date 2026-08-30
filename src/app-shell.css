@@ -1174,3 +1174,22 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
    Adobe's acrobat/online pages carry a site header and no editor rail. */
 .app[data-route="home"] .sidebar { display: none; }
 .app[data-route="home"] .workbench { grid-template-columns: minmax(0, 1fr); }
+
+/* With a PDF loaded the tool page becomes a workspace: controls on the left,
+   the document in the middle, siblings on the right — the Acrobat arrangement,
+   where the document is the subject and the form is the instrument. */
+.tool-shell-doc { grid-template-columns: minmax(300px, 360px) minmax(0, 1fr) var(--app-inspector-w); }
+.tool-shell-doc .tool-canvas { max-width: none; }
+
+.tool-document {
+  grid-column: 2;
+  align-self: stretch;
+  min-width: 0;
+  height: calc(100svh - var(--app-menubar-h) - var(--app-status-h) - var(--app-docbar-h) - 24px);
+  padding: 12px 0;
+}
+
+@media (max-width: 1100px) {
+  .tool-shell-doc { grid-template-columns: minmax(0, 1fr); }
+  .tool-document { grid-column: auto; height: 60vh; padding: 0 12px 12px; }
+}

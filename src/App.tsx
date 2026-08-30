@@ -7,6 +7,7 @@ import { categories, categoryGroups, tools } from "./registry/tools.registry.js"
 import { stashWorkspaceFiles, clearWorkspaceFilesUnless } from "./lib/workspace-handoff";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import LandingPage from "./components/LandingPage";
+import DocumentView from "./components/DocumentView";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { filterTools, searchableText } from "./lib/search.js";
 import { formatBytes } from "./utils/format.js";
@@ -1304,9 +1305,33 @@ function CategoryPage({ category }: { category: string }) {
 function ToolPage({ tool }: { tool: Tool }) {
   const related = tools.filter((item: Tool) => item.category === tool.category && item.id !== tool.id);
   const Icon = iconForTool(tool);
+  // The PDF currently loaded in this tool, published by FileControl. Keyed by
+  // the control that owns it so a second file input cannot clear the first.
+  const [docs, setDocs] = useState<Record<string, File>>({});
+  const activeFile = Object.values(docs)[0] || null;
+
   useEffect(() => {
     saveRecentTool(tool.id);
   }, [tool.id]);
+
+  // Tool change starts a clean document context.
+  useEffect(() => { setDocs({}); }, [tool.id]);
+
+  useEffect(() => {
+    const onActive = (event: Event) => {
+      const detail = (event as CustomEvent<{ source: string; file: File | null }>).detail;
+      if (!detail?.source) return;
+      setDocs((current) => {
+        if (detail.file) return { ...current, [detail.source]: detail.file };
+        if (!(detail.source in current)) return current;
+        const next = { ...current };
+        delete next[detail.source];
+        return next;
+      });
+    };
+    window.addEventListener("myfilekit:active-file", onActive);
+    return () => window.removeEventListener("myfilekit:active-file", onActive);
+  }, []);
 
   return (
     <>
@@ -1319,7 +1344,7 @@ function ToolPage({ tool }: { tool: Tool }) {
           <a className="secondary-button" href={categoryRoute(tool.category)}>{tool.category.replace(" Tools", "")}</a>
         </span>
       </div>
-      <div className="tool-shell">
+      <div className={`tool-shell ${activeFile ? "tool-shell-doc" : ""}`}>
         <div className="tool-canvas">
           <p className="doc-bar-meta" style={{ marginBottom: 12 }}>{tool.description}</p>
           {/* Keyed by tool id: several tools share one renderer (Split/Delete Pages
@@ -1328,6 +1353,11 @@ function ToolPage({ tool }: { tool: Tool }) {
               ranges and result would carry over into the next tool. */}
           <ToolRenderer key={tool.id} tool={tool} />
         </div>
+        {activeFile ? (
+          <section className="tool-document" aria-label={`Preview of ${activeFile.name}`}>
+            <DocumentView file={activeFile} />
+          </section>
+        ) : null}
         <aside className="tool-inspector" aria-label="Related tools">
           <p className="inspector-title">More in {tool.category.replace(" Tools", "")}</p>
           {related.slice(0, 14).map((item: Tool) => {
