@@ -9,11 +9,12 @@ export function categoryRoute(category) {
 }
 
 export function routeForHash(hash) {
-  const raw = String(hash || "#dashboard").replace(/^#/, "") || "dashboard";
+  const raw = String(hash || "#home").replace(/^#/, "") || "home";
   // Optional query on the hash, currently only `browse-tools?ext=pdf`.
   const queryAt = raw.indexOf("?");
   const id = queryAt === -1 ? raw : raw.slice(0, queryAt);
   const query = queryAt === -1 ? "" : raw.slice(queryAt + 1);
+  if (id === "home") return { type: "home" };
   if (id === "dashboard") return { type: "dashboard" };
   if (id === "browse-tools") {
     const match = /(?:^|&)ext=([a-z0-9]{1,12})(?:&|$)/i.exec(query);

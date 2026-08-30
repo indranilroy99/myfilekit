@@ -6,6 +6,7 @@ import { SpotlightCard } from "@/components/ui/spotlight-card";
 import { categories, categoryGroups, tools } from "./registry/tools.registry.js";
 import { stashWorkspaceFiles, clearWorkspaceFilesUnless } from "./lib/workspace-handoff";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import LandingPage from "./components/LandingPage";
 import { categoryRoute, routeForHash } from "./lib/routing";
 import { filterTools, searchableText } from "./lib/search.js";
 import { formatBytes } from "./utils/format.js";
@@ -79,7 +80,8 @@ export default function App() {
   }, [theme]);
 
   const route = routeForHash(hash);
-  const routeTitle = route.type === "dashboard" ? "Dashboard"
+  const routeTitle = route.type === "home" ? "MyFileKit"
+    : route.type === "dashboard" ? "Workspace"
     : route.type === "browse" ? "Browse tools"
     : route.type === "category" ? route.category
     : route.type === "tool" ? route.tool.name
@@ -100,12 +102,13 @@ export default function App() {
   }, [hash]);
 
   return (
-    <div className="app">
+    <div className="app" data-route={route.type}>
       <span aria-live="polite" className="sr-only">{routeTitle}</span>
       <MenuBar hash={hash} theme={theme} onToggleTheme={() => setTheme((current) => current === "dark" ? "light" : "dark")} />
       <div className="workbench">
         <SideBar hash={hash} />
         <main className="worksurface" id="app-main" tabIndex={-1}>
+          {route.type === "home" && <LandingPage featured={popularToolIds.map(findToolById).filter(Boolean).slice(0, 6) as any} />}
           {route.type === "dashboard" && <WorkspaceHome />}
           {route.type === "browse" && <ToolIndex ext={route.ext} />}
           {route.type === "category" && <ToolIndex category={route.category} />}
@@ -332,6 +335,9 @@ function SideBar({ hash }: { hash: string }) {
     <nav className="sidebar" aria-label="Workspace navigation">
       <div className="sidebar-scroll">
         <p className="sidebar-group">Library</p>
+        <a className={`sidebar-link ${route.type === "home" ? "sidebar-link-active" : ""}`} href="#home" aria-current={route.type === "home" ? "page" : undefined}>
+          <Sparkles size={14} aria-hidden="true" />Home
+        </a>
         <a className={`sidebar-link ${route.type === "dashboard" ? "sidebar-link-active" : ""}`} href="#dashboard" aria-current={route.type === "dashboard" ? "page" : undefined}>
           <LayoutDashboard size={14} aria-hidden="true" />Workspace
         </a>
@@ -400,6 +406,7 @@ function StatusBar({ route }: { route: ReturnType<typeof routeForHash> }) {
   const networkNote = route.type === "tool" ? NETWORK_NOTES[route.tool.id] : undefined;
   const label = route.type === "tool" ? route.tool.name
     : route.type === "category" ? route.category
+    : route.type === "home" ? "Home"
     : route.type === "dashboard" ? "Workspace"
     : route.type === "browse" ? "All tools"
     : "Not found";

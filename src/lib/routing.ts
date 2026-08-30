@@ -5,6 +5,7 @@ import {
 } from "../router.js";
 
 export type Route =
+  | { type: "home" }
   | { type: "dashboard" }
   | { type: "browse"; ext?: string }
   | { type: "category"; category: string }
