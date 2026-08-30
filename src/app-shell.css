@@ -156,14 +156,6 @@ body {
   letter-spacing: -.01em;
 }
 
-.menubar-brand span {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--c-text-faint);
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
 .menubar-item {
   display: inline-flex;
   align-items: center;
@@ -1188,7 +1180,11 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
 /* With a PDF loaded the tool page becomes a workspace: controls on the left,
    the document in the middle, siblings on the right — the Acrobat arrangement,
    where the document is the subject and the form is the instrument. */
-.tool-shell-doc { grid-template-columns: minmax(360px, 460px) minmax(0, 1fr) var(--app-inspector-w); }
+/* Document open: two columns. The sibling-tools rail is navigation, and keeping
+   it here left ~50px for the page at 1280px — users were marking redactions on a
+   document they could not see. */
+.tool-shell-doc { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); }
+.tool-shell-doc .tool-inspector { display: none; }
 .tool-shell-doc .tool-canvas { max-width: none; }
 
 .tool-document {
@@ -1335,3 +1331,6 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
   .editor-canvas { height: 60vh; }
   .editor-rail { border-left: 0; border-top: 1px solid var(--c-line); }
 }
+
+.doc-zoom-label { border: 0; background: transparent; cursor: default; font: inherit; }
+.doc-zoom-label:hover { color: var(--c-text); text-decoration: underline; }

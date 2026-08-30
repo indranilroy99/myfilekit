@@ -187,7 +187,7 @@ function MenuBar({ hash, theme, onToggleTheme }: { hash: string; theme: ThemeMod
 
   return (
     <header className="menubar" ref={barRef as any}>
-      <a className="menubar-brand" href="#dashboard">MyFileKit <span>local</span></a>
+      <a className="menubar-brand" href="#home" aria-label="MyFileKit — home">MyFileKit</a>
       {MENUS.map((menu) => {
         const isOpen = openMenu === menu.id;
         const owns = menu.categories.includes(activeCategory);

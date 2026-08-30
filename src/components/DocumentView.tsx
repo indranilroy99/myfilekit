@@ -29,6 +29,8 @@ type Props = {
 };
 
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
+/** Index of 100%; "fit" is represented separately so the page starts visible. */
+const FIT = -1;
 
 type Selection = {
   page: number;
@@ -46,7 +48,11 @@ export function DocumentView({ file, page, onPageChange, onPageCount, selectMode
   const [doc, setDoc] = useState<any>(null);
   const [pageCount, setPageCount] = useState(0);
   const [current, setCurrent] = useState(1);
-  const [zoomIndex, setZoomIndex] = useState(2);
+  // Starts fitted to the column, not at 100%: a full A4 page at 100% does not
+  // fit a typical tool column, and the user was left marking a page they could
+  // not see.
+  const [zoomIndex, setZoomIndex] = useState(FIT);
+  const [fitScale, setFitScale] = useState(1);
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [message, setMessage] = useState("");
   const [thumbs, setThumbs] = useState<Record<number, string>>({});
@@ -123,7 +129,16 @@ export function DocumentView({ file, page, onPageChange, onPageCount, selectMode
       try {
         const sized = await doc.getPage(current);
         const base = sized.getViewport({ scale: 1 });
-        const canvas = await renderPdfPageToCanvas(doc, current, ZOOMS[zoomIndex] * 1.5);
+        // Fit mode measures the stage and scales the page to it.
+        let scale = zoomIndex === FIT ? fitScale : ZOOMS[zoomIndex];
+        if (zoomIndex === FIT) {
+          const stageWidth = stage.parentElement?.clientWidth || stage.clientWidth;
+          if (stageWidth > 0) {
+            scale = Math.max(0.2, Math.min(3, (stageWidth - 32) / base.width));
+            setFitScale(scale);
+          }
+        }
+        const canvas = await renderPdfPageToCanvas(doc, current, scale * 1.5);
         // A newer render started while this one was in flight.
         if (token !== renderToken.current) return;
         setPagePoints({ w: base.width, h: base.height });
@@ -300,9 +315,11 @@ export function DocumentView({ file, page, onPageChange, onPageCount, selectMode
         <span className="doc-controls-page tabular-nums">{current} / {pageCount || "–"}</span>
         <button type="button" className="icon-button" aria-label="Next page" disabled={current >= pageCount} onClick={() => go(current + 1)}><ChevronDown size={15} /></button>
         <span className="doc-bar-sep" aria-hidden="true" />
-        <button type="button" className="icon-button" aria-label="Zoom out" disabled={zoomIndex <= 0} onClick={() => setZoomIndex((z) => Math.max(0, z - 1))}><Minus size={15} /></button>
-        <span className="doc-controls-page tabular-nums">{Math.round(ZOOMS[zoomIndex] * 100)}%</span>
-        <button type="button" className="icon-button" aria-label="Zoom in" disabled={zoomIndex >= ZOOMS.length - 1} onClick={() => setZoomIndex((z) => Math.min(ZOOMS.length - 1, z + 1))}><Plus size={15} /></button>
+        <button type="button" className="icon-button" aria-label="Zoom out" disabled={zoomIndex === 0} onClick={() => setZoomIndex((z) => (z === FIT ? 0 : Math.max(0, z - 1)))}><Minus size={15} /></button>
+        <button type="button" className="doc-controls-page tabular-nums doc-zoom-label" aria-label="Fit the page to the window" onClick={() => setZoomIndex(FIT)}>
+          {zoomIndex === FIT ? "Fit" : `${Math.round(ZOOMS[zoomIndex] * 100)}%`}
+        </button>
+        <button type="button" className="icon-button" aria-label="Zoom in" disabled={zoomIndex >= ZOOMS.length - 1} onClick={() => setZoomIndex((z) => (z === FIT ? 3 : Math.min(ZOOMS.length - 1, z + 1)))}><Plus size={15} /></button>
       </div>
     </div>
   );
