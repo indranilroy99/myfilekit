@@ -24,6 +24,41 @@ import { deflateSync, strToU8 } from "fflate";
 import nodeCrypto from "node:crypto";
 import { analyzePdfBytes, buildAnalyzerReportText, classifyMagic, decodePdfName, findObfuscatedNames, sha256Hex } from "../src/services/pdf-analyzer.service.js";
 
+// Tool components were split out of src/App.tsx into per-category modules under
+// src/tools/ (lazy-loaded by ToolRenderer). Source-level assertions that used to
+// read App.tsx read the shell plus those modules, so they cover the same code.
+const readAppSource = () => [
+  fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"),
+  ...fs
+    .readdirSync(new URL("../src/tools/", import.meta.url))
+    .sort()
+    .map((name) => fs.readFileSync(new URL(`../src/tools/${name}`, import.meta.url), "utf8"))
+].join("\n");
+
+
+/**
+ * Source of the named top-level components, concatenated. Replaces slicing
+ * between two positional markers: the components now live in different files
+ * under src/tools/, and a positional span both broke and silently swallowed
+ * neighbouring components. Each body runs from `function Name(` to the next
+ * top-level `function `, so the scope is exactly the components named.
+ */
+const sourceOfComponents = (names) => {
+  const source = readAppSource();
+  return names
+    .map((name) => {
+      const start = source.indexOf(`function ${name}(`);
+      assert.ok(start >= 0, `component ${name} not found in source`);
+      // Bound at the next TOP-LEVEL declaration of any kind. Bounding only on
+      // "\nfunction " let a component that is last in its file run to the end of
+      // the whole concatenation and swallow every following file.
+      const rest = source.slice(start + 1);
+      const next = rest.search(/\n(?:export |function |const |class |type |interface )/);
+      return next === -1 ? source.slice(start) : source.slice(start, start + 1 + next);
+    })
+    .join("\n");
+};
+
 const pdfLibCode = fs.readFileSync(new URL("../assets/vendor/pdf-lib.min.js", import.meta.url), "utf8");
 const loadPdfLib = new Function(`${pdfLibCode}; return PDFLib;`);
 globalThis.window = { PDFLib: loadPdfLib() };
@@ -98,12 +133,12 @@ test("markdown preview escapes user HTML", () => {
 });
 
 test("React shell does not use dangerous user-controlled HTML injection", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   assert.doesNotMatch(appSource, /dangerouslySetInnerHTML|\\.innerHTML\\s*=/);
 });
 
 test("SpotlightCard glow is single-accent, on-element, and injection-free", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   const cardSource = fs.readFileSync(new URL("../src/components/ui/spotlight-card.tsx", import.meta.url), "utf8");
 
   // The card glow is the deliberately-rebuilt on-system version: it must NOT
@@ -129,7 +164,7 @@ test("SpotlightCard glow is single-accent, on-element, and injection-free", () =
 });
 
 test("liquid buttons provide standard button semantics without SVG filter effects", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   const buttonSource = fs.readFileSync(new URL("../src/components/ui/liquid-glass-button.tsx", import.meta.url), "utf8");
 
   assert.match(appSource, /import \{ LiquidButton \}/);
@@ -219,7 +254,7 @@ test("invoice defaults are neutral and drafts are not persisted", () => {
 });
 
 test("every visible tool has a concrete renderer", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   for (const tool of tools) {
     assert.equal(appSource.includes(`"${tool.id}"`), true, `${tool.name} is missing from ToolRenderer`);
   }
@@ -679,7 +714,7 @@ test("Phase 3 conversion tools are registered under sensible categories with ren
     "handwriting-to-pdf-tool": "PDF Tools",
     "scan-to-pdf-tool": "PDF Tools",
   };
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   for (const [id, category] of Object.entries(expected)) {
     const found = tools.find((tool) => tool.id === id);
     assert.ok(found, `${id} should be registered`);
@@ -702,7 +737,7 @@ test("Phase 2 PDF tools are registered under sensible categories with renderers"
     "repair-pdf-tool": "PDF Tools",
     "fingerprint-pdf-tool": "Security & Privacy",
   };
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   for (const [id, category] of Object.entries(expected)) {
     const found = tools.find((tool) => tool.id === id);
     assert.ok(found, `${id} should be registered`);
@@ -721,7 +756,7 @@ test("Phase 2 PDF tools are registered under sensible categories with renderers"
 
 test("Phase 4a office tools are registered under PDF Tools with renderers", () => {
   const expected = ["word-to-pdf-tool", "excel-to-pdf-tool", "powerpoint-to-pdf-tool", "ebook-to-pdf-tool"];
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   for (const id of expected) {
     const found = tools.find((tool) => tool.id === id);
     assert.ok(found, `${id} should be registered`);
@@ -2770,7 +2805,7 @@ test("pdf.js sees the permission bits encryptPdf wrote", async () => {
 });
 
 test("the three security tools are registered under Security & Privacy with renderers", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   const expected = { "encrypt-pdf-tool": "Encrypt PDF", "remove-password-tool": "Remove Password", "unlock-pdf-tool": "Unlock PDF" };
   for (const [id, name] of Object.entries(expected)) {
     const found = tools.find((tool) => tool.id === id);
@@ -2796,17 +2831,17 @@ test("the three security tools are registered under Security & Privacy with rend
 });
 
 test("the security tools never write a password into their status text or filenames", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  const start = appSource.indexOf("function EncryptPdfTool");
-  const end = appSource.indexOf("function ImageOutputTool");
-  assert.ok(start > 0 && end > start);
-  const section = appSource.slice(start, end);
+  const appSource = readAppSource();
+  const section = sourceOfComponents([
+    "EncryptPdfTool", "RemovePasswordTool", "UnlockPdfTool",
+    "SignPdfTool", "SignatureCard", "VerifySignatureTool",
+  ]);
   // No logging, no storage, no network, no password interpolated into output.
   for (const forbidden of ["console.", "localStorage", "sessionStorage", "indexedDB", "fetch("]) {
     assert.equal(section.includes(forbidden), false, `the security tools must not use ${forbidden}`);
   }
   assert.equal(/\$\{\s*(password|ownerPassword|confirmation)\s*\}/.test(section), false, "a password must never be interpolated into output");
-  assert.equal(/type="password"/.test(appSource.slice(appSource.indexOf("function PasswordField"), start)), true);
+  assert.equal(/type="password"/.test(sourceOfComponents(["PasswordField"])), true);
   // Passwords are cleared on reset and on unmount.
   assert.equal(section.includes("useEffect(() => forgetPasswords, [])"), true);
   assert.equal(section.includes("useEffect(() => forgetPassword, [])"), true);
@@ -3277,7 +3312,7 @@ test("a clean PDF scans clean", async () => {
 });
 
 test("Auto-Redact PII and Privacy Scanner are registered, routed, and rendered", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   const expected = { "auto-redact-pii-tool": "Auto-Redact PII", "privacy-scanner-tool": "Privacy Scanner" };
   for (const [id, name] of Object.entries(expected)) {
     const found = tools.find((tool) => tool.id === id);
@@ -3297,10 +3332,10 @@ test("Auto-Redact PII and Privacy Scanner are registered, routed, and rendered",
   for (const query of ["pii", "aadhaar", "redact"]) assert.match(searchable, new RegExp(query));
 
   // The new components stay local and never log PII.
-  const start = appSource.indexOf("function AutoRedactPiiTool");
-  const end = appSource.indexOf("function CreatePdfTool");
-  assert.ok(start > 0 && end > start);
-  const section = appSource.slice(start, end);
+  const section = sourceOfComponents([
+    "AutoRedactPiiTool", "PrivacyScannerTool", "severityTone", "SeverityTag",
+    "verdictTone", "PdfAnalyzerTool", "SanitizePdfTool", "ExtractImagesTool",
+  ]);
   for (const forbidden of ["console.", "localStorage", "sessionStorage", "indexedDB", "fetch(", "innerHTML", "dangerouslySetInnerHTML"]) {
     assert.equal(section.includes(forbidden), false, `the PII tools must not use ${forbidden}`);
   }
@@ -3487,7 +3522,7 @@ test("PDF Analyser is registered, routed, and rendered", () => {
   assert.deepEqual(found.acceptedTypes, ["application/pdf"]);
   assert.equal(found.file.maxFiles, 1);
   assert.equal(routeForHash(found.route).tool.id, "pdf-analyzer-tool");
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   assert.equal(appSource.includes('"pdf-analyzer-tool"'), true);
   const searchable = [found.name, found.description, ...found.keywords].join(" ").toLowerCase();
   for (const query of ["malware", "javascript", "triage"]) assert.match(searchable, new RegExp(query));
@@ -3783,7 +3818,7 @@ test("createFormPdf validates fields onto an uploaded PDF and rejects bad input"
 
 test("advanced PDF tools are registered, routed, and rendered", () => {
   const ids = ["smart-split-pdf-tool", "bates-numbering-tool", "impose-pdf-tool", "bookmarks-editor-tool", "create-form-tool"];
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   for (const id of ids) {
     const found = tools.find((tool) => tool.id === id);
     assert.ok(found, `${id} registered`);
@@ -3969,7 +4004,7 @@ test("archivalPrepPdf refuses an encrypted PDF with a friendly message", async (
 
 test("Phase 2 review tools are registered, routed, and rendered", () => {
   const ids = ["compare-pdf-tool", "deskew-pdf-tool", "pdfa-prep-tool"];
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   for (const id of ids) {
     const found = tools.find((tool) => tool.id === id);
     assert.ok(found, `${id} registered`);
@@ -4084,7 +4119,7 @@ test("batch-process tool is registered, routed, rendered, and exposes sensible o
   assert.equal(found.file.maxFiles, 100);
   assert.equal(routeForHash(found.route).tool.id, "batch-process-tool");
 
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   assert.equal(appSource.includes(`"batch-process-tool"`), true, "wired into ToolRenderer");
   assert.equal(appSource.includes("BatchProcessTool"), true, "component defined");
 
@@ -4250,7 +4285,7 @@ test("edit-pdf-text tool is registered, routed, wired into ToolRenderer, and dis
   assert.equal(found.file.maxFiles, 1);
   assert.equal(routeForHash(found.route).tool.id, "edit-pdf-text-tool");
 
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   assert.equal(appSource.includes(`"edit-pdf-text-tool"`), true, "wired into ToolRenderer");
   assert.equal(appSource.includes("EditPdfTextTool"), true, "component defined");
 
@@ -4420,7 +4455,7 @@ test("annotate-pdf tool is registered, routed, wired into ToolRenderer, and disc
   assert.equal(found.file.maxFiles, 1);
   assert.equal(routeForHash(found.route).tool.id, "annotate-pdf-tool");
 
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   assert.equal(appSource.includes(`"annotate-pdf-tool"`), true, "wired into ToolRenderer");
   assert.equal(appSource.includes("AnnotatePdfTool"), true, "component defined");
 
@@ -4637,7 +4672,7 @@ test("sign-pdf-tool and verify-signature-tool are registered, routed, and wired 
     assert.equal(found.localProcessing, true);
     assert.equal(routeForHash(found.route).tool.id, id);
   }
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   assert.equal(appSource.includes(`"sign-pdf-tool"`), true, "sign tool wired into ToolRenderer");
   assert.equal(appSource.includes(`"verify-signature-tool"`), true, "verify tool wired into ToolRenderer");
   assert.equal(appSource.includes("SignPdfTool"), true);
@@ -4780,7 +4815,7 @@ test("isNew is boolean everywhere and flags the newest tools", () => {
 });
 
 test("dashboard discovery references resolve to real, sensible tools", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   // New quick chips exist and a couple of new tools are in the popular/new shelves.
   for (const chip of ["Edit PDF text", "Annotate PDF", "Sign PDF", "Compare PDFs"]) {
     assert.ok(appSource.includes(`"${chip}"`), `quick chip ${chip} missing`);
@@ -4837,14 +4872,14 @@ test("confusable tool pairs carry disambiguating cross-references", () => {
 });
 
 test("Redact PDF has a persistent post-result consequence note", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   const redactBody = appSource.slice(appSource.indexOf("function RedactPdfTool"), appSource.indexOf("function AutoRedactPiiTool"));
   assert.match(redactBody, /status\.tone === "success" && <ResultConsequenceNote>/);
   assert.match(redactBody, /permanently removed and the page is flattened to an image/);
 });
 
 test("semantic tone literals are consolidated onto canonical tokens", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   // The near-duplicate drifts the critics flagged are gone...
   assert.doesNotMatch(appSource, /#31631f/);        // added-line green drift
   assert.doesNotMatch(appSource, /#f59e0b/);        // edited-run raw amber
@@ -5092,7 +5127,7 @@ test("workflow preset runs end-to-end through runWorkflow", async () => {
 });
 
 test("Sanitize PDF and Extract Images tools are registered, routed, and wired", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
 
   const sanitize = tools.find((tool) => tool.id === "sanitize-pdf-tool");
   assert.ok(sanitize, "sanitize-pdf-tool registered");
@@ -5314,7 +5349,7 @@ test("auto-tag writes /Alt for described figures and /Artifact for decorative on
 });
 
 test("Accessibility Check and Auto-Tag tools are registered, grouped, routed, and wired", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
 
   const check = tools.find((tool) => tool.id === "accessibility-check-tool");
   assert.ok(check, "accessibility-check-tool registered");
@@ -5433,7 +5468,7 @@ test("translate: with a fake endpoint, chunks are sent and reassembled IN ORDER 
 });
 
 test("translate-pdf-tool is registered, routed, grouped under Work with PDFs, and wired", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   const t = tools.find((tool) => tool.id === "translate-pdf-tool");
   assert.ok(t, "translate-pdf-tool registered");
   assert.equal(t.category, "Text & Data Tools");
@@ -5551,7 +5586,7 @@ test("timestamp: embedding a TSA token keeps the signature valid and verify repo
 });
 
 test("timestamp: the SignatureCard reports timestamp presence and SignPdfTool wires the toggle", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   assert.match(appSource, /RFC 3161 timestamp/i, "the sign UI offers the timestamp toggle");
   assert.match(appSource, /tsaUrl/, "the sign UI collects a TSA URL");
   assert.match(appSource, /timestamp: useTimestamp/, "the toggle is passed to signPdf");
@@ -5723,7 +5758,7 @@ test("batch-workflow: validates inputs (no files / no steps / bad op / over-limi
 });
 
 test("batch-workflow-tool is registered under Organize, routed, and wired", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   const t = tools.find((tool) => tool.id === "batch-workflow-tool");
   assert.ok(t, "batch-workflow-tool registered");
   assert.equal(t.category, "PDF Tools");
@@ -5876,7 +5911,7 @@ test("api-playground tool is registered, routed, wired, and documents the local 
   assert.equal(found.localProcessing, true);
   assert.equal(routeForHash(found.route).tool.id, "api-playground-tool");
 
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   assert.equal(appSource.includes(`"api-playground-tool"`), true, "wired into ToolRenderer");
   assert.equal(appSource.includes("ApiPlaygroundTool"), true, "component defined");
 
@@ -6122,7 +6157,7 @@ test("tier3: request-signature-tool is registered, routes, and is wired into the
   assert.equal(route.type, "tool");
   assert.equal(route.tool.id, "request-signature-tool");
   // The renderer wires the tool id to its component.
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   assert.match(appSource, /request-signature-tool"\)\s*return\s*<RequestSignatureTool/);
 });
 
@@ -6850,7 +6885,7 @@ test("flagship intent queries resolve to this release's new tools", () => {
 });
 
 test("every quick-search chip resolves to a real tool", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   const chips = appSource.match(/const quickSearches = \[(.*?)\]/s)[1].match(/"([^"]+)"/g).map((s) => s.replace(/"/g, ""));
   assert.ok(chips.length >= 6, "quick searches should offer a useful set");
   for (const chip of chips) {
@@ -6877,7 +6912,7 @@ test("the eight flagship new tools carry the New badge", () => {
 });
 
 test("New & Notable shelf points at real, isNew flagship tools", () => {
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   const shelf = appSource.match(/newAndNotableIds = \[(.*?)\]/s)[1].match(/"([^"]+)"/g).map((s) => s.replace(/"/g, ""));
   assert.ok(shelf.length >= 4 && shelf.length <= 6, "shelf stays a sensible size");
   for (const id of shelf) {
@@ -7038,7 +7073,7 @@ test("reflow-pdf-tool is registered, routed, wired, cross-references Edit PDF Te
   assert.equal(found.file.maxFiles, 1);
   assert.equal(routeForHash(found.route).tool.id, "reflow-pdf-tool");
 
-  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const appSource = readAppSource();
   assert.ok(appSource.includes(`"reflow-pdf-tool"`), "wired into ToolRenderer");
   assert.ok(appSource.includes("ReflowEditorTool"), "component defined");
 
@@ -7522,4 +7557,96 @@ test("C2 security: an untouched single signature has a present, matching, TRUSTE
   assert.equal(sig.auditTrailTrusted, true, "an untampered audit trail is trusted");
   assert.equal(sig.auditTrail.signer, "Alice Signer");
   assert.equal(sig.tamperFindings.length, 0, "no tamper findings on a clean signature");
+});
+
+// --- Workspace file matching --------------------------------------------------
+// A release review found the Workspace telling users the product could not open
+// files it ships tools for, and a filename with no extension matching every PDF
+// tool. Both are matcher bugs; these pin the behaviour.
+
+test("workspace matcher: extension parsing, any-type tools, and honest support claims", async () => {
+  const appSource = readAppSource();
+
+  // A name with no dot has no extension — it must not be treated as one.
+  // (Regression: "pdf" as a whole filename matched all 59 PDF tools.)
+  assert.match(appSource, /lastIndexOf\("\."\)/, "extension must be parsed from the last dot");
+  assert.equal(appSource.includes('name.split(".").pop()'), false, "split-pop parsing must not return");
+
+  // Tools whose file input accepts anything must declare it, so the matcher can
+  // always offer them — including for a file type no other tool handles.
+  const anyType = tools.filter((tool) => tool.file && tool.file.anyType === true).map((tool) => tool.id).sort();
+  assert.deepEqual(anyType, ["file-hash-tool", "hash-compare-tool"]);
+
+  // Every tool that declares extensions must declare them lower-case, or the
+  // case-insensitive match in the UI silently disagrees with the registry.
+  for (const tool of tools) {
+    for (const ext of tool.file?.extensions || []) {
+      assert.equal(ext, ext.toLowerCase(), `${tool.id} declares a non-lowercase extension: ${ext}`);
+      assert.equal(ext.startsWith("."), false, `${tool.id} extension must not include a dot: ${ext}`);
+    }
+  }
+
+  // The zero-match state must offer a way forward, not just a refusal.
+  assert.match(appSource, /Browse all \{tools\.length\} tools/, "no-match state must link to the full index");
+});
+
+test("browse route carries an optional extension filter", () => {
+  assert.deepEqual(routeForHash("#browse-tools"), { type: "browse" });
+  assert.deepEqual(routeForHash("#browse-tools?ext=pdf"), { type: "browse", ext: "pdf" });
+  assert.deepEqual(routeForHash("#browse-tools?ext=PDF"), { type: "browse", ext: "pdf" });
+  // A malformed or oversized filter degrades to the unfiltered index.
+  assert.deepEqual(routeForHash("#browse-tools?ext=" + "a".repeat(40)), { type: "browse" });
+  assert.deepEqual(routeForHash("#browse-tools?nope=1"), { type: "browse" });
+});
+
+// --- Workspace hand-off scoping ----------------------------------------------
+// A release review found a file staged on the Workspace silently auto-loading
+// into P2P File Share — a WebRTC tool whose purpose is sending the file off the
+// device — because the first FileControl to mount adopted whatever was pending.
+// The hand-off is now scoped to the one tool the user clicked.
+
+test("workspace hand-off is scoped to the tool the user chose", async () => {
+  const mod = await import("../src/lib/workspace-handoff.ts").catch(() => null);
+  const handoff = mod || (await import("../src/lib/workspace-handoff.js"));
+  const { stashWorkspaceFiles, takeWorkspaceFilesFor, clearWorkspaceFilesUnless, pendingWorkspaceToolId } = handoff;
+  const file = { name: "bank-statement.pdf", size: 10 };
+
+  // Only the intended tool may take the files.
+  stashWorkspaceFiles([file], "merge-pdf-tool");
+  assert.deepEqual(takeWorkspaceFilesFor("p2p-share-tool"), [], "an unintended tool must never receive the hand-off");
+  assert.equal(pendingWorkspaceToolId(), "merge-pdf-tool", "a failed take must not consume the stash");
+  assert.deepEqual(takeWorkspaceFilesFor("merge-pdf-tool"), [file]);
+  assert.equal(pendingWorkspaceToolId(), null, "a successful take clears the stash");
+
+  // Navigating anywhere else drops it, so nothing lingers unseen.
+  stashWorkspaceFiles([file], "merge-pdf-tool");
+  clearWorkspaceFilesUnless("compress-image-tool");
+  assert.equal(pendingWorkspaceToolId(), null, "navigating to another tool must drop the stash");
+
+  // Navigating to the intended tool keeps it.
+  stashWorkspaceFiles([file], "merge-pdf-tool");
+  clearWorkspaceFilesUnless("merge-pdf-tool");
+  assert.equal(pendingWorkspaceToolId(), "merge-pdf-tool");
+  takeWorkspaceFilesFor("merge-pdf-tool");
+
+  // Nothing is staged without an explicit target.
+  stashWorkspaceFiles([file], "");
+  assert.equal(pendingWorkspaceToolId(), null);
+});
+
+test("the status bar never claims 'offline' for a tool that can reach a network", () => {
+  const appSource = readAppSource();
+  const noted = [...appSource.matchAll(/"([a-z0-9-]+-tool)":\s*"(?:Server-backed|Local · optional|Direct connection)[^"]*"/g)]
+    .map((match) => match[1]);
+
+  // Any tool whose implementation can open a connection must carry a label.
+  const networkMarkers = ["requestChatCompletion", "requestEnvelope", "RTCPeerConnection"];
+  for (const id of ["request-signature-tool", "translate-pdf-tool", "summarize-pdf-tool", "chat-with-pdf-tool", "p2p-share-tool", "collab-whiteboard-tool"]) {
+    assert.ok(noted.includes(id), `${id} can reach a network and needs an honest status-bar label`);
+  }
+  // And the markers themselves still exist, so this test fails loudly if the
+  // network paths move rather than silently passing on a stale list.
+  for (const marker of networkMarkers) {
+    assert.ok(appSource.includes(marker), `expected ${marker} in the source — update this guard if it moved`);
+  }
 });

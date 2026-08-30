@@ -2,6 +2,8 @@ import React from "react";
 
 type ErrorBoundaryProps = {
   children: React.ReactNode;
+  /** Scoped fallback. When omitted, the full-screen app-level error page is used. */
+  fallback?: React.ReactNode;
 };
 
 type ErrorBoundaryState = {
@@ -26,6 +28,12 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   render(): React.ReactNode {
     if (!this.state.hasError) {
       return this.props.children;
+    }
+
+    // A nested boundary (e.g. around one lazy tool) renders its own fallback so a
+    // single failing pane does not replace the whole shell.
+    if (this.props.fallback !== undefined) {
+      return this.props.fallback;
     }
 
     return (

@@ -6,7 +6,7 @@ import {
 
 export type Route =
   | { type: "dashboard" }
-  | { type: "browse" }
+  | { type: "browse"; ext?: string }
   | { type: "category"; category: string }
   | { type: "tool"; tool: any }
   | { type: "missing"; hash: string };
