@@ -541,6 +541,12 @@ body {
   transition: background .12s ease, border-color .12s ease !important;
 }
 
+/* LiquidButton paints its gloss on a child <span>, not the button, so flattening
+   the button above left the gradient untouched: every primary action in the
+   product carried a lighter band across its top 45%. The button takes its fill
+   from .primary-button, so the overlay has nothing left to contribute. */
+.liquid-button-surface { display: none !important; }
+
 .primary-button,
 html:not(.dark) .primary-button,
 html.dark .primary-button {
@@ -600,7 +606,23 @@ html.dark .surface-muted,
 html.dark .page-header,
 html.dark .tool-form-status,
 html.dark .surface-panel .surface-card,
-html.dark .surface-panel .surface-muted {
+html.dark .surface-panel .surface-muted,
+/* The light-mode selectors below are not decoration: styles.css carries an
+   `html:not(.dark) .surface-card { background:#fff; box-shadow: 0 1px 2px … }`
+   block at (0,2,0) that outranked the bare classes above, so light mode kept a
+   drop shadow this system says it does not have while dark mode correctly had
+   none. Matching the specificity is what makes the two themes agree. */
+html:not(.dark) .surface-panel,
+html:not(.dark) .surface-card,
+html:not(.dark) .surface-muted,
+html:not(.dark) .page-header,
+html:not(.dark) .command-stat,
+html:not(.dark) .category-card,
+html:not(.dark) .why-card,
+html:not(.dark) .search-result-card,
+html:not(.dark) .hero-empty-result,
+html:not(.dark) .surface-panel .surface-card,
+html:not(.dark) .surface-panel .surface-muted {
   border: 1px solid var(--c-line) !important;
   border-radius: var(--app-radius) !important;
   background: var(--c-panel) !important;
@@ -617,12 +639,19 @@ html.dark .surface-panel .surface-muted {
 .tool-form-grid { display: grid !important; gap: 12px !important; grid-template-columns: minmax(0, 1fr) !important; }
 .tool-form-actions { gap: 12px !important; }
 
-.tool-form-status {
+/* The status rail is a layout slot, not a panel: it holds the result card, the
+   status box and the trust line, each of which draws its own surface. Given a
+   background of its own it rendered, when idle, as a shadowed white sliver
+   97x83 with zero padding wrapped around one line of 11px text. `html:not(.dark)`
+   here for the same specificity reason as the panels block above. */
+.tool-form-status,
+html:not(.dark) .tool-form-status {
   display: grid !important;
   gap: 10px !important;
   padding: 0 !important;
   border: 0 !important;
   background: transparent !important;
+  box-shadow: none !important;
 }
 
 /* Dropzone: a work area, not a marketing card. */
