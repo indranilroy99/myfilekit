@@ -78,6 +78,18 @@ function ToolMetaPanel({ status, onReset, children, sends }: { status: Status; o
   const showStatusBox = !isIdle && !(status.tone === "success" && downloadReady);
   const hasState = !isIdle || Boolean(downloadReady);
 
+  // Hiding the box on success cost real information. Tools write their findings
+  // into the success message — "Output: 1200x1600", "Note: the output is not
+  // smaller than the original", "Cropped to 1x1" — and every one of them was
+  // computed and then discarded the instant a download card rendered. That is
+  // exactly how a wrong result gets reported as a success, and it has already
+  // hidden one shipped defect (Compress PDF returning a larger file).
+  // The message now rides inside the result card, which keeps the surface calm
+  // while putting the detail where the user is already looking.
+  const successNote = status.tone === "success" && downloadReady && status.message && status.message !== "Ready."
+    ? status.message
+    : "";
+
   return (
     <aside className="tool-form-status">
       {downloadReady ? (
@@ -89,6 +101,7 @@ function ToolMetaPanel({ status, onReset, children, sends }: { status: Status; o
           <div>
             <p className="break-words font-semibold text-[var(--foreground)]">{downloadReady.filename}</p>
             <p className="mt-1 text-xs font-semibold text-neutral-500">{formatBytes(downloadReady.size)} · stayed on this device</p>
+            {successNote ? <p className="result-card-note">{successNote}</p> : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <a className="primary-button no-underline" href={downloadReady.url} download={downloadReady.filename}>

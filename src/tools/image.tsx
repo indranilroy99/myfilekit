@@ -11,14 +11,50 @@ import { getHtml2Canvas } from "../services/capture.service.js";
 import { initialStatus, ToolForm, StatusBox, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, PrimaryButton, SecondaryButton, runSafely, canvasToBlob, imageExt } from "./shared";
 import type { Tool } from "./shared";
 
+
+const IMAGE_FORMATS = ["image/jpeg", "image/png", "image/webp"];
+const KEEPS_ALPHA = new Set(["image/png", "image/webp"]);
+
+/**
+ * Follow the source file's own format instead of hard-defaulting to JPEG.
+ *
+ * The default used to be JPEG for every source. Drop in a PNG logo with a
+ * transparent background, press the only button, and the formerly transparent
+ * pixels came back opaque white — measured [255,255,255,255] — under a silently
+ * changed .jpg extension, for a 0.7% size saving. Nothing said so.
+ */
+function useSourceFormat(files: File[], setFormat: (value: string) => void) {
+  const seen = useRef("");
+  useEffect(() => {
+    const type = files[0]?.type || "";
+    if (!type || type === seen.current) return;
+    seen.current = type;
+    if (IMAGE_FORMATS.includes(type)) setFormat(type);
+  }, [files, setFormat]);
+}
+
+/** Warns before a lossy target silently flattens a transparent source. */
+function AlphaWarning({ files, format }: { files: File[]; format: string }) {
+  const source = files[0]?.type || "";
+  if (!source || KEEPS_ALPHA.has(format) || !KEEPS_ALPHA.has(source)) return null;
+  return (
+    <p className="text-xs font-semibold" style={{ color: "#9a5b08" }}>
+      JPEG cannot store transparency. Any transparent area in this image will become solid white.
+      Choose PNG or WebP to keep it.
+    </p>
+  );
+}
+
 function ImageOutputTool({ tool, mode }: { tool: Tool; mode: "compress" | "convert" }) {
   const [files, setFiles] = useState<File[]>([]);
   const [format, setFormat] = useState("image/jpeg");
   const [quality, setQuality] = useState("0.82");
   const [status, setStatus] = useState(initialStatus);
+  useSourceFormat(files, setFormat);
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
     <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
     <Select label="Output format" value={format} onChange={setFormat} options={["image/jpeg", "image/png", "image/webp"]} labels={["JPEG", "PNG", "WebP"]} />
+    <AlphaWarning files={files} format={format} />
     {mode === "compress" && format !== "image/png" && <Range label="Quality" value={quality} onChange={setQuality} />}
     {mode === "compress" && format === "image/png" && (
       <p className="text-xs font-semibold text-neutral-500">PNG is lossless, so the quality setting does not apply. Choose JPEG or WebP to trade quality for a smaller file.</p>
@@ -43,9 +79,11 @@ function BatchImageTool({ tool, mode }: { tool: Tool; mode: "compress" | "resize
   const [preserve, setPreserve] = useState(true);
   const [format, setFormat] = useState("image/jpeg");
   const [status, setStatus] = useState(initialStatus);
+  useSourceFormat(files, setFormat);
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
     <FileControl accept="image/jpeg,image/png,image/webp" multiple files={files} setFiles={setFiles} />
     <Select label="Output format" value={format} onChange={setFormat} options={["image/jpeg", "image/png", "image/webp"]} labels={["JPEG", "PNG", "WebP"]} />
+    <AlphaWarning files={files} format={format} />
     {mode === "compress" ? <Range label="Quality" value={quality} onChange={setQuality} /> : (
       <>
         <div className="grid gap-3 sm:grid-cols-2"><Input label="Width" value={width} onChange={setWidth} type="number" /><Input label="Height" value={height} onChange={setHeight} type="number" /></div>
@@ -82,11 +120,13 @@ function ResizeImageTool({ tool }: { tool: Tool }) {
   const [format, setFormat] = useState("image/jpeg");
   const [preserve, setPreserve] = useState(true);
   const [status, setStatus] = useState(initialStatus);
+  useSourceFormat(files, setFormat);
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
     <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
     <div className="grid gap-3 sm:grid-cols-2"><Input label="Width" value={width} onChange={setWidth} type="number" /><Input label="Height" value={height} onChange={setHeight} type="number" /></div>
     <Checkbox label="Preserve aspect ratio" checked={preserve} onChange={setPreserve} />
     <Select label="Output format" value={format} onChange={setFormat} options={["image/jpeg", "image/png", "image/webp"]} labels={["JPEG", "PNG", "WebP"]} />
+    <AlphaWarning files={files} format={format} />
     <PrimaryButton label="Resize image" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       const canvas = await resizeImage(file, Number(width), Number(height), preserve);

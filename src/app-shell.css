@@ -1375,3 +1375,15 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
 
 .doc-zoom-label { border: 0; background: transparent; cursor: default; font: inherit; }
 .doc-zoom-label:hover { color: var(--c-text); text-decoration: underline; }
+
+/* The tool's own success message, carried inside the result card. Reads as
+   detail, not as a second headline: the card's own title already says "Done". */
+.result-card-note {
+  margin-top: 6px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  line-height: 1.45 !important;
+  white-space: pre-wrap;
+}
+html:not(.dark) .result-card-note { color: #40454d !important; }
+html.dark .result-card-note { color: var(--c-text-dim) !important; }
