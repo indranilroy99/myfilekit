@@ -703,28 +703,51 @@ export function rectsForMatch(items, start, end) {
 
 // --- browser: text + coordinates ---------------------------------------------
 
-function itemRect(pdfjs, viewport, item) {
+// Exported for tests: this box decides where an irreversible, flattening
+// redaction lands, so "it looked right on screen" is not enough evidence.
+export function itemRect(pdfjs, viewport, item) {
   // Item transform is in PDF user space; compose it with the viewport transform
   // to land in top-left-origin viewport space, then express the box as page
   // percentages so it survives the DPI scaling done by rasterRebuild.
   const transform = pdfjs.Util.transform(viewport.transform, item.transform);
   const height = Math.abs(item.height) || Math.hypot(transform[2], transform[3]) || 8;
   const width = Math.abs(item.width) || 1;
-  const left = transform[4];
-  const baseline = transform[5];
-  // Baseline sits at the bottom of the glyph box; allow a little for descenders.
-  const top = baseline - height;
-  const pad = Math.min(2, height * 0.25);
+
+  // The run is not necessarily horizontal. `item.width` and `item.height` are
+  // lengths along the run's OWN axes, so on a /Rotate 90 page — a scanned
+  // landscape statement, say — treating them as across-and-down puts a
+  // horizontal bar beside vertical text: measured 0% coverage of the target,
+  // after which rasterRebuild bakes the still-legible value into an image and
+  // the tool reports the text as gone. Build the quad along the real axes and
+  // take its bounding box; at 0 degrees this reduces to the old maths exactly.
+  const angle = Math.atan2(transform[1], transform[0]);
+  const dirX = Math.cos(angle);
+  const dirY = Math.sin(angle);
+  // Perpendicular, from the baseline towards the top of the glyph box.
+  const upX = dirY;
+  const upY = -dirX;
+  const originX = transform[4];
+  const originY = transform[5];
+  const cornerX = [originX, originX + width * dirX, originX + width * dirX + height * upX, originX + height * upX];
+  const cornerY = [originY, originY + width * dirY, originY + width * dirY + height * upY, originY + height * upY];
+  const left = Math.min(...cornerX);
+  const top = Math.min(...cornerY);
+  const boxWidth = Math.max(...cornerX) - left;
+  const boxHeight = Math.max(...cornerY) - top;
+
+  // Allow a little for descenders, scaled off the smaller side so a vertical run
+  // is padded by the same visual amount as a horizontal one.
+  const pad = Math.min(2, Math.min(boxWidth, boxHeight) * 0.25);
   const x = ((left - pad) / viewport.width) * 100;
   const y = ((top - pad) / viewport.height) * 100;
-  const w = ((width + pad * 2) / viewport.width) * 100;
-  const h = ((height + pad * 2) / viewport.height) * 100;
+  const w = ((boxWidth + pad * 2) / viewport.width) * 100;
+  const h = ((boxHeight + pad * 2) / viewport.height) * 100;
   return {
     x: Math.max(0, Math.min(100, x)),
     y: Math.max(0, Math.min(100, y)),
     w: Math.max(0.2, Math.min(100, w)),
     h: Math.max(0.2, Math.min(100, h)),
-    outsidePage: left + width < -1 || left > viewport.width + 1 || baseline < -1 || top > viewport.height + 1,
+    outsidePage: left + boxWidth < -1 || left > viewport.width + 1 || top + boxHeight < -1 || top > viewport.height + 1,
   };
 }
 

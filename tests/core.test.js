@@ -2993,6 +2993,7 @@ import {
   maskValue,
   parseXmpFields,
   PII_TYPE_LABELS,
+  itemRect,
   rectsForMatch,
   sanitiseForReport,
   scanContentForInvisibleText,
@@ -8259,5 +8260,77 @@ test("each sends= line says what leaves, not that nothing does", () => {
     assert.ok(/\b(Sends|Uploads)\b/.test(line), `sends= copy must name the transfer: ${line}`);
     assert.ok(!/never leave/i.test(line), `sends= copy must not repeat the local-only promise: ${line}`);
     assert.ok(line.length > 40, `sends= copy must say where it goes: ${line}`);
+  }
+});
+
+// --- Redaction geometry on rotated pages -------------------------------------
+
+/** A one-page PDF at the given /Rotate, carrying one known run of text. */
+async function rotatedPageWithText(angle, text = "ACCOUNT 123456789012") {
+  const { PDFDocument, StandardFonts, degrees } = globalThis.window.PDFLib;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText(text, { x: 100, y: 700, size: 12, font });
+  page.setRotation(degrees(angle));
+  return doc.save();
+}
+
+test("the redaction box lands on the text at every page rotation", async () => {
+  const pdfjs = await loadPdfjsForInterop();
+  for (const angle of [0, 90, 180, 270]) {
+    const bytes = await rotatedPageWithText(angle);
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), verbosity: 0, isEvalSupported: false }).promise;
+    const page = await doc.getPage(1);
+    const viewport = page.getViewport({ scale: 1 });
+    const item = (await page.getTextContent()).items.find((entry) => entry.str.includes("ACCOUNT"));
+    assert.ok(item, `no text run found at /Rotate ${angle}`);
+
+    const rect = itemRect(pdfjs, viewport, item);
+    // Back to viewport pixels, the space the box is actually painted in.
+    const box = {
+      x: (rect.x / 100) * viewport.width,
+      y: (rect.y / 100) * viewport.height,
+      w: (rect.w / 100) * viewport.width,
+      h: (rect.h / 100) * viewport.height,
+    };
+
+    // Both ends of the baseline must be inside the box. That is the property
+    // that matters: a bar that misses either end leaves the value readable.
+    const t = pdfjs.Util.transform(viewport.transform, item.transform);
+    const runAngle = Math.atan2(t[1], t[0]);
+    const ends = [
+      [t[4], t[5]],
+      [t[4] + item.width * Math.cos(runAngle), t[5] + item.width * Math.sin(runAngle)],
+    ];
+    for (const [px, py] of ends) {
+      assert.ok(
+        px >= box.x - 0.6 && px <= box.x + box.w + 0.6 && py >= box.y - 0.6 && py <= box.y + box.h + 0.6,
+        `/Rotate ${angle}: baseline point (${px.toFixed(1)}, ${py.toFixed(1)}) is outside the redaction box ` +
+        `x=${box.x.toFixed(1)} y=${box.y.toFixed(1)} w=${box.w.toFixed(1)} h=${box.h.toFixed(1)}`
+      );
+    }
+
+    // The box must follow the run's orientation, not always be a wide short bar.
+    const rotated = angle === 90 || angle === 270;
+    assert.equal(box.h > box.w, rotated, `/Rotate ${angle}: box orientation does not match the text direction`);
+    assert.equal(rect.outsidePage, false, `/Rotate ${angle}: an on-page run was reported as off-page`);
+  }
+});
+
+test("redaction boxes stay inside the page at every rotation", async () => {
+  const pdfjs = await loadPdfjsForInterop();
+  for (const angle of [0, 90, 180, 270]) {
+    const bytes = await rotatedPageWithText(angle);
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), verbosity: 0, isEvalSupported: false }).promise;
+    const page = await doc.getPage(1);
+    const viewport = page.getViewport({ scale: 1 });
+    const item = (await page.getTextContent()).items.find((entry) => entry.str.includes("ACCOUNT"));
+    const rect = itemRect(pdfjs, viewport, item);
+    assert.ok(rect.x >= 0 && rect.y >= 0, `/Rotate ${angle}: negative origin`);
+    assert.ok(rect.x + rect.w <= 100.01, `/Rotate ${angle}: box runs off the right edge`);
+    assert.ok(rect.y + rect.h <= 100.01, `/Rotate ${angle}: box runs off the bottom edge`);
+    // A box that covers most of the page would "work" but destroys the document.
+    assert.ok(rect.w * rect.h < 2000, `/Rotate ${angle}: box covers ${(rect.w * rect.h / 100).toFixed(0)}% of the page`);
   }
 });
