@@ -16,9 +16,9 @@
 
 :root {
   --app-radius: 3px;
-  --app-row: 26px;
-  --app-control: 28px;
-  --app-menubar-h: 38px;
+  --app-row: 30px;
+  --app-control: 30px;
+  --app-menubar-h: 42px;
   --app-status-h: 24px;
   --app-docbar-h: 44px;
   --app-sidebar-w: 236px;
@@ -36,11 +36,11 @@
   --c-text: #1b1d21;
   --c-text-dim: #4a4f57;    /* >= 7:1 on chrome */
   --c-text-faint: #5f646c;  /* >= 4.5:1 on chrome — never lighter than this */
-  --c-accent: #2563eb;
-  --c-accent-solid: #2563eb;
+  --c-accent: #4f46e5;
+  --c-accent-solid: #4f46e5;
   --c-accent-fg: #ffffff;
-  --c-accent-soft: #e8f0fe;
-  --c-accent-text: #1d4ed8;  /* accent text ON accent-soft */
+  --c-accent-soft: #eef0fe;
+  --c-accent-text: #3730a3;  /* accent text ON accent-soft */
   --c-hover: #eef0f3;
   --c-active: #e3e7ee;
   --c-ok: #15803d;
@@ -73,23 +73,23 @@
 }
 
 html.dark {
-  --c-bg: #0d0e10;
-  --c-chrome: #16181c;
-  --c-panel: #1b1e23;
-  --c-line: #2a2e35;
-  --c-line-soft: #23262c;
+  --c-bg: #1a1b1e;          /* never pure black: elevation needs somewhere to go */
+  --c-chrome: #222326;      /* menubar / sidebar / panels */
+  --c-panel: #2a2b2f;       /* raised surfaces sit above the chrome */
+  --c-line: #3a3c42;        /* visible separator, not a background change */
+  --c-line-soft: #303237;
   --c-text: #e6e8ec;
   --c-text-dim: #aeb5bf;    /* >= 7:1 on chrome */
   --c-text-faint: #949ba5;  /* >= 4.5:1 on chrome — never darker than this */
-  --c-accent: #3b82f6;      /* text/borders on dark */
-  --c-accent-solid: #2563eb; /* solid fills carrying white text (>= 4.5:1) */
+  --c-accent: #818cf8;      /* accent text/borders ON dark surfaces */
+  --c-accent-solid: #4f46e5; /* solid fills carrying white text (~6.3:1) */
   --c-accent-fg: #ffffff;
-  --c-accent-soft: #16233c;
-  --c-accent-text: #93b4fb;  /* accent text ON accent-soft */
-  --c-hover: #21252b;
-  --c-active: #272c34;
+  --c-accent-soft: #262a45;
+  --c-accent-text: #a5b4fc;  /* accent text ON accent-soft */
+  --c-hover: #2e3035;
+  --c-active: #35373d;
   --c-ok: #4ade80;
-  --c-drop: #21252b;
+  --c-drop: #2a2b2f;
 }
 
 html, body, #root {
@@ -111,8 +111,8 @@ body {
   background: var(--c-bg) !important;
   color: var(--c-text) !important;
   font-family: var(--app-font);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -254,7 +254,7 @@ body {
   padding: 3px 6px;
   border-radius: var(--app-radius);
   color: var(--c-text);
-  font-size: 12px;
+  font-size: 13px;
   text-decoration: none;
   white-space: nowrap;
   overflow: hidden;
@@ -314,7 +314,7 @@ body {
   background: var(--c-panel);
   color: var(--c-text);
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .sidebar-search input:focus { outline: 2px solid var(--c-accent); outline-offset: -1px; border-color: var(--c-accent); }
@@ -340,7 +340,7 @@ body {
   padding: 3px 10px;
   border-left: 2px solid transparent;
   color: var(--c-text-dim);
-  font-size: 12px;
+  font-size: 13px;
   text-decoration: none;
   white-space: nowrap;
   overflow: hidden;
@@ -377,7 +377,7 @@ body {
 
 .doc-bar h1 {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 650;
   letter-spacing: -.01em;
   color: var(--c-text);
@@ -445,7 +445,7 @@ body {
   padding: 4px 8px;
   border-radius: var(--app-radius);
   color: var(--c-text);
-  font-size: 12px;
+  font-size: 13px;
   text-decoration: none;
 }
 
@@ -531,7 +531,7 @@ body {
   height: auto !important;
   padding: 5px 12px !important;
   border-radius: var(--app-radius) !important;
-  font-size: 12px !important;
+  font-size: 13px !important;
   font-weight: 600 !important;
   letter-spacing: 0 !important;
   box-shadow: none !important;
@@ -569,7 +569,7 @@ html.dark .field-input,
   border-radius: var(--app-radius) !important;
   background: var(--c-panel) !important;
   color: var(--c-text) !important;
-  font-size: 12px !important;
+  font-size: 13px !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
 }
@@ -658,7 +658,7 @@ html.dark .dropzone { background: var(--c-panel) !important; border-color: var(-
   border-radius: var(--app-radius) !important;
   background: var(--c-accent-solid) !important;
   color: #ffffff !important;
-  font-size: 12px !important;
+  font-size: 13px !important;
   font-weight: 600 !important;
 }
 
@@ -672,7 +672,7 @@ html.dark .dropzone-cta { background: var(--c-accent) !important; }
   background: var(--c-panel) !important;
 }
 
-.file-chip-name { font-size: 12px !important; font-weight: 500 !important; }
+.file-chip-name { font-size: 13px !important; font-weight: 500 !important; }
 .file-chip-size { font-size: 11px !important; color: var(--c-text-faint) !important; }
 .file-list-hint { font-size: 11px !important; color: var(--c-text-faint) !important; }
 
@@ -693,7 +693,7 @@ html.dark .dropzone-cta { background: var(--c-accent) !important; }
   background: var(--c-panel) !important;
 }
 
-.result-card-head { font-size: 12px !important; font-weight: 600 !important; }
+.result-card-head { font-size: 13px !important; font-weight: 600 !important; }
 .result-card-check { color: var(--c-accent) !important; }
 
 .trust-line { font-size: 11px !important; color: var(--c-text-faint) !important; }
@@ -714,31 +714,31 @@ html.dark .page-header,
 html.dark .tool-form-status .surface-muted,
 html.dark .menu-pop,
 html.dark .search-result-card {
-  background: #1b1e23 !important;
-  background-color: #1b1e23 !important;
-  border-color: #2a2e35 !important;
-  color: #e6e8ec !important;
+  background: var(--c-panel) !important;
+  background-color: var(--c-panel) !important;
+  border-color: var(--c-line) !important;
+  color: var(--c-text) !important;
 }
 
 html.dark .dropzone:hover,
 html.dark .dropzone-active {
-  background: #16233c !important;
-  background-color: #16233c !important;
-  border-color: #3b82f6 !important;
+  background: var(--c-accent-soft) !important;
+  background-color: var(--c-accent-soft) !important;
+  border-color: var(--c-accent) !important;
 }
 
-html.dark .secondary-button:hover { background: #21252b !important; background-color: #21252b !important; }
-html.dark .dropzone-hint, html.dark .file-chip-size, html.dark .trust-line, html.dark .file-list-hint { color: #949ba5 !important; }
-html.dark .dropzone-title, html.dark .file-chip-name, html.dark .result-card-head { color: #e6e8ec !important; }
-html.dark .dropzone-cta, html.dark .primary-button { background: #2563eb !important; background-color: #2563eb !important; color: #ffffff !important; }
+html.dark .secondary-button:hover { background: var(--c-hover) !important; background-color: var(--c-hover) !important; }
+html.dark .dropzone-hint, html.dark .file-chip-size, html.dark .trust-line, html.dark .file-list-hint { color: var(--c-text-faint) !important; }
+html.dark .dropzone-title, html.dark .file-chip-name, html.dark .result-card-head { color: var(--c-text) !important; }
+html.dark .dropzone-cta, html.dark .primary-button { background: var(--c-accent-solid) !important; background-color: var(--c-accent-solid) !important; color: #ffffff !important; }
 
 html:not(.dark) .dropzone { background: #ffffff !important; background-color: #ffffff !important; }
 /* Solid background-color longhands on the work surfaces: contrast tooling walks
    ancestors for an effective background and cannot resolve a transparent chain. */
 html:not(.dark) .worksurface, html:not(.dark) .tool-canvas { background-color: #f1f2f4; }
-html.dark .worksurface, html.dark .tool-canvas { background-color: #0d0e10; }
+html.dark .worksurface, html.dark .tool-canvas { background-color: var(--c-bg); }
 html:not(.dark) .tool-inspector, html:not(.dark) .doc-bar, html:not(.dark) .sidebar, html:not(.dark) .menubar, html:not(.dark) .statusbar { background-color: #fbfbfc; }
-html.dark .tool-inspector, html.dark .doc-bar, html.dark .sidebar, html.dark .menubar, html.dark .statusbar { background-color: #16181c; }
+html.dark .tool-inspector, html.dark .doc-bar, html.dark .sidebar, html.dark .menubar, html.dark .statusbar { background-color: var(--c-chrome); }
 html:not(.dark) .dropzone-title, html:not(.dark) .file-chip-name, html:not(.dark) .result-card-head { color: #1b1d21 !important; }
 html:not(.dark) .dropzone-hint, html:not(.dark) .file-chip-size, html:not(.dark) .trust-line, html:not(.dark) .file-list-hint { color: #5f646c !important; }
 html:not(.dark) .secondary-button, html:not(.dark) .doc-bar .secondary-button { background: #ffffff !important; color: #1b1d21 !important; border-color: #dcdee3 !important; }
@@ -775,7 +775,7 @@ html.dark .tag-badge, html.dark .new-badge {
   border: 1px solid var(--c-line) !important;
   background: var(--c-panel) !important;
   color: var(--c-text-dim) !important;
-  font-size: 12px !important;
+  font-size: 13px !important;
   padding: 4px 9px !important;
 }
 
@@ -795,7 +795,7 @@ html.dark .tag-badge, html.dark .new-badge {
 /* Headings inside tool bodies: stop the display-weight shouting. */
 .tool-canvas h2, .tool-canvas h3, .tool-canvas h4,
 .tool-inspector h2, .tool-inspector h3, .tool-inspector h4 {
-  font-size: 12px !important;
+  font-size: 13px !important;
   font-weight: 650 !important;
   letter-spacing: 0 !important;
 }
@@ -882,7 +882,7 @@ html.dark .tag-badge, html.dark .new-badge {
   color: var(--c-text);
 }
 
-.workspace-more { margin-top: 6px; font-size: 12px; }
+.workspace-more { margin-top: 6px; font-size: 13px; }
 .workspace-more a { color: var(--c-accent); }
 
 .sidebar-foot {
@@ -938,7 +938,7 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
 }
 
 .doc-empty-title { font-size: 13px; font-weight: 650; color: var(--c-text); }
-.doc-empty-hint { font-size: 12px; color: var(--c-text-faint); max-width: 46ch; }
+.doc-empty-hint { font-size: 13px; color: var(--c-text-faint); max-width: 46ch; }
 
 .doc-thumbs {
   display: grid;
@@ -990,7 +990,7 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
   justify-content: center;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--c-text-faint);
 }
 
@@ -1039,7 +1039,7 @@ html.dark .workspace-file { background: var(--c-panel); border-color: var(--c-li
 .landing-hero { display: grid; justify-items: center; text-align: center; gap: 18px; }
 
 .landing-eyebrow {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: .1em;
   text-transform: uppercase;
