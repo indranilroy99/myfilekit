@@ -19,8 +19,11 @@ Execute these stages **in order**. Each stage is a skill — invoke it, capture 
 ## Live stage (needs a running page)
 5. **`accessibility-scan`** with the dev URL — real live-DOM WCAG 2.2 violations, each grounded to a DOM selector and `file:line`.
 
+## PDF dogfood stage (this app ships PDFs — test the real output)
+6. Generate a sample PDF from the app (export/download flow, or an existing file under the project dir). Then use the **`pdf-viewer:pdf`** connector: `open` it, and exercise `sign`, `fill-form`, and `annotate`. Confirm the generated PDF actually renders, signs, and fills correctly — not just that the UI looks right. Note any PDF that fails to open or whose form fields/signature anchors are broken.
+
 ## Verify stage
-6. **`design-review`** — final designer's-eye QA pass on the rendered app.
+7. **`design-review`** — final designer's-eye QA pass on the rendered app.
 
 ## Consolidate + fix
 - Merge every finding into **one table**, columns: `severity | source-skill | file:line | issue | proposed fix`.

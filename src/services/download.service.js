@@ -23,13 +23,17 @@ export function downloadBlob(blob, filename) {
       blob,
     },
   }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.rel = "noopener";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  // Deliberately does NOT click a link.
+  //
+  // Every one of the ~109 result paths in this app used to write a file into
+  // the user's Downloads folder the instant an operation finished — before they
+  // had seen the result, and whether or not they wanted to keep it. Redact was
+  // the worst case: it destroys content irreversibly, saved the output
+  // automatically, and then advised "verify nothing sensitive remains before
+  // sharing" about a file that was already on disk.
+  //
+  // The event above hands the result to the UI, which shows it and offers a
+  // Download the user presses. Saving a file is the user's decision.
   return { url, filename, size: blob.size || 0, mimeType: blob.type || "application/octet-stream" };
 }
 

@@ -28,7 +28,7 @@
   --app-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Light chrome */
-  --c-bg: #f1f2f4;          /* desktop behind the document */
+  --c-bg: #f8fafc;          /* cool grey behind the document */
   --c-chrome: #fbfbfc;      /* menubar / panels */
   --c-panel: #ffffff;       /* raised panel */
   --c-line: #dcdee3;
@@ -36,11 +36,13 @@
   --c-text: #1b1d21;
   --c-text-dim: #4a4f57;    /* >= 7:1 on chrome */
   --c-text-faint: #5f646c;  /* >= 4.5:1 on chrome — never lighter than this */
-  --c-accent: #4f46e5;
-  --c-accent-solid: #4f46e5;
+  /* Enterprise blue, not the framework's default indigo. Measured: #0265DC
+     carries white text at 5.30:1 and reads at 5.30:1 on white, both AA. */
+  --c-accent: #0265DC;
+  --c-accent-solid: #0265DC;
   --c-accent-fg: #ffffff;
-  --c-accent-soft: #eef0fe;
-  --c-accent-text: #3730a3;  /* accent text ON accent-soft */
+  --c-accent-soft: #eaf2fe;
+  --c-accent-text: #0b4fa8;  /* accent text ON accent-soft — 7.4:1 */
   --c-hover: #eef0f3;
   --c-active: #e3e7ee;
   --c-ok: #15803d;
@@ -81,11 +83,11 @@ html.dark {
   --c-text: #e6e8ec;
   --c-text-dim: #aeb5bf;    /* >= 7:1 on chrome */
   --c-text-faint: #949ba5;  /* >= 4.5:1 on chrome — never darker than this */
-  --c-accent: #818cf8;      /* accent text/borders ON dark surfaces */
-  --c-accent-solid: #4f46e5; /* solid fills carrying white text (~6.3:1) */
+  --c-accent: #6ba5f5;      /* accent text/borders ON dark surfaces */
+  --c-accent-solid: #0265DC; /* solid fills carrying white text (5.30:1) */
   --c-accent-fg: #ffffff;
-  --c-accent-soft: #2e3358;
-  --c-accent-text: #a5b4fc;  /* accent text ON accent-soft */
+  --c-accent-soft: #12294a;
+  --c-accent-text: #a9cbfa;  /* accent text ON accent-soft */
   --c-hover: #2e3035;
   --c-active: #35373d;
   --c-ok: #4ade80;
@@ -767,7 +769,7 @@ html.dark .dropzone-cta, html.dark .primary-button { background: var(--c-accent-
 html:not(.dark) .dropzone { background: #ffffff !important; background-color: #ffffff !important; }
 /* Solid background-color longhands on the work surfaces: contrast tooling walks
    ancestors for an effective background and cannot resolve a transparent chain. */
-html:not(.dark) .worksurface, html:not(.dark) .tool-canvas { background-color: #f1f2f4; }
+html:not(.dark) .worksurface, html:not(.dark) .tool-canvas { background-color: #f8fafc; }
 html.dark .worksurface, html.dark .tool-canvas { background-color: var(--c-bg); }
 html:not(.dark) .tool-inspector, html:not(.dark) .doc-bar, html:not(.dark) .sidebar, html:not(.dark) .menubar, html:not(.dark) .statusbar { background-color: #fbfbfc; }
 html.dark .tool-inspector, html.dark .doc-bar, html.dark .sidebar, html.dark .menubar, html.dark .statusbar { background-color: var(--c-chrome); }
@@ -1522,11 +1524,12 @@ html.dark .result-card-note { color: var(--c-text-dim) !important; }
   font-size: 12px; line-height: 1.5; color: var(--c-text-dim);
 }
 
-/* In the editor the result IS the open document — the doc bar carries Download
-   and "Edited". A second Download inside the options panel is a competing call
-   to action for the same file, so the card keeps its filename, size and the
-   tool's note, and loses the buttons. */
-.editor-panel .result-card-actions { display: none !important; }
+/* The result card keeps its actions.
+   Hiding them was safe only while downloads fired automatically; now that saving
+   is the user's decision, this is the ONLY way to get an output that is not the
+   open document — a ZIP of extracted images, a converted .docx. The two buttons
+   are distinguished by label instead: the doc bar saves the DOCUMENT, the card
+   downloads this tool's RESULT. */
 
 /* A disabled primary read as a washed-out enabled one — "Apply edits" looked
    broken rather than not-yet-available. Disabled controls now read as disabled:

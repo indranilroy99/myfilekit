@@ -212,8 +212,10 @@ export function EditorPage({ renderTool }: { renderTool: (tool: Tool) => React.R
         <span className="doc-bar-actions">
           {/* Save whatever is on screen, at any point — including after an edit,
               without hunting for the tool's own result card. */}
-          <button type="button" className="primary-button" onClick={downloadCurrent}>
-            <Download size={15} aria-hidden="true" /> Download
+          {/* Saves the open document. A tool's own output is downloaded from its
+              result card, which names the file it produced. */}
+          <button type="button" className="secondary-button" onClick={downloadCurrent}>
+            <Download size={15} aria-hidden="true" /> Save document
           </button>
           {original ? <button type="button" className="secondary-button" onClick={revertToOriginal}>
             <RotateCcw size={15} aria-hidden="true" /> Revert to original
