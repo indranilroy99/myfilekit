@@ -54,30 +54,43 @@ function ToolMetaPanel({ status, onReset, children, sends }: { status: Status; o
       });
     };
 
-    // A new file selection invalidates the previous result. Without this the
-    // card survived the change: run Redact, pick a different PDF, and the panel
-    // still offered "Done — ready to save" with the FIRST document's filename
-    // and a live Download button — one click from saving the wrong document's
-    // redaction. Thirteen tools hand-rolled a per-file reset of their own state
-    // and none could reach this card, because it is private to this component.
-    const handleFileChange = () => {
-      setDownloadReady((current) => {
-        if (current?.url) revokeDownloadUrl(current.url);
-        return null;
-      });
-    };
-
     window.addEventListener("myfilekit:download-ready", handleDownloadReady);
-    window.addEventListener("myfilekit:active-file", handleFileChange);
     return () => {
       window.removeEventListener("myfilekit:download-ready", handleDownloadReady);
-      window.removeEventListener("myfilekit:active-file", handleFileChange);
       setDownloadReady((current) => {
         if (current?.url) revokeDownloadUrl(current.url);
         return null;
       });
     };
   }, []);
+
+  /**
+   * A result is superseded by the next run, not by touching a file input.
+   *
+   * This used to clear on any `myfilekit:active-file` event, which every file
+   * control fires on every change — including a second input that has nothing to
+   * do with the output, like the certificate picker in Digital Signature. That
+   * was harmless while downloads fired automatically: the file was already on
+   * disk. Now that saving is the user's decision, wiping the card destroys the
+   * only copy of a result they have not saved yet, with no way back. Compare
+   * PDFs could lose a finished report to a stray change of the second input.
+   *
+   * The filename is printed on the card, so a stale result is visible rather
+   * than dangerous — and a new run replaces it the moment one starts.
+   */
+  const startedRef = useRef(false);
+  useEffect(() => {
+    const running = status.tone === "idle" && status.message === "Processing...";
+    if (running && !startedRef.current) {
+      startedRef.current = true;
+      setDownloadReady((current) => {
+        if (current?.url) revokeDownloadUrl(current.url);
+        return null;
+      });
+    } else if (!running) {
+      startedRef.current = false;
+    }
+  }, [status.tone, status.message]);
 
   const resetPanel = () => {
     setDownloadReady((current) => {
@@ -436,7 +449,7 @@ function usePendingHandler(onClick: () => unknown) {
 function PrimaryButton({ label, onClick, disabled = false }: { label: string; onClick: () => unknown; disabled?: boolean }) {
   const { pending, handleClick } = usePendingHandler(onClick);
   const isDownload = label.toLowerCase().startsWith("download");
-  const busyLabel = isDownload ? "Downloading…" : "Working…";
+  const busyLabel = isDownload ? "Working…" : "Working…";
   const Idle = isDownload ? Download : Zap;
 
   return (

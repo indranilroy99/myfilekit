@@ -1591,3 +1591,83 @@ html.dark .result-card-note { color: var(--c-text-dim) !important; }
 .tool-inspector p, .tool-inspector li {
   overflow-wrap: anywhere;
 }
+
+/* =========================================================================
+   Cascade repairs.
+
+   The marketing sheet carries an `html:not(.dark)` block at styles.css:2326+
+   whose selectors out-specify this system's bare classes, so the layer written
+   to replace it was losing: focused inputs painted the OLD #2563eb with a 3px
+   glow ring while this sheet's own #0265DC outline drew around it — three rings
+   and two blues on one control — and resting inputs used #d4d4d8 / #18181b
+   instead of the tokens. Matching the specificity is the repair; a design
+   system that loses the cascade to the sheet it replaced is not yet a system.
+   ========================================================================= */
+
+html:not(.dark) .field-input,
+html:not(.dark) .spotlight-search,
+html:not(.dark) .category-filter {
+  border-color: var(--c-line) !important;
+  background: var(--c-panel) !important;
+  color: var(--c-text) !important;
+}
+
+/* One focus treatment for the whole app: the outline defined once above. No
+   border recolour, no glow. */
+html:not(.dark) .field-input:focus,
+html:not(.dark) .spotlight-search:focus-within,
+html:not(.dark) .category-filter:focus-within {
+  box-shadow: none !important;
+}
+
+/* The tokens must actually paint. styles.css set body to #f5f7fa in light and
+   #09090b in dark — the latter contradicting this sheet's own "never pure
+   black" note. Only visible on overscroll, but wrong is wrong. */
+html:not(.dark), html:not(.dark) body { background: var(--c-bg) !important; color: var(--c-text) !important; }
+html.dark, html.dark body { background: var(--c-bg) !important; color: var(--c-text) !important; }
+
+/* A full-viewport decorative gradient survived on every route in both themes.
+   "No gradient decoration" is one of this system's stated invariants. */
+body::before { display: none !important; }
+
+/* One primary action per screen. "Browse files" inside the dropzone was filled
+   with the brand colour 65px from the actual primary — two accent buttons, one
+   screen. The dropzone is a target you drop onto; the tool's action is the
+   primary. */
+.dropzone-cta {
+  background: var(--c-panel) !important;
+  color: var(--c-text) !important;
+  border: 1px solid var(--c-line) !important;
+}
+.dropzone:hover .dropzone-cta { background: var(--c-hover) !important; }
+
+/* Bordered controls were overshooting the 30px row: min-height plus padding
+   plus borders resolved to 31.5px beside 30px inputs in the same column. */
+.primary-button, .secondary-button, .liquid-button, .dropzone-cta {
+  height: var(--app-control) !important;
+  min-height: var(--app-control) !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+/* The zoom label sat at 21px — under the 24px minimum target size this sheet's
+   own header cites. */
+.doc-zoom-label { min-height: 24px !important; }
+
+/* The brand colour marked 22 NEW badges on one browse screen and zero primary
+   actions. Metadata is not the brand. */
+.index-new {
+  background: var(--c-hover) !important;
+  color: var(--c-text-faint) !important;
+  border: 1px solid var(--c-line) !important;
+}
+
+/* The skip link was the only #111111 and the only 900 weight in the product. */
+.skip-link {
+  background: var(--c-accent-solid) !important;
+  color: var(--c-accent-fg) !important;
+  font-weight: 600 !important;
+  min-height: var(--app-control) !important;
+  height: auto !important;
+  border-radius: var(--app-radius) !important;
+}

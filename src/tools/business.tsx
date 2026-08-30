@@ -310,7 +310,7 @@ function PosBillingTool() {
         </div>
       ) : <p className="text-sm font-semibold text-neutral-500">{preview.error}</p>}
 
-      <PrimaryButton label="Save bill & download receipt" onClick={() => runSafely(setStatus, async () => {
+      <PrimaryButton label="Save bill and make receipt" onClick={() => runSafely(setStatus, async () => {
         const billNo = `B${String(bills.length + 1).padStart(4, "0")}`;
         const saved: any = computePosBill({
           items: cart,
@@ -412,15 +412,15 @@ function GstFilingPrepTool({ tool }: { tool: Tool }) {
         <div className="grid gap-2 sm:grid-cols-3">
           <SecondaryButton label="Download CSV" onClick={() => runSafely(setStatus, async () => {
             downloadText(gstr1SummaryCsv(requireSummary()), `${baseName}-gstr1`, "csv", "text/csv;charset=utf-8");
-            return "CSV summary downloaded.";
+            return "CSV summary ready.";
           })} />
           <SecondaryButton label="Download XLSX" onClick={() => runSafely(setStatus, async () => {
             downloadBytes(await gstr1SummaryXlsx(requireSummary()), withExtension(`${baseName}-gstr1`, "xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            return "XLSX summary downloaded.";
+            return "XLSX summary ready.";
           })} />
           <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
             downloadBytes(await gstr1SummaryPdf(requireSummary(), { sourceName: files[0]?.name }), withExtension(`${baseName}-gstr1`, "pdf"), "application/pdf");
-            return "PDF summary downloaded.";
+            return "PDF summary ready.";
           })} />
         </div>
       </div>

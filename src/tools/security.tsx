@@ -718,7 +718,7 @@ function SanitizePdfTool({ tool }: { tool: Tool }) {
           </div>
           <PrimaryButton label="Download sanitized PDF" onClick={() => runSafely(setStatus, async () => {
             downloadBytes(result.bytes, filename, "application/pdf");
-            return `${filename} downloaded.`;
+            return `${filename} is ready to save.`;
           })} />
           {status.tone === "success" && <ResultConsequenceNote>This removes active content. It cannot neutralise an exploit hidden inside an image, font or encrypted stream — for a suspicious file, check it in PDF Analyser first.</ResultConsequenceNote>}
         </>
@@ -847,7 +847,7 @@ function RemovePasswordTool({ tool }: { tool: Tool }) {
       downloadBytes(result.bytes, withExtension(`${safeFilename(file.name)}-no-password`, "pdf"), "application/pdf");
       return `Removed ${result.algorithm} encryption from ${file.name}.`;
     })} />
-    {status.tone === "success" && <ResultConsequenceNote>The copy you just downloaded opens without a password.</ResultConsequenceNote>}
+    {status.tone === "success" && <ResultConsequenceNote>The copy waiting in the result panel opens without a password. Save it somewhere you would keep the unlocked version.</ResultConsequenceNote>}
   </ToolForm>;
 }
 
@@ -866,7 +866,7 @@ function UnlockPdfTool({ tool }: { tool: Tool }) {
       const restored = listPermissions(result.permissionsBefore as Record<string, boolean>, false);
       return `Removed ${result.algorithm} owner-password restrictions from ${file.name}.\n${restored.length ? `Restored: ${restored.join(", ")}.` : "That PDF was encrypted but had no restrictions set."}`;
     })} />
-    {status.tone === "success" && <ResultConsequenceNote>The copy you downloaded has its owner-password restrictions removed — printing, copying, and editing are open to anyone who has it.</ResultConsequenceNote>}
+    {status.tone === "success" && <ResultConsequenceNote>The copy waiting in the result panel has its restrictions removed — printing, copying and editing are open to anyone who gets it.</ResultConsequenceNote>}
   </ToolForm>;
 }
 

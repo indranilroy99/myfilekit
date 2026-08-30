@@ -442,7 +442,7 @@ function EquationToImageTool() {
         logging: false,
       });
       downloadBlob(await canvasToBlob(canvas, type), withExtension("myfilekit-equation", format));
-      return `Equation image downloaded as ${format.toUpperCase()}.`;
+      return `Equation image ready as ${format.toUpperCase()}.`;
     })} />
   </ToolForm>;
 }

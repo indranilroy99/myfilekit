@@ -435,7 +435,7 @@ function TextToPdfTool() {
   const [status, setStatus] = useState(initialStatus);
   return <ToolForm status={status} onReset={() => { setText(""); setStatus(initialStatus); }}>
     <Textarea label="Text" value={text} onChange={setText} rows={14} />
-    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => { downloadBytes(await textToPdf(text), "myfilekit-text.pdf", "application/pdf"); return "PDF downloaded."; })} />
+    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => { downloadBytes(await textToPdf(text), "myfilekit-text.pdf", "application/pdf"); return "PDF ready."; })} />
   </ToolForm>;
 }
 
@@ -449,7 +449,7 @@ function MarkdownTool() {
     <PrimaryButton label="Download HTML" onClick={() => runSafely(setStatus, async () => {
       if (!markdown.trim()) throw new Error("Add Markdown before downloading.");
       downloadText(html, "markdown-preview", "html", "text/html;charset=utf-8");
-      return "HTML downloaded.";
+      return "HTML file ready.";
     })} />
   </ToolForm>;
 }
@@ -501,7 +501,7 @@ function MarkdownToPdfTool() {
     <div className="surface-card wabi-card-edge grid gap-3 p-4">{renderMarkdownPreview(markdown)}</div>
     <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
       downloadBytes(await markdownToPdf(markdown), "myfilekit-markdown.pdf", "application/pdf");
-      return "Markdown PDF downloaded.";
+      return "Markdown PDF ready.";
     })} />
   </ToolForm>;
 }
@@ -519,7 +519,7 @@ function CsvToPdfTool() {
     <Textarea label="CSV" value={csv} onChange={setCsv} rows={12} />
     <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
       downloadBytes(await csvToPdf(csv), "myfilekit-table.pdf", "application/pdf");
-      return "CSV table PDF downloaded.";
+      return "CSV table PDF ready.";
     })} />
   </ToolForm>;
 }

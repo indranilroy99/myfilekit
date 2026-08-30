@@ -895,7 +895,7 @@ function ReflowEditorTool({ tool }: { tool: Tool }) {
         </div>
       )}
 
-      <PrimaryButton label="Reflow & download PDF" disabled={!extracted || !blocks.some((block) => block.text.trim())} onClick={download} />
+      <PrimaryButton label="Reflow PDF" disabled={!extracted || !blocks.some((block) => block.text.trim())} onClick={download} />
 
       <ResultConsequenceNote>Text is rebuilt on fresh pages, so untouched paragraphs may shift and images are not carried over. To change one line without moving anything, use Edit PDF Text.</ResultConsequenceNote>
     </ToolForm>
@@ -2052,7 +2052,7 @@ function FillPdfFormTool({ tool }: { tool: Tool }) {
           <p key={field.name} className="text-xs font-semibold text-neutral-500">{field.name}: unsupported field type (left unchanged).</p>
         ))}
         <Checkbox label="Flatten form after filling (values become permanent)" checked={flatten} onChange={setFlatten} />
-        <PrimaryButton label="Fill & download PDF" onClick={() => runSafely(setStatus, async () => {
+        <PrimaryButton label="Fill PDF" onClick={() => runSafely(setStatus, async () => {
           const [file] = validateFiles(files, tool.file);
           const bytes = await fillPdfForm(file, values, flatten);
           downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-filled`, "pdf"), "application/pdf");
@@ -2191,7 +2191,7 @@ function ExtractImagesTool({ tool }: { tool: Tool }) {
             <PrimaryButton label="Download ZIP" onClick={() => runSafely(setStatus, async () => {
               const zipped = buildExtractionZip(result);
               downloadBytes(zipped, zipName, "application/zip");
-              return `${zipName} downloaded (${result.images.length + result.attachments.length} file${result.images.length + result.attachments.length === 1 ? "" : "s"}).`;
+              return `${zipName} ready to save (${result.images.length + result.attachments.length} file${result.images.length + result.attachments.length === 1 ? "" : "s"}).`;
             })} />
           )}
         </div>
@@ -3189,7 +3189,7 @@ function TagPdfTool({ tool }: { tool: Tool }) {
               )}
             </div>
 
-            <PrimaryButton label="Make accessible & download" onClick={remediate} />
+            <PrimaryButton label="Make accessible" onClick={remediate} />
           </>
         )}
       </div>
@@ -3252,7 +3252,7 @@ function HtmlToPdfTool() {
       await doc.fonts?.ready?.catch(() => {});
       const canvas = await html2canvas(doc.body, { backgroundColor: "#ffffff", scale: 2, useCORS: false, logging: false });
       downloadBytes(await canvasToPdf(canvas), "myfilekit-html.pdf", "application/pdf");
-      return "HTML PDF downloaded.";
+      return "HTML PDF ready.";
     })} />
   </ToolForm>;
 }
@@ -3575,7 +3575,7 @@ function OcrPdfTool({ tool }: { tool: Tool }) {
         if (searchable && bytes) downloadBytes(bytes, withExtension(`${base}-ocr`, "pdf"), "application/pdf");
         if (!recognised) return `No text was recognised in ${pages} page${pages === 1 ? "" : "s"}. Try a higher DPI or a cleaner scan.`;
         return searchable && bytes
-          ? `Read ${pages} page${pages === 1 ? "" : "s"} and downloaded a searchable PDF.`
+          ? `Read ${pages} page${pages === 1 ? "" : "s"}. Searchable PDF ready to save.`
           : `Read ${pages} page${pages === 1 ? "" : "s"}.`;
       }
 
@@ -3929,7 +3929,7 @@ function WorkflowBuilderTool({ tool }: { tool: Tool }) {
 
     {output && <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
       downloadBytes(output.bytes, output.filename, "application/pdf");
-      return `${output.filename} downloaded.`;
+      return `${output.filename} is ready to save.`;
     })} />}
   </ToolForm>;
 }
@@ -3967,12 +3967,12 @@ function BatchProcessTool({ tool }: { tool: Tool }) {
       const [only] = result.outputs;
       const ext = only.name.toLowerCase().split(".").pop() || "";
       downloadBytes(only.bytes, only.name, batchMime[ext] || "application/octet-stream");
-      return `${only.name} downloaded.`;
+      return `${only.name} is ready to save.`;
     }
     const zipped = zipOutputs(result.outputs);
     const zipName = withExtension(`myfilekit-batch-${definition.id}`, "zip");
     downloadBytes(zipped, zipName, "application/zip");
-    return `${zipName} downloaded (${result.outputs.length} files).`;
+    return `${zipName} ready to save (${result.outputs.length} files).`;
   });
 
   return <ToolForm status={status} onReset={reset}>
@@ -4118,11 +4118,11 @@ function BatchWorkflowTool({ tool }: { tool: Tool }) {
     if (result.outputs.length === 1) {
       const [only] = result.outputs;
       downloadBytes(only.bytes, only.name, "application/pdf");
-      return `${only.name} downloaded.`;
+      return `${only.name} is ready to save.`;
     }
     const zipName = withExtension("myfilekit-batch-workflow", "zip");
     downloadBytes(zipOutputs(result.outputs), zipName, "application/zip");
-    return `${zipName} downloaded (${result.outputs.length} files).`;
+    return `${zipName} ready to save (${result.outputs.length} files).`;
   });
 
   return <ToolForm status={status} onReset={reset}>

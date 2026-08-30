@@ -67,7 +67,7 @@ function ApiPlaygroundTool({ tool }: { tool: Tool }) {
         <p className="font-black">Live example — merge PDFs through the API</p>
         <p className="text-sm font-semibold leading-6 text-neutral-600">Pick two or more PDFs. This calls <code className="font-mono">window.MyFileKit.pdf.merge(files)</code> — the exact API a developer would call — and downloads the merged bytes, proving the API works end to end.</p>
         <FileControl accept="application/pdf" multiple files={files} setFiles={setFiles} label="Choose PDFs to merge" />
-        <PrimaryButton label="Run MyFileKit.pdf.merge & download" onClick={() => runSafely(setStatus, async () => {
+        <PrimaryButton label="Run the merge example" onClick={() => runSafely(setStatus, async () => {
           const valid = validateFiles(files, tool.file);
           if (valid.length < 2) throw new Error("Choose at least two PDFs to merge.");
           const api = (typeof window !== "undefined" && (window as any).MyFileKit) || MyFileKit;
