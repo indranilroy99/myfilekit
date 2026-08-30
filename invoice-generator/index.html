@@ -263,6 +263,13 @@
       grid-column: 1 / -1;
     }
 
+    .field-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
     label {
       color: var(--muted);
       font-size: 11px;
@@ -1674,6 +1681,21 @@
       }
     }
 
+    /* Capture-only, applied for the moment the PDF is rendered.
+       html2canvas lays the copy out in a fixed 1440px off-screen window, so the
+       responsive rules above cannot reach it - except for ::before / ::after,
+       whose content it reads from THIS document. Those two phone-only rules would
+       otherwise be baked into the PDF whenever the window happens to be narrow:
+       the stacked "Qty / Rate / Amount" cell labels, and a missing sidebar panel.
+       Undo exactly those, nothing else. */
+    .invoice.is-exporting td::before {
+      content: none;
+    }
+
+    .invoice.is-exporting.layout-sidebar::before {
+      display: block;
+    }
+
     @media print {
       body {
         background: #fff;
@@ -1724,6 +1746,7 @@
           <button class="btn btn-ghost" id="downloadJsonBtn" type="button">Download JSON</button>
           <button class="btn btn-ghost" id="resetBtn" type="button">Reset</button>
         </div>
+        <p class="field-note">Download PDF saves the invoice as a picture, so your client cannot select or copy the invoice number or bank details from it. For a PDF with selectable text, use Print / PDF and choose "Save as PDF".</p>
         <div class="export-ready" id="exportReady" hidden>
           <p>
             Export ready
@@ -1995,6 +2018,7 @@
               <option value="freelancer">Freelancer / Individual</option>
               <option value="company">Company / Agency</option>
             </select>
+            <p class="field-note">Fill in both Your Name and Company Name and the invoice prints both. This only sets which one leads: Company / Agency puts the company on the first line.</p>
           </div>
           <div class="field full">
             <label for="senderName">Your Name</label>
@@ -2007,6 +2031,7 @@
           <div class="field full">
             <label for="companyName">Company Name</label>
             <input id="companyName" data-bind="companyName">
+            <p class="field-note">Prints alongside your name. Leave it empty for a personal invoice.</p>
           </div>
           <div class="field full">
             <label for="companyMeta">Address / Tax Details</label>
@@ -3071,6 +3096,34 @@
         .trim();
     }
 
+    // >>> export-geometry (pure; extracted by tests/core.test.js)
+    // A4 in PDF points.
+    const PDF_PAGE_WIDTH_PT = 595.28;
+    const PDF_PAGE_HEIGHT_PT = 841.89;
+    // The invoice is always laid out at this CSS width and captured at this fixed
+    // pixel scale, whatever the window is doing, so the exported document is the
+    // same at 390px as at 1920px. 920 CSS px * 2 across A4 is ~223 dpi.
+    const EXPORT_WIDTH_PX = 920;
+    const EXPORT_SCALE = 2;
+    // Size of the off-screen window html2canvas lays the capture copy out in.
+    // Wide enough that the 1020px and 720px responsive rules never apply to it.
+    const EXPORT_WINDOW_WIDTH_PX = 1440;
+    const EXPORT_WINDOW_HEIGHT_PX = 1400;
+    // One A4 page measured in those same CSS pixels.
+    const EXPORT_PAGE_HEIGHT_PX = EXPORT_WIDTH_PX * (PDF_PAGE_HEIGHT_PT / PDF_PAGE_WIDTH_PT);
+    // Sub-pixel layout rounding and hairline borders can push a sheet a fraction
+    // past the page box. That is not content, so it must not buy a second page.
+    const EXPORT_OVERFLOW_TOLERANCE_PX = 2;
+
+    // Pages an invoice of this rendered height needs. Height alone decides it,
+    // because the export width - and so the page box - is fixed.
+    function exportPageCount(contentHeightPx) {
+      const height = Number(contentHeightPx);
+      if (!Number.isFinite(height) || height <= EXPORT_PAGE_HEIGHT_PX) return 1;
+      return Math.max(1, Math.ceil((height - EXPORT_OVERFLOW_TOLERANCE_PX) / EXPORT_PAGE_HEIGHT_PX));
+    }
+    // <<< export-geometry
+
     async function buildInvoicePreviewPdfBytes() {
       if (!window.PDFLib) throw new Error("PDF engine is not loaded.");
       const canvas = await renderInvoicePreviewCanvas();
@@ -3084,21 +3137,25 @@
 
       // A4 page in PDF points. Keep a fixed A4 width and height and paginate the
       // tall source canvas into page-height bands so long invoices stay readable.
-      const pageWidth = 595.28;
-      const pageHeight = 841.89;
+      const pageWidth = PDF_PAGE_WIDTH_PT;
+      const pageHeight = PDF_PAGE_HEIGHT_PT;
       // Points-per-source-pixel once the canvas width is scaled to the page width.
       const scale = pageWidth / canvas.width;
-      // Source-canvas pixels that fit on one full A4 page at that scale.
-      const bandHeightPx = Math.max(1, Math.floor(pageHeight / scale));
+      // Source-canvas pixels covered by exactly one A4 page, kept fractional: the
+      // old `Math.floor` shortened every band, so a canvas one page tall spilled a
+      // few rows onto a second, blank page.
+      const bandHeightPx = canvas.width * (pageHeight / pageWidth);
       const totalHeightPx = canvas.height;
-      const pageCount = Math.max(1, Math.ceil(totalHeightPx / bandHeightPx));
+      // Page count from the captured height in CSS pixels, so it uses the same
+      // hairline tolerance the layout does and sub-pixel slop buys no blank page.
+      const pageCount = exportPageCount(totalHeightPx / EXPORT_SCALE);
 
       const sliceCanvas = document.createElement("canvas");
       const sliceCtx = sliceCanvas.getContext("2d");
 
       for (let i = 0; i < pageCount; i++) {
-        const sourceY = i * bandHeightPx;
-        const sliceHeightPx = Math.min(bandHeightPx, totalHeightPx - sourceY);
+        const sourceY = Math.round(i * bandHeightPx);
+        const sliceHeightPx = Math.min(Math.round(bandHeightPx), totalHeightPx - sourceY);
         if (sliceHeightPx <= 0) break;
 
         // Copy just this vertical band of the tall canvas onto a scratch canvas.
@@ -3135,11 +3192,30 @@
       const invoice = document.getElementById("invoicePreview");
       if (!invoice) throw new Error("Invoice preview is not ready.");
       if (document.fonts && document.fonts.ready) await document.fonts.ready;
+      // html2canvas resolves ::before / ::after from the live element, so the live
+      // element has to be in export dress while it clones. See `.is-exporting`.
+      invoice.classList.add("is-exporting");
+      try {
+        return await captureInvoice(invoice);
+      } finally {
+        invoice.classList.remove("is-exporting");
+      }
+    }
+
+    function captureInvoice(invoice) {
       return window.html2canvas(invoice, {
-        backgroundColor: null,
+        backgroundColor: "#ffffff",
         logging: false,
-        scale: Math.min(3, Math.max(2, window.devicePixelRatio || 1)),
+        // Fixed capture resolution. This used to follow the device pixel ratio, so
+        // the same invoice came out at a different dpi on different machines.
+        scale: EXPORT_SCALE,
         useCORS: false,
+        // html2canvas lays the capture copy out in an off-screen iframe of this
+        // size and measures it there, so the responsive @media rules resolve at a
+        // fixed desktop width instead of the real window width. Without this a
+        // 390px window exported the squashed phone layout at ~89 dpi.
+        windowWidth: EXPORT_WINDOW_WIDTH_PX,
+        windowHeight: EXPORT_WINDOW_HEIGHT_PX,
         onclone: (clonedDocument) => {
           const clonedInvoice = clonedDocument.getElementById("invoicePreview");
           if (!clonedInvoice) return;
@@ -3147,8 +3223,29 @@
             node.removeAttribute("contenteditable");
             node.removeAttribute("tabindex");
           });
+          applyExportLayout(clonedInvoice);
         }
       });
+    }
+
+    // Pins the capture copy to a constant width and strips the screen-only chrome.
+    //
+    // Width is the whole fix for the blank second page. The sheet's `min-height`
+    // is a fixed 1180px with no relation to A4, so it only fits one page while the
+    // sheet is wide enough for A4 to be taller than that - past 834px. The sheet is
+    // `min(100%, 920px)`, so any window narrower than ~1336px rendered it below
+    // that and every invoice, however short, overflowed onto a second page.
+    //
+    // Height is deliberately left alone. html2canvas freezes ::before / ::after
+    // geometry at the live element's used height, so forcing a different height on
+    // the copy tore layout-sidebar's tint panel short of the page.
+    function applyExportLayout(node) {
+      node.style.width = `${EXPORT_WIDTH_PX}px`;
+      node.style.minWidth = `${EXPORT_WIDTH_PX}px`;
+      node.style.maxWidth = "none";
+      node.style.margin = "0";
+      node.style.borderRadius = "0";
+      node.style.boxShadow = "none";
     }
 
     async function exportInvoicePdf() {
@@ -3177,8 +3274,10 @@
       document.querySelectorAll("[data-bind]").forEach((input) => {
         const key = input.dataset.bind;
         input.addEventListener("input", () => {
+          const previous = state[key];
           state[key] = input.type === "number" ? numeric(input.value) : cleanText(input.value, longTextFields.includes(key) ? MAX_TEXT_LENGTH : MAX_SHORT_TEXT_LENGTH);
           if (key === "paymentLink") state[key] = cleanUrlText(state[key]);
+          if (key === "companyName") revealCompanyName(previous);
           if (key === "senderType") {
             syncSenderVisibility();
             render(true);
@@ -3570,6 +3669,17 @@
       }
     }
 
+    // The Company Name field starts hidden, which is right while it is empty and
+    // wrong the instant it is not: anything typed there simply never reached the
+    // invoice. Filling the field in turns it on. A later, deliberate flick of the
+    // Company Name toggle still wins, because this only fires on empty -> filled.
+    function revealCompanyName(previousValue) {
+      if (String(previousValue || "").trim() || !state.companyName.trim()) return;
+      state.visible.companyName = true;
+      syncStaticVisibleControls();
+      renderFieldToggles();
+    }
+
     function applyTemplate(index) {
       const template = templates[clampIndex(index, templates.length)];
       state.templateIndex = clampIndex(index, templates.length);
@@ -3912,14 +4022,16 @@
         .toUpperCase();
     }
 
+    // Both names print when both are filled. Sender Type only chooses the order -
+    // a company invoice leads with the company, a freelancer leads with the person.
+    // It used to choose which of the two survived, so a name or a company the user
+    // had typed was dropped from the invoice with nothing said about it.
     function senderDisplayName() {
-      if (state.senderType === "company") {
-        return state.visible.companyName && state.companyName.trim() ? state.companyName : state.senderName;
-      }
-      if (state.visible.companyName && state.companyName.trim()) {
-        return `${state.senderName}\n${state.companyName}`;
-      }
-      return state.senderName || state.companyName || "Your Name";
+      const name = String(state.senderName || "").trim();
+      const company = state.visible.companyName === false ? "" : String(state.companyName || "").trim();
+      if (!company) return name || "Your Name";
+      if (!name || name === company) return company;
+      return state.senderType === "company" ? `${company}\n${name}` : `${name}\n${company}`;
     }
 
     function optionalHasContent(key) {

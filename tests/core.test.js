@@ -253,6 +253,135 @@ test("invoice defaults are neutral and drafts are not persisted", () => {
   assert.match(invoiceSource, /Private session/);
 });
 
+const readInvoiceSource = () => fs.readFileSync(new URL("../invoice-generator/index.html", import.meta.url), "utf8");
+
+// The export geometry is marked off in the invoice's inline script so it can be
+// exercised here as plain functions, without driving a browser.
+const invoiceExportGeometry = () => {
+  const source = readInvoiceSource();
+  const start = source.indexOf("// >>> export-geometry");
+  const end = source.indexOf("// <<< export-geometry");
+  assert.ok(start >= 0 && end > start, "export-geometry block missing from invoice-generator/index.html");
+  return new Function(`${source.slice(start, end)}
+    return { PDF_PAGE_WIDTH_PT, PDF_PAGE_HEIGHT_PT, EXPORT_WIDTH_PX, EXPORT_SCALE,
+      EXPORT_WINDOW_WIDTH_PX, EXPORT_WINDOW_HEIGHT_PX, EXPORT_PAGE_HEIGHT_PX,
+      EXPORT_OVERFLOW_TOLERANCE_PX, exportPageCount };`)();
+};
+
+const invoiceSenderDisplayName = (state) => {
+  const source = readInvoiceSource();
+  const start = source.indexOf("function senderDisplayName()");
+  assert.ok(start >= 0, "senderDisplayName missing from invoice-generator/index.html");
+  const body = source.slice(start, source.indexOf("\n    }", start) + 6);
+  return new Function("state", `${body}
+    return senderDisplayName();`)(state);
+};
+
+test("a one-page invoice exports as exactly one page", () => {
+  const geometry = invoiceExportGeometry();
+  const source = readInvoiceSource();
+
+  // The export page box is A4 at the fixed export width - 920px across A4's
+  // 595.28pt x 841.89pt - not whatever height the on-screen sheet happens to be.
+  assert.equal(Math.round(geometry.EXPORT_PAGE_HEIGHT_PX), 1301);
+
+  // The regression: `.invoice` carries a screen-only `min-height` that has nothing
+  // to do with A4. While it was taller than the page box the default invoice, with
+  // no content near the bottom, still spilled onto a second, near-blank page.
+  const sheetMinHeights = [...source.matchAll(/\.invoice[^{}]*\{[^}]*?min-height:\s*(\d+)px/gs)].map((match) => Number(match[1]));
+  assert.ok(sheetMinHeights.length >= 1, "expected the invoice sheet to declare a min-height");
+  for (const minHeight of sheetMinHeights) {
+    assert.equal(geometry.exportPageCount(minHeight), 1, `.invoice min-height ${minHeight}px must still fit one export page`);
+  }
+
+  // Bands are a whole A4 page of source pixels. The old `Math.floor` made every
+  // band a pixel or two short, which by itself spilled a blank trailing page.
+  assert.match(source, /const bandHeightPx = canvas\.width \* \(pageHeight \/ pageWidth\)/);
+  // Page count comes from the one helper exercised below, not from ad-hoc maths.
+  assert.match(source, /const pageCount = exportPageCount\(totalHeightPx \/ EXPORT_SCALE\)/);
+
+  // Short content, an exactly-full page, and sub-pixel slop all stay on one page.
+  assert.equal(geometry.exportPageCount(1), 1);
+  assert.equal(geometry.exportPageCount(600), 1);
+  assert.equal(geometry.exportPageCount(geometry.EXPORT_PAGE_HEIGHT_PX), 1);
+  assert.equal(geometry.exportPageCount(geometry.EXPORT_PAGE_HEIGHT_PX + geometry.EXPORT_OVERFLOW_TOLERANCE_PX), 1);
+  assert.equal(geometry.exportPageCount(0), 1);
+  assert.equal(geometry.exportPageCount(Number.NaN), 1);
+
+  // Line items that genuinely overflow must still paginate.
+  assert.equal(geometry.exportPageCount(geometry.EXPORT_PAGE_HEIGHT_PX + 40), 2);
+  assert.equal(geometry.exportPageCount(geometry.EXPORT_PAGE_HEIGHT_PX * 2), 2);
+  assert.equal(geometry.exportPageCount(geometry.EXPORT_PAGE_HEIGHT_PX * 3), 3);
+  assert.equal(geometry.exportPageCount(geometry.EXPORT_PAGE_HEIGHT_PX * 7 + 500), 8);
+});
+
+test("invoice export layout is fixed and does not follow the browser window", () => {
+  const geometry = invoiceExportGeometry();
+  const source = readInvoiceSource();
+
+  assert.equal(geometry.EXPORT_WIDTH_PX, 920);
+  assert.equal(geometry.EXPORT_SCALE, 2);
+
+  // The off-screen window the capture is laid out in must clear every responsive
+  // breakpoint, or a narrow browser window leaks the phone layout into the PDF.
+  const breakpoints = [...source.matchAll(/@media \(max-width:\s*(\d+)px\)/g)].map((match) => Number(match[1]));
+  assert.ok(breakpoints.length >= 2);
+  for (const breakpoint of breakpoints) {
+    assert.ok(geometry.EXPORT_WINDOW_WIDTH_PX > breakpoint, `export window must clear the ${breakpoint}px breakpoint`);
+  }
+
+  const capture = source.slice(source.indexOf("function captureInvoice("), source.indexOf("function applyExportLayout("));
+  assert.match(capture, /windowWidth: EXPORT_WINDOW_WIDTH_PX/);
+  assert.match(capture, /windowHeight: EXPORT_WINDOW_HEIGHT_PX/);
+  assert.match(capture, /scale: EXPORT_SCALE/);
+  // Capture resolution used to follow devicePixelRatio, so the same invoice came
+  // out at ~89 dpi in a phone-sized window and ~223 dpi on a desktop.
+  assert.doesNotMatch(capture, /devicePixelRatio|innerWidth|clientWidth/);
+
+  // The copy is forced to the fixed width rather than inheriting the screen width.
+  const layout = source.slice(source.indexOf("function applyExportLayout("));
+  assert.match(layout, /node\.style\.width = `\$\{EXPORT_WIDTH_PX\}px`/);
+  assert.match(layout, /node\.style\.maxWidth = "none"/);
+
+  // html2canvas resolves ::before / ::after against the live page even though it
+  // lays the copy out in the fixed window, so the phone-only pseudo rules have to
+  // be cancelled for the duration of the capture.
+  assert.match(source, /\.invoice\.is-exporting td::before \{\s*content: none;/);
+  assert.match(source, /invoice\.classList\.add\("is-exporting"\)/);
+  assert.match(source, /invoice\.classList\.remove\("is-exporting"\)/);
+});
+
+test("both sender names survive when the user fills in both", () => {
+  const both = { senderName: "Aisha Rahman", companyName: "Northlight Studio", visible: { companyName: true } };
+
+  // Sender Type chooses the order, never which one is thrown away.
+  assert.equal(invoiceSenderDisplayName({ ...both, senderType: "freelancer" }), "Aisha Rahman\nNorthlight Studio");
+  assert.equal(invoiceSenderDisplayName({ ...both, senderType: "company" }), "Northlight Studio\nAisha Rahman");
+
+  // One field alone still prints alone, in either mode, with no duplication.
+  assert.equal(invoiceSenderDisplayName({ senderName: "Aisha Rahman", companyName: "", visible: {}, senderType: "company" }), "Aisha Rahman");
+  assert.equal(invoiceSenderDisplayName({ senderName: "", companyName: "Northlight Studio", visible: {}, senderType: "freelancer" }), "Northlight Studio");
+  assert.equal(invoiceSenderDisplayName({ senderName: "Northlight Studio", companyName: "Northlight Studio", visible: {}, senderType: "company" }), "Northlight Studio");
+  assert.equal(invoiceSenderDisplayName({ senderName: "", companyName: "", visible: {}, senderType: "freelancer" }), "Your Name");
+
+  // Turning the Company Name field off is still honoured - it is an explicit act.
+  assert.equal(invoiceSenderDisplayName({ ...both, visible: { companyName: false }, senderType: "freelancer" }), "Aisha Rahman");
+
+  const source = readInvoiceSource();
+  // Typing into an empty Company Name reveals it rather than dropping it silently.
+  assert.match(source, /function revealCompanyName\(previousValue\)/);
+  assert.match(source, /if \(key === "companyName"\) revealCompanyName\(previous\)/);
+  // And the panel explains the relationship where the two fields are entered.
+  assert.match(source, /the invoice prints both/);
+  assert.match(source, /Prints alongside your name/);
+});
+
+test("invoice discloses that the downloaded PDF is an image, not text", () => {
+  const source = readInvoiceSource();
+  assert.match(source, /Download PDF saves the invoice as a picture/);
+  assert.match(source, /cannot select or copy/);
+});
+
 test("every visible tool has a concrete renderer", () => {
   const appSource = readAppSource();
   for (const tool of tools) {
