@@ -699,6 +699,7 @@ html.dark .dropzone { background: var(--c-panel) !important; border-color: var(-
 .result-card-check { color: var(--c-accent) !important; }
 
 .trust-line { font-size: 11px !important; color: var(--c-text-faint) !important; }
+.trust-line-sends { font-weight: 600 !important; }
 
 /* Dark-theme surfaces stated literally.
    The legacy sheet carries !important white/near-white backgrounds for several
@@ -743,6 +744,14 @@ html:not(.dark) .tool-inspector, html:not(.dark) .doc-bar, html:not(.dark) .side
 html.dark .tool-inspector, html.dark .doc-bar, html.dark .sidebar, html.dark .menubar, html.dark .statusbar { background-color: var(--c-chrome); }
 html:not(.dark) .dropzone-title, html:not(.dark) .file-chip-name, html:not(.dark) .result-card-head { color: #1b1d21 !important; }
 html:not(.dark) .dropzone-hint, html:not(.dark) .file-chip-size, html:not(.dark) .trust-line, html:not(.dark) .file-list-hint { color: #5f646c !important; }
+
+/* The "this tool sends something" line must not read as the quiet reassurance it
+   replaces. Matched at the same specificity as the two .trust-line theme rules
+   above and placed after them, so it wins the cascade on order rather than by
+   piling on another !important. Measured against their own panel background:
+   5.42:1 on #fff, 7.05:1 on the dark panel. */
+html:not(.dark) .trust-line-sends { color: #9a5b08 !important; }
+html.dark .trust-line-sends { color: #e6ad52 !important; }
 html:not(.dark) .secondary-button, html:not(.dark) .doc-bar .secondary-button { background: #ffffff !important; color: #1b1d21 !important; border-color: #dcdee3 !important; }
 html.dark .secondary-button, html.dark .doc-bar .secondary-button { color: #e6e8ec !important; }
 

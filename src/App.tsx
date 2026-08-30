@@ -391,7 +391,12 @@ function SideBar({ hash }: { hash: string }) {
           </>
         ) : null}
       </div>
-      <p className="sidebar-foot">Files are processed here, never uploaded.</p>
+      {/* Same rule as the tool panel's badge: the blanket claim is only printed
+          where it holds. NETWORK_NOTES is the one list of tools that touch the
+          network, so the sidebar, the status bar and the badge cannot drift. */}
+      <p className="sidebar-foot">
+        {NETWORK_NOTES[activeToolId] ? "This tool sends data off your device." : "Files are processed here, never uploaded."}
+      </p>
     </nav>
   );
 }

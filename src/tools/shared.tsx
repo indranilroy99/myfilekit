@@ -2,7 +2,7 @@
 // more than one tool module (and by the app shell). Kept free of tool-specific
 // logic so it stays small — this module loads with the entry chunk.
 import { useEffect, useId, useRef, useState } from "react";
-import { CheckCircle2, ChevronDown, ChevronUp, Download, GripVertical, Eye, Printer, ShieldCheck, Loader2, Upload, X, Zap } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronUp, Download, GripVertical, Eye, Printer, Radio, ShieldCheck, Loader2, Upload, X, Zap } from "lucide-react";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { tools } from "../registry/tools.registry.js";
 import { formatBytes } from "../utils/format.js";
@@ -39,7 +39,7 @@ function printDownloadUrl(url: string) {
   document.body.appendChild(frame);
 }
 
-function ToolMetaPanel({ status, onReset, children }: { status: Status; onReset: () => void; children?: React.ReactNode }) {
+function ToolMetaPanel({ status, onReset, children, sends }: { status: Status; onReset: () => void; children?: React.ReactNode; sends?: string }) {
   const [downloadReady, setDownloadReady] = useState<DownloadReady | null>(null);
   const canReview = downloadReady ? /^(application\/pdf|application\/json|image\/|text\/)/.test(downloadReady.mimeType) : false;
   const canPrint = downloadReady ? /^(application\/pdf|image\/|text\/html)/.test(downloadReady.mimeType) : false;
@@ -111,7 +111,18 @@ function ToolMetaPanel({ status, onReset, children }: { status: Status; onReset:
         </div>
       ) : null}
       {children}
-      {downloadReady ? null : (
+      {/*
+        The blanket promise is only printed where it is true. On a tool that
+        sends something, the same slot carries what leaves instead — a product
+        whose whole pitch is one sentence cannot afford to print that sentence
+        above a send button.
+      */}
+      {downloadReady ? null : sends ? (
+        <p className="trust-line trust-line-sends">
+          <Radio size={14} aria-hidden="true" />
+          <span>{sends}</span>
+        </p>
+      ) : (
         <p className="trust-line">
           <ShieldCheck size={14} aria-hidden="true" />
           <span>Runs entirely in your browser — your files never leave this device.</span>
@@ -122,13 +133,23 @@ function ToolMetaPanel({ status, onReset, children }: { status: Status; onReset:
   );
 }
 
-function ToolForm({ children, status, onReset }: { children: React.ReactNode; status: Status; onReset: () => void }) {
+/**
+ * `sends` names what this tool puts on the network, for the handful of tools
+ * that put anything there at all. Omitted — the case for ~99 of 105 tools — the
+ * panel shows the local-only badge.
+ *
+ * It is a prop rather than a lookup because the claim has to be impossible to
+ * get wrong by default: a new networked tool that forgets to pass it is a
+ * visible bug in its own file, not a silent false statement inherited from a
+ * shared component.
+ */
+function ToolForm({ children, status, onReset, sends }: { children: React.ReactNode; status: Status; onReset: () => void; sends?: string }) {
   return (
     <div className="tool-form-grid">
       <div className="tool-form-actions">
         {children}
       </div>
-      <ToolMetaPanel status={status} onReset={onReset} />
+      <ToolMetaPanel status={status} onReset={onReset} sends={sends} />
     </div>
   );
 }

@@ -8223,3 +8223,41 @@ test("scans and handwriting go through the same A4 geometry", () => {
   // The old bug: canvas pixels used directly as the page box.
   assert.doesNotMatch(body, /addPage\(\[canvas\.width, canvas\.height\]\)/);
 });
+
+// --- The no-upload claim is only printed where it is true ---------------------
+
+test("no tool that sends data prints the local-only promise", () => {
+  const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const toolSource = readAppSource();
+
+  // The status bar already knows which tools touch the network. That list is the
+  // authority; the badge must agree with it.
+  const block = appSource.slice(appSource.indexOf("const NETWORK_NOTES"), appSource.indexOf("};", appSource.indexOf("const NETWORK_NOTES")));
+  const networked = [...block.matchAll(/"([a-z0-9-]+)":/g)].map((m) => m[1]);
+  assert.ok(networked.length >= 6, `expected NETWORK_NOTES to list the networked tools, got ${networked.length}`);
+
+  // Every networked tool must resolve to a component whose ToolForm declares `sends`.
+  const sendsCount = (toolSource.match(/<ToolForm\s+sends="/g) || []).length;
+  assert.equal(sendsCount, networked.length, `NETWORK_NOTES lists ${networked.length} networked tools but ${sendsCount} pass sends= to ToolForm`);
+
+  // The panel must choose between the two lines, never print the promise regardless.
+  const shared = fs.readFileSync(new URL("../src/tools/shared.tsx", import.meta.url), "utf8");
+  assert.match(shared, /downloadReady \? null : sends \?/);
+  assert.match(shared, /trust-line-sends/);
+  // Guard the exact regression: the promise must sit in the else branch of `sends`.
+  const promise = "your files never leave this device";
+  const promiseAt = shared.indexOf(promise);
+  const branchAt = shared.indexOf("downloadReady ? null : sends ?");
+  assert.ok(branchAt >= 0 && promiseAt > branchAt, "the local-only promise must be gated behind the sends check");
+});
+
+test("each sends= line says what leaves, not that nothing does", () => {
+  const toolSource = readAppSource();
+  const declared = [...toolSource.matchAll(/<ToolForm\s+sends="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(declared.length >= 6);
+  for (const line of declared) {
+    assert.ok(/\b(Sends|Uploads)\b/.test(line), `sends= copy must name the transfer: ${line}`);
+    assert.ok(!/never leave/i.test(line), `sends= copy must not repeat the local-only promise: ${line}`);
+    assert.ok(line.length > 40, `sends= copy must say where it goes: ${line}`);
+  }
+});

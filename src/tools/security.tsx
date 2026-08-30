@@ -1099,7 +1099,7 @@ function RequestSignatureTool({ tool }: { tool: Tool }) {
     setStatus(initialStatus);
   };
 
-  return <ToolForm status={status} onReset={reset}>
+  return <ToolForm sends="Uploads the whole PDF to the signing backend you configure. Off until you set one up." status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
       Send a PDF to other people to sign, through a signing backend <strong>you</strong> deploy. Unlike every other tool in MyFileKit, this one <strong>uploads your PDF off this device</strong> — to the backend you configure below and nowhere else. It is <strong>off by default</strong>: until you configure a backend, nothing is uploaded and no envelope is created. This is a scaffold client, not a hosted service; see reference-backend/ and docs/TIER3-OPTIONAL-BACKEND.md to stand one up.
     </div>

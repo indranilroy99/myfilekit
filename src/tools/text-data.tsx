@@ -167,7 +167,7 @@ function SummarizePdfTool({ tool }: { tool: Tool }) {
     setStatus(initialStatus);
   };
 
-  return <ToolForm status={status} onReset={reset}>
+  return <ToolForm sends="Sends the document text to the AI endpoint you configure. Off until you set one up." status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
       Extracts the PDF's text, then ranks its sentences with a local TextRank graph over TF-IDF similarity and returns the most central ones, skipping near-duplicates. This is an <strong>extractive</strong> summary: every sentence is copied verbatim from the document, so nothing is invented — but it will not read like freshly written prose.
     </div>
@@ -275,7 +275,7 @@ function ChatWithPdfTool({ tool }: { tool: Tool }) {
     setStatus(initialStatus);
   };
 
-  return <ToolForm status={status} onReset={reset}>
+  return <ToolForm sends="Sends the matching passages to the AI endpoint you configure. Off until you set one up." status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
       By default this is a <strong>local search</strong>, not a chatbot. It indexes the PDF page by page with BM25 and returns the passages that best match your question, with page numbers and matched terms highlighted. It does not write prose and it never invents an answer — you read the source text and judge it yourself.
     </div>
@@ -362,7 +362,7 @@ function TranslatePdfTool({ tool }: { tool: Tool }) {
     setFiles([]); setText(""); setTranslation(""); setProgress(null); setStatus(initialStatus);
   };
 
-  return <ToolForm status={status} onReset={reset}>
+  return <ToolForm sends="Sends the document text to the AI endpoint you configure. Off until you set one up." status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
       Extracting the PDF's text is <strong>100% local</strong>. Translation is not: it needs your own OpenAI-compatible endpoint, configured below and <strong>off by default</strong>. Until you turn one on, nothing is sent and no translation happens — this tool does not pretend to translate offline. Long documents are split into ordered chunks that fit the model, translated one at a time, and reassembled.
     </div>

@@ -358,7 +358,7 @@ function P2pShareTool({ tool }: { tool: Tool }) {
     setStatus(initialStatus);
   };
 
-  return <ToolForm status={status} onReset={reset}>
+  return <ToolForm sends="Sends your files directly to the other device you connect to. No server sees them." status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge grid gap-2 p-4 text-sm font-semibold leading-6 text-neutral-600">
       <p>Files travel straight from one browser to the other over an encrypted WebRTC data channel. There is no server in the middle and nothing is uploaded — but you have to hand your peer one code yourself, because MyFileKit has no backend to do it for you.</p>
       <p className="text-neutral-500">Works best when both devices are on the same network. Up to {Math.round(MAX_TRANSFER_BYTES / (1024 * 1024))} MB per file, {maxFileCount} files per session, sent one after another.</p>
@@ -754,7 +754,7 @@ function WhiteboardTool() {
     setStatus(initialStatus);
   };
 
-  return <ToolForm status={status} onReset={reset}>
+  return <ToolForm sends="Sends your drawing directly to the people you connect to. No server sees it." status={status} onReset={reset}>
     <div ref={wrapperRef} className="surface-card wabi-card-edge relative w-full overflow-hidden rounded-3xl border-dashed border-neutral-300" style={{ aspectRatio: "3 / 2" }}>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" aria-label="Whiteboard drawing surface" />
     </div>
