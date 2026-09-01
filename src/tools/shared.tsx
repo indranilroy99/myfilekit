@@ -241,6 +241,54 @@ function ToolNotes({ summary, children }: { summary: string; children: React.Rea
   );
 }
 
+
+/**
+ * The two ways to convert an Office document, with what each costs.
+ *
+ * A browser can only rasterise these formats, so the local path produces a
+ * picture with no selectable text — measured at 0 extractable characters. The
+ * server runs LibreOffice and returns real text (88 characters on the same
+ * file). Both are legitimate: one keeps the file on the device, the other
+ * produces a usable document.
+ *
+ * Shared rather than repeated per tool, because the thing that must not drift
+ * is the disclosure. If the copy explaining an upload lived in three places it
+ * would eventually say three different things, and one of them would be wrong.
+ */
+function ServerConvertChoice({
+  serverAvailable,
+  serverProbed,
+  onServer,
+  onLocal,
+  localWarning,
+}: {
+  serverAvailable: boolean;
+  serverProbed: boolean;
+  onServer: () => void;
+  onLocal: () => void;
+  localWarning: string;
+}) {
+  if (!serverAvailable) {
+    return (
+      <>
+        <PrimaryButton label="Convert to PDF" onClick={onLocal} />
+        <ToolNotes summary="About the output">
+          <li>{localWarning}</li>
+          {serverProbed ? <li>Our converter, which returns real selectable text, is unreachable right now.</li> : null}
+        </ToolNotes>
+      </>
+    );
+  }
+  return (
+    <div className="convert-choice">
+      <PrimaryButton label="Convert on our server" onClick={onServer} />
+      <p className="convert-choice-note">Real, selectable text. Your file is uploaded to our converter and deleted when the request finishes.</p>
+      <SecondaryButton label="Convert here instead" onClick={onLocal} />
+      <p className="convert-choice-note">Nothing is uploaded. {localWarning}</p>
+    </div>
+  );
+}
+
 function ResultConsequenceNote({ children }: { children: React.ReactNode }) {
   return (
     <div role="note" className="grid gap-1 rounded-lg border border-[var(--line)] bg-[var(--paper-soft)] p-4 text-sm font-semibold leading-6 text-neutral-600">
@@ -581,4 +629,4 @@ function imageExt(type: string) {
 
 
 export type { Tool, Status, DownloadReady };
-export { initialStatus, printDownloadUrl, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, acceptHint, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, usePendingHandler, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, ToolNotes, canvasToBlob, dataUrlToBlob, requireOutput, copyText, imageExt };
+export { initialStatus, printDownloadUrl, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, acceptHint, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, usePendingHandler, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, ToolNotes, ServerConvertChoice, canvasToBlob, dataUrlToBlob, requireOutput, copyText, imageExt };

@@ -27,7 +27,7 @@ import { pdfToDocx, pdfToEpub, pdfToHtml, pdfToXlsx } from "../services/export.s
 import { serverCapabilities, convertOfficeOnServer } from "../services/server.service.js";
 import { DEFAULT_OCR_LANG, OCR_ENGINE_SIZE_LABEL, OCR_LANGUAGES, mergeSearchablePdfPages, ocrImages, ocrPdf, terminateOcrWorker } from "../services/ocr.service.js";
 import { getSpeechSynthesis, loadSpeechVoices, speechSynthesisSupported, splitTextForSpeech } from "../services/audio.service.js";
-import { initialStatus, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, ToolNotes, canvasToBlob, requireOutput, copyText } from "./shared";
+import { initialStatus, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, ToolNotes, ServerConvertChoice, canvasToBlob, requireOutput, copyText } from "./shared";
 import type { Tool } from "./shared";
 
 type PdfOutput = { url: string; blob: Blob; filename: string; pages: number; sourceName: string };
@@ -3412,18 +3412,28 @@ async function renderHtmlToCanvas(bodyHtml: string, { widthPx = 794, scale = 2 }
  * default to be inherited from a build flag, and the product's central claim
  * only survives if the user is the one who decides.
  */
-function WordToPdfTool({ tool }: { tool: Tool }) {
-  const [files, setFiles] = useState<File[]>([]);
-  const [server, setServer] = useState<{ available: boolean; office: boolean } | null>(null);
-  const [status, setStatus] = useState(initialStatus);
 
+/**
+ * Whether the conversion server is reachable and has a document converter.
+ *
+ * Probed once per tool mount; serverCapabilities() caches per session so this
+ * does not hit the network on every render. An unreachable server is a normal
+ * state, so this never throws and every caller still works locally.
+ */
+function useConversionServer() {
+  const [probe, setProbe] = useState<{ available: boolean; office: boolean } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    serverCapabilities().then((probe) => { if (!cancelled) setServer(probe); }).catch(() => {});
+    serverCapabilities().then((next) => { if (!cancelled) setProbe(next); }).catch(() => { if (!cancelled) setProbe({ available: false, office: false }); });
     return () => { cancelled = true; };
   }, []);
+  return { probe, canUseServer: Boolean(probe?.available && probe?.office), probed: probe !== null };
+}
 
-  const canUseServer = Boolean(server?.available && server?.office);
+function WordToPdfTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  const { canUseServer, probed } = useConversionServer();
 
   const convertLocally = () => runSafely(setStatus, async () => {
     const [file] = validateFiles(files, tool.file);
@@ -3446,60 +3456,78 @@ function WordToPdfTool({ tool }: { tool: Tool }) {
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
     <p className="tool-lead">Turn a Word document into a PDF.</p>
     <FileControl accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" files={files} setFiles={setFiles} label="Choose or drop a Word file" />
-    {canUseServer ? (
-      <div className="convert-choice">
-        <PrimaryButton label="Convert on our server" onClick={convertOnServer} />
-        <p className="convert-choice-note">Real, selectable text. Your file is uploaded to our converter and deleted when the request finishes.</p>
-        <SecondaryButton label="Convert here instead" onClick={convertLocally} />
-        <p className="convert-choice-note">Nothing is uploaded, but the text becomes part of a picture — not selectable or searchable.</p>
-      </div>
-    ) : (
-      <>
-        <PrimaryButton label="Convert to PDF" onClick={convertLocally} />
-        <ToolNotes summary="About the output">
-          <li>Converting in the browser turns the text into a picture, so it cannot be selected or searched.</li>
-          <li>Legacy .doc files need re-saving as .docx first.</li>
-          {server && !server.available ? <li>Our converter, which produces real text, is unreachable right now.</li> : null}
-        </ToolNotes>
-      </>
-    )}
+    <ServerConvertChoice
+      serverAvailable={canUseServer}
+      serverProbed={probed}
+      onServer={convertOnServer}
+      onLocal={convertLocally}
+      localWarning="Converting here turns the text into a picture, so it cannot be selected or searched."
+    />
   </ToolForm>;
 }
 
 function ExcelToPdfTool({ tool }: { tool: Tool }) {
   const [files, setFiles] = useState<File[]>([]);
   const [status, setStatus] = useState(initialStatus);
+  const { canUseServer, probed } = useConversionServer();
+
+  const convertOnServer = () => runSafely(setStatus, async () => {
+    const [file] = validateFiles(files, tool.file);
+    setStatus({ tone: "idle", message: "Uploading and converting…" });
+    const bytes = await convertOfficeOnServer(file);
+    downloadBytes(bytes, withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
+    return "Converted on our server. The figures are real, selectable text. Your file was deleted when the request finished.";
+  });
+
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
-    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Reads .xlsx, .xls, or .csv locally with SheetJS, lays every sheet out as a table, then renders those pages to the PDF. Wide sheets are scaled to fit the page width, so very large tables render smaller.
-    </div>
-    <div className="surface-card wabi-card-edge grid gap-2 border-[var(--warning)] p-4 text-sm font-semibold leading-6 text-neutral-600">
-      <p className="text-xs font-bold uppercase text-[var(--warning)]">The output is a picture of your sheet, not selectable text</p>
-      <p className="text-[var(--foreground)]">The table is laid out and then <strong>turned into an image</strong>, so the PDF contains images rather than text. It looks exactly like your spreadsheet, but nobody can select, copy, search, or extract the figures from it — and the file is much larger than a text PDF of the same data.</p>
-      <p>If you need a ledger whose rows stay real, selectable text, paste the sheet's CSV into <a className="underline" href="#csv-to-pdf-tool">CSV to PDF</a> instead. To turn a turned into an image PDF back into searchable text afterwards, run <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a>.</p>
-    </div>
+    <p className="tool-lead">Turn a spreadsheet into a PDF, one table per sheet.</p>
     <FileControl accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" files={files} setFiles={setFiles} label="Choose or drop a spreadsheet" />
-    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
-      const [file] = validateFiles(files, tool.file);
-      setStatus({ tone: "idle", message: "Reading workbook…" });
-      const sheets = await readWorkbookSheets(file);
-      setStatus({ tone: "idle", message: `Rendering ${sheets.length} sheet${sheets.length === 1 ? "" : "s"}…` });
-      const canvas = await renderHtmlToCanvas(sheetsToHtml(sheets));
-      downloadBytes(await canvasToPdf(canvas), withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
-      return `Converted ${sheets.length} sheet${sheets.length === 1 ? "" : "s"} to PDF as a rendered image — the pages have no selectable text. For selectable rows, use CSV to PDF.`;
-    })} />
+    <ServerConvertChoice
+      serverAvailable={canUseServer}
+      serverProbed={probed}
+      onServer={convertOnServer}
+      onLocal={() => runSafely(setStatus, async () => {
+        const [file] = validateFiles(files, tool.file);
+        setStatus({ tone: "idle", message: "Reading workbook…" });
+        const sheets = await readWorkbookSheets(file);
+        setStatus({ tone: "idle", message: `Rendering ${sheets.length} sheet${sheets.length === 1 ? "" : "s"}…` });
+        const canvas = await renderHtmlToCanvas(sheetsToHtml(sheets));
+        downloadBytes(await canvasToPdf(canvas), withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
+        return `Converted ${sheets.length} sheet${sheets.length === 1 ? "" : "s"}. The pages have no selectable text — for figures you can copy, use CSV to PDF.`;
+      })}
+      localWarning="Converting here turns your figures into a picture, so nobody can select, copy or search them."
+    />
+    {/* A real link, not just a mention: this is the tool that gives selectable
+        figures, and a test pins the cross-reference because sending someone to
+        the right tool is the most useful thing this page can do. */}
+    <ToolNotes summary="If you need figures you can copy">
+      <li>Paste the sheet's CSV into <a className="underline" href="#csv-to-pdf-tool">CSV to PDF</a> — it produces real, selectable text.</li>
+      <li>To make an existing picture-PDF searchable, run <a className="underline" href="#ocr-pdf-tool">OCR / Searchable PDF</a>.</li>
+    </ToolNotes>
   </ToolForm>;
 }
 
 function PowerpointToPdfTool({ tool }: { tool: Tool }) {
   const [files, setFiles] = useState<File[]>([]);
   const [status, setStatus] = useState(initialStatus);
+  const { canUseServer, probed } = useConversionServer();
+
+  const convertOnServer = () => runSafely(setStatus, async () => {
+    const [file] = validateFiles(files, tool.file);
+    setStatus({ tone: "idle", message: "Uploading and converting…" });
+    const bytes = await convertOfficeOnServer(file);
+    downloadBytes(bytes, withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
+    return "Converted on our server, which lays out the slides properly — charts and shapes included. Your file was deleted when the request finished.";
+  });
+
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
-    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Best-effort .pptx conversion: slide text and images are extracted and positioned locally, one PDF page per slide. Complex layouts, charts, SmartArt, and animations are approximated. Legacy .ppt files aren't supported.
-    </div>
+    <p className="tool-lead">Turn a PowerPoint deck into a PDF, one page per slide.</p>
     <FileControl accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" files={files} setFiles={setFiles} label="Choose or drop a PowerPoint file" />
-    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
+    <ServerConvertChoice
+      serverAvailable={canUseServer}
+      serverProbed={probed}
+      onServer={convertOnServer}
+      onLocal={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       setStatus({ tone: "idle", message: "Reading slides…" });
       const { slideWidthEmu, slideHeightEmu, slides } = await pptxToSlides(file);
@@ -3512,8 +3540,10 @@ function PowerpointToPdfTool({ tool }: { tool: Tool }) {
         canvases.push(await renderHtmlToCanvas(html, { widthPx, scale: 2 }));
       }
       downloadBytes(await canvasesToPdf(canvases), withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
-      return `Converted ${slides.length} slide${slides.length === 1 ? "" : "s"} to PDF.`;
-    })} />
+      return `Converted ${slides.length} slide${slides.length === 1 ? "" : "s"}. Charts, SmartArt and complex layouts are approximated.`;
+      })}
+      localWarning="Converting here approximates the layout — charts, SmartArt and animations are not reproduced, and the text becomes part of a picture."
+    />
   </ToolForm>;
 }
 
