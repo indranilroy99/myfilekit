@@ -182,8 +182,13 @@ export async function canvasToPdf(canvas) {
     context.fillRect(0, 0, slice.width, height);
     context.drawImage(canvas, 0, offset, canvas.width, height, 0, 0, canvas.width, height);
     const image = await pdf.embedJpg(await canvasJpegBytes(slice));
-    const page = pdf.addPage([A4.width, height * scale]);
-    page.drawImage(image, { x: 0, y: 0, width: A4.width, height: height * scale });
+    // Every page is a full A4, with a short final slice drawn at the TOP and
+    // white below it. Sizing the page to the remainder produced stub pages —
+    // measured 8.268 x 0.807 inches, blank — which then read as "the converter
+    // added an empty page".
+    const drawHeight = height * scale;
+    const page = pdf.addPage([A4.width, A4.height]);
+    page.drawImage(image, { x: 0, y: A4.height - drawHeight, width: A4.width, height: drawHeight });
   }
   return pdf.save();
 }

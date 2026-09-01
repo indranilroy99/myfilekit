@@ -3244,15 +3244,17 @@ function HtmlToPdfTool() {
         className="surface-card wabi-card-edge h-80 w-full rounded-3xl bg-white"
       />
     </div>
-    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
+    <PrimaryButton label="Make PDF" onClick={() => runSafely(setStatus, async () => {
       if (!html.trim()) throw new Error("Paste some HTML first.");
-      const html2canvas = getHtml2Canvas();
-      const doc = frameRef.current?.contentDocument;
-      if (!doc?.body) throw new Error("The preview is not ready yet. Wait a moment and try again.");
-      await doc.fonts?.ready?.catch(() => {});
-      const canvas = await html2canvas(doc.body, { backgroundColor: "#ffffff", scale: 2, useCORS: false, logging: false });
+      // Rendered OFF-SCREEN at a fixed page width, not captured from the preview
+      // above. Capturing the preview meant the PDF followed the browser window:
+      // the same input produced 3 pages (two of them blank) in a narrow window
+      // and 1 page at 1280px, and reported "Done" every time. The helper next
+      // door already lays out at a fixed 794px, which is A4 at 96dpi — Word,
+      // Excel and eBook to PDF have always used it.
+      const canvas = await renderHtmlToCanvas(html);
       downloadBytes(await canvasToPdf(canvas), "myfilekit-html.pdf", "application/pdf");
-      return "HTML PDF ready.";
+      return "PDF ready to save.";
     })} />
   </ToolForm>;
 }
@@ -3280,15 +3282,25 @@ async function renderHtmlToCanvas(bodyHtml: string, { widthPx = 794, scale = 2 }
     const doc = iframe.contentDocument;
     if (!doc?.body) throw new Error("Could not prepare the document for rendering.");
     await doc.fonts?.ready?.catch(() => {});
-    const height = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight, 1);
+    // Collapse the frame BEFORE measuring. It is created 1200px tall so the
+    // document has room to lay out, but the body then reports at least that
+    // height — so a one-line document measured ~1200px and produced a second,
+    // blank A4 page. Collapsing first means scrollHeight is the content's own
+    // height, and the capture is exactly as tall as the content.
+    iframe.style.height = "1px";
+    void doc.body.offsetHeight;
+    const height = Math.max(doc.body.scrollHeight, 1);
     iframe.style.height = `${height}px`;
+    void doc.body.offsetHeight;
     return await html2canvas(doc.body, {
       backgroundColor: "#ffffff",
       scale,
       useCORS: false,
       logging: false,
       width: widthPx,
+      height,
       windowWidth: widthPx,
+      windowHeight: height,
     });
   } finally {
     iframe.remove();
