@@ -7,7 +7,7 @@ import { categories, categoryGroups, tools } from "./registry/tools.registry.js"
 import { stashWorkspaceFiles, clearWorkspaceFilesUnless, setActiveTool } from "./lib/workspace-handoff";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import LandingPage from "./components/LandingPage";
-import EditorPage from "./components/EditorPage";
+import EditorPage, { editorKindFor } from "./components/EditorPage";
 import DocumentView from "./components/DocumentView";
 import { categoryRoute, routeForHash, SELECT_MODE_BY_TOOL } from "./lib/routing";
 import { filterTools, searchableText } from "./lib/search.js";
@@ -1364,6 +1364,22 @@ function CategoryPage({ category }: { category: string }) {
   );
 }
 
+
+/**
+ * Preview for an image being worked on. Its own component so the object URL is
+ * created and revoked with the element rather than leaking on every file change.
+ */
+function ImageStage({ file }: { file: File }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    const next = URL.createObjectURL(file);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [file]);
+  if (!url) return null;
+  return <div className="editor-image-stage"><img src={url} alt={`Preview of ${file.name}`} /></div>;
+}
+
 function ToolPage({ tool }: { tool: Tool }) {
   const related = tools.filter((item: Tool) => item.category === tool.category && item.id !== tool.id);
   const Icon = iconForTool(tool);
@@ -1472,14 +1488,18 @@ function ToolPage({ tool }: { tool: Tool }) {
         */}
         {previewable ? (
           <section className="tool-document" aria-label={activeFile ? `Preview of ${activeFile.name}` : "Document preview"}>
-            {activeFile
-              ? <DocumentView file={activeFile} selectMode={SELECT_MODE_BY_TOOL[tool.id] || null} regions={regions} />
-              : (
-                <div className="doc-view doc-view-empty">
-                  <p className="doc-empty-title">Your document appears here</p>
-                  <p className="doc-empty-hint">Choose a file on the left to see it.</p>
-                </div>
-              )}
+            {!activeFile ? (
+              <div className="doc-view doc-view-empty">
+                <p className="doc-empty-title">Your document appears here</p>
+                <p className="doc-empty-hint">Choose a file on the left to see it.</p>
+              </div>
+            ) : editorKindFor(activeFile.name) === "image" ? (
+              // DocumentView renders PDF pages only, so an image needs its own
+              // stage — the same one the editor uses.
+              <ImageStage file={activeFile} />
+            ) : (
+              <DocumentView file={activeFile} selectMode={SELECT_MODE_BY_TOOL[tool.id] || null} regions={regions} />
+            )}
           </section>
         ) : null}
         <aside className="tool-inspector" aria-label="Related tools">

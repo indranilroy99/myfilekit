@@ -98,7 +98,11 @@ function FileHashTool({ tool }: { tool: Tool }) {
   return <ToolForm status={status} onReset={() => { setFiles([]); setOutput(""); setStatus(initialStatus); }}>
     <FileControl accept="*/*" files={files} setFiles={setFiles} />
     <Textarea label="SHA-256" value={output} onChange={setOutput} rows={3} />
-    <PrimaryButton label="Generate SHA-256" onClick={() => runSafely(setStatus, async () => { const [file] = validateFiles(files, tool.file); setOutput(await sha256File(file)); return `Hashed ${file.name}.`; })} />
+    <div className="flex flex-wrap gap-2">
+      <PrimaryButton label="Generate SHA-256" onClick={() => runSafely(setStatus, async () => { const [file] = validateFiles(files, tool.file); setOutput(await sha256File(file)); return `Hashed ${file.name}.`; })} />
+      {/* A checksum exists to be pasted somewhere else. */}
+      <SecondaryButton label="Copy hash" onClick={() => runSafely(setStatus, async () => { await copyText(requireOutput(output)); return "Hash copied to the clipboard."; })} />
+    </div>
   </ToolForm>;
 }
 

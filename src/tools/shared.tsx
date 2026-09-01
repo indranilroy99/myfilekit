@@ -307,9 +307,19 @@ function FileControl({ accept, multiple = false, files, setFiles, label }: { acc
   // PDF and the .p12 in Digital Signature) must not have one clear the other.
   useEffect(() => {
     const first = files[0];
-    const isPdf = Boolean(first && (first.type === "application/pdf" || /\.pdf$/i.test(first.name)));
+    // Announce PDFs AND images. This used to publish `null` for anything that
+    // was not a PDF, so an image tool showed "Choose a file on the left to see
+    // it" beside a document pane while the image was loaded and the tool was
+    // already operating on it. The editor could always preview images; the tool
+    // routes could not, for no reason other than this gate.
+    const previewable = Boolean(first && (
+      first.type === "application/pdf"
+      || /\.pdf$/i.test(first.name)
+      || first.type.startsWith("image/")
+      || /\.(png|jpe?g|webp)$/i.test(first.name)
+    ));
     window.dispatchEvent(new CustomEvent("myfilekit:active-file", {
-      detail: { source: controlId, file: isPdf ? first : null },
+      detail: { source: controlId, file: previewable ? first : null },
     }));
   }, [files, controlId]);
 

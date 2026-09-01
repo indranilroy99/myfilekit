@@ -669,6 +669,9 @@ function UrlCodecTool() {
     <div className="flex flex-wrap gap-2">
       <PrimaryButton label="Encode URL text" onClick={() => runSafely(setStatus, async () => { if (!input.trim()) throw new Error("Enter text to encode."); setOutput(urlEncode(input)); return "URL text encoded."; })} />
       <SecondaryButton label="Decode URL text" onClick={() => runSafely(setStatus, async () => { setOutput(urlDecode(input)); return "URL text decoded."; })} />
+      {/* Every other tool in this file offers Copy. Without it the result is
+          only reachable by selecting a textarea by hand. */}
+      <SecondaryButton label="Copy output" onClick={() => runSafely(setStatus, async () => { await copyText(requireOutput(output)); return "Copied to the clipboard."; })} />
     </div>
   </ToolForm>;
 }
