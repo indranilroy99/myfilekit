@@ -626,7 +626,17 @@ function CsvToJsonTool() {
     <Textarea label="CSV input" value={input} onChange={setInput} rows={9} />
     <Textarea label="JSON output" value={output} onChange={setOutput} rows={10} />
     <div className="flex flex-wrap gap-2">
-      <PrimaryButton label="Convert" onClick={() => runSafely(setStatus, async () => { setOutput(JSON.stringify(csvToJson(input), null, 2)); return "CSV converted."; })} />
+      <PrimaryButton label="Convert" onClick={() => runSafely(setStatus, async () => {
+        const rows = csvToJson(input);
+        setOutput(JSON.stringify(rows, null, 2));
+        // Say when the CSV was ragged. Silently keeping the extras would be
+        // better than silently dropping them, but the user still needs to know
+        // their header row does not describe every column.
+        const extras = (rows as unknown as { extraColumns?: string[] }).extraColumns || [];
+        return extras.length
+          ? `Converted ${rows.length} row${rows.length === 1 ? "" : "s"}. Some rows had more cells than the header, kept as ${extras.join(", ")} — check your header row.`
+          : `Converted ${rows.length} row${rows.length === 1 ? "" : "s"}.`;
+      })} />
       <SecondaryButton label="Copy" onClick={() => runSafely(setStatus, async () => { await copyText(requireOutput(output)); return "Copied."; })} />
       <SecondaryButton label="Download JSON" onClick={() => runSafely(setStatus, async () => { downloadText(requireOutput(output), "converted", "json", "application/json;charset=utf-8"); return "JSON ready to download."; })} />
     </div>

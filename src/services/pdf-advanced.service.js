@@ -683,3 +683,100 @@ export async function createFormPdf(file, fields, options = {}) {
     throw latin1Error(error);
   }
 }
+
+// --- Blank-page detection -----------------------------------------------------
+//
+// Scanned documents routinely carry blank versos and separator sheets, and
+// nobody wants to find them by hand across 200 pages. Detection is pure and
+// unit-tested; the caller supplies each page's measured ink coverage so the
+// rasterising half stays in the browser where it belongs.
+
+/**
+ * Which 1-based pages count as blank.
+ *
+ * `coverage` is the fraction of non-white pixels per page, 0..1. The default
+ * threshold is deliberately low: a scanner's speckle and a JPEG's ringing put a
+ * genuinely empty page a little above zero, while a page with even one line of
+ * text is an order of magnitude higher.
+ *
+ * @param {number[]} coverage per-page ink fraction, page 1 first
+ * @param {{ threshold?: number }} [options]
+ * @returns {number[]} 1-based page numbers judged blank
+ */
+export function blankPagesFromCoverage(coverage, { threshold = 0.002 } = {}) {
+  if (!Array.isArray(coverage)) return [];
+  const limit = Number.isFinite(threshold) && threshold >= 0 ? threshold : 0.002;
+  const blank = [];
+  coverage.forEach((value, index) => {
+    const ink = Number(value);
+    if (Number.isFinite(ink) && ink <= limit) blank.push(index + 1);
+  });
+  return blank;
+}
+
+/**
+ * Pages to KEEP after removing the blank ones — never all of them.
+ *
+ * A document that is entirely blank would otherwise produce a zero-page PDF,
+ * which most readers refuse to open. The caller is told nothing was removed
+ * rather than handed a file that cannot be opened.
+ */
+export function pagesAfterRemovingBlanks(pageCount, blankPages) {
+  const total = Number(pageCount);
+  if (!Number.isInteger(total) || total < 1) return { keep: [], removed: [] };
+  const blank = new Set((Array.isArray(blankPages) ? blankPages : []).filter((n) => n >= 1 && n <= total));
+  const keep = [];
+  for (let page = 1; page <= total; page += 1) if (!blank.has(page)) keep.push(page);
+  if (!keep.length) return { keep: Array.from({ length: total }, (_, i) => i + 1), removed: [] };
+  return { keep, removed: [...blank].sort((a, b) => a - b) };
+}
+
+// --- Remove embedded images ---------------------------------------------------
+
+/**
+ * Drops every image XObject's pixels from a PDF, keeping the text and layout.
+ *
+ * Useful twice over: it is the cheapest real size reduction that does NOT
+ * rasterise the text (unlike Compress PDF), and it removes photographs from a
+ * document you are about to share. The image slots are replaced with a 1x1
+ * transparent pixel rather than unlinked, because a dangling /XObject reference
+ * makes some readers refuse the page.
+ *
+ * @returns {Promise<{bytes: Uint8Array, removed: number, before: number, after: number}>}
+ */
+export async function removePdfImages(file) {
+  const { PDFDocument, PDFName, PDFRawStream, PDFDict } = getPdfLib();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const pdf = await PDFDocument.load(bytes, { throwOnInvalidObject: false, ignoreEncryption: false });
+  const ctx = pdf.context;
+  let removed = 0;
+
+  for (const page of pdf.getPages()) {
+    const resources = ctx.lookup(page.node.get(PDFName.of("Resources")));
+    if (!resources || typeof resources.get !== "function") continue;
+    const xobjects = ctx.lookup(resources.get(PDFName.of("XObject")));
+    if (!xobjects || typeof xobjects.entries !== "function") continue;
+    for (const [, ref] of xobjects.entries()) {
+      const stream = ctx.lookup(ref);
+      if (!(stream instanceof PDFRawStream)) continue;
+      const dict = stream.dict;
+      if (!(dict instanceof PDFDict)) continue;
+      const subtype = dict.get(PDFName.of("Subtype"));
+      if (!subtype || String(subtype) !== "/Image") continue;
+      // A 1x1 transparent grey pixel: valid image data, effectively nothing.
+      ctx.assign(ref, ctx.flateStream(""));
+      const replaced = ctx.lookup(ref);
+      if (replaced && replaced.dict && typeof replaced.dict.set === "function") {
+        replaced.dict.set(PDFName.of("Type"), PDFName.of("XObject"));
+        replaced.dict.set(PDFName.of("Subtype"), PDFName.of("Image"));
+        replaced.dict.set(PDFName.of("Width"), ctx.obj(1));
+        replaced.dict.set(PDFName.of("Height"), ctx.obj(1));
+        replaced.dict.set(PDFName.of("ColorSpace"), PDFName.of("DeviceGray"));
+        replaced.dict.set(PDFName.of("BitsPerComponent"), ctx.obj(8));
+      }
+      removed += 1;
+    }
+  }
+  const out = await pdf.save();
+  return { bytes: out, removed, before: bytes.byteLength, after: out.byteLength };
+}

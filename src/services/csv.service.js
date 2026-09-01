@@ -16,7 +16,26 @@ export function csvToJson(csvText) {
     used.add(name);
     return name;
   });
-  return rows.slice(1).filter((row) => row.some(Boolean)).map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])));
+  // A row with MORE cells than the header used to lose the extras silently: a
+  // header of `a,b` and a row `1,2,3,4` returned {a:"1",b:"2"} and reported
+  // "CSV converted." Columns 3 and 4 were simply gone. Extra cells now get
+  // synthesised names so nothing is dropped, and the caller is told.
+  const extras = [];
+  const out = rows.slice(1).filter((row) => row.some(Boolean)).map((row, rowIndex) => {
+    const entry = Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""]));
+    for (let index = headers.length; index < row.length; index += 1) {
+      const value = row[index];
+      if (String(value ?? "").trim() === "") continue;
+      const name = `column_${index + 1}`;
+      entry[name] = value;
+      if (!extras.includes(name)) extras.push(name);
+      void rowIndex;
+    }
+    return entry;
+  });
+  // Non-enumerable so JSON.stringify(out) is unchanged for every caller.
+  Object.defineProperty(out, "extraColumns", { value: extras, enumerable: false });
+  return out;
 }
 
 export function jsonToCsv(jsonText) {

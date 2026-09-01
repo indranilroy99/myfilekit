@@ -8627,3 +8627,78 @@ test("the checker fails a document whose text is written twice", async () => {
   // The whole point: this must move the verdict, not sit in the list unnoticed.
   assert.ok(doubled.summary.fail > clean.summary.fail, "the failure must reach the tally the verdict is built from");
 });
+
+test("csvToJson keeps cells the header does not name, and says so", () => {
+  // A row with more cells than the header used to lose the extras silently and
+  // report success: header `a,b` with row `1,2,3,4` returned only a and b.
+  const rows = csvToJson("a,b\n1,2,3,4\n5,6");
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].a, "1");
+  assert.equal(rows[0].b, "2");
+  assert.equal(rows[0].column_3, "3", "the third cell must survive");
+  assert.equal(rows[0].column_4, "4", "so must the fourth");
+  assert.deepEqual(rows.extraColumns, ["column_3", "column_4"], "and the caller must be able to report it");
+  // A well-formed CSV is untouched and reports nothing.
+  const clean = csvToJson("a,b\n1,2");
+  assert.deepEqual(clean, [{ a: "1", b: "2" }]);
+  assert.deepEqual(clean.extraColumns, []);
+  // Blank extra cells are not worth inventing a column for.
+  const trailing = csvToJson("a,b\n1,2,");
+  assert.deepEqual(trailing.extraColumns, []);
+  // JSON.stringify must be unaffected — extraColumns is non-enumerable.
+  assert.equal(JSON.stringify(csvToJson("a,b\n1,2")), '[{"a":"1","b":"2"}]');
+});
+
+// --- Gaps closed against Stirling-PDF's tool set -----------------------------
+
+test("blank pages are detected from ink coverage, with scanner speckle tolerated", async () => {
+  const { blankPagesFromCoverage, pagesAfterRemovingBlanks } = await import("../src/services/pdf-advanced.service.js");
+  // page 1 has text, 2 is empty, 3 is a scanner's speckle, 4 has text.
+  assert.deepEqual(blankPagesFromCoverage([0.031, 0, 0.0004, 0.052]), [2, 3]);
+  // A page with even one line of text is an order of magnitude above the floor.
+  assert.deepEqual(blankPagesFromCoverage([0.003]), []);
+  assert.deepEqual(blankPagesFromCoverage([]), []);
+  assert.deepEqual(blankPagesFromCoverage(null), []);
+  // Threshold is adjustable for aggressive scans.
+  assert.deepEqual(blankPagesFromCoverage([0.004], { threshold: 0.01 }), [1]);
+});
+
+test("removing blank pages never produces a zero-page PDF", async () => {
+  const { pagesAfterRemovingBlanks } = await import("../src/services/pdf-advanced.service.js");
+  assert.deepEqual(pagesAfterRemovingBlanks(4, [2, 3]), { keep: [1, 4], removed: [2, 3] });
+  // Every page blank: keep them all and report nothing removed, rather than
+  // hand back a file most readers refuse to open.
+  assert.deepEqual(pagesAfterRemovingBlanks(3, [1, 2, 3]), { keep: [1, 2, 3], removed: [] });
+  // Out-of-range page numbers are ignored, not trusted.
+  assert.deepEqual(pagesAfterRemovingBlanks(2, [0, 2, 9]), { keep: [1], removed: [2] });
+  assert.deepEqual(pagesAfterRemovingBlanks(0, [1]), { keep: [], removed: [] });
+});
+
+test("removePdfImages strips image pixels and keeps the text", async () => {
+  const { PDFDocument, StandardFonts } = globalThis.window.PDFLib;
+  const { removePdfImages } = await import("../src/services/pdf-advanced.service.js");
+
+  // A page carrying both text and a real embedded JPEG.
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([300, 300]);
+  page.drawText("Keep this text", { x: 20, y: 260, size: 14, font });
+  // Minimal 8x8 grey JPEG, built by pdf-lib's own encoder path via a PNG.
+  const png = Buffer.from(
+    "89504e470d0a1a0a0000000d4948445200000008000000080802000000" +
+    "4b6d29dc0000001849444154789c63fcffff3f0303030313032323030300" +
+    "00d0a0f2f8f1a5d0000000049454e44ae426082", "hex");
+  const image = await doc.embedPng(new Uint8Array(png));
+  page.drawImage(image, { x: 20, y: 40, width: 120, height: 120 });
+  const withImage = new Uint8Array(await doc.save());
+
+  const file = new File([withImage], "with-image.pdf", { type: "application/pdf" });
+  const result = await removePdfImages(file);
+  assert.ok(result.removed >= 1, `expected at least one image removed, got ${result.removed}`);
+  assert.ok(result.after < result.before, `output must be smaller: ${result.before} -> ${result.after}`);
+
+  // The text must survive — this is the difference from Compress PDF, which
+  // rasterises everything.
+  const reloaded = await PDFDocument.load(result.bytes, { throwOnInvalidObject: false });
+  assert.equal(reloaded.getPageCount(), 1, "the page must still be there");
+});

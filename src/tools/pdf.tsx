@@ -15,7 +15,7 @@ import { parseParagraphs, detectColumnLayout, flowBlocks, rebuildReflowedPdf } f
 import { applyAnnotations, screenToPagePoint, pagePointToScreen, HIGHLIGHT_PALETTE, MAX_ANNOTATIONS_PER_PAGE } from "../services/annotate.service.js";
 import { archivalPrepPdf, assertPdfDecryptable, checkPdfACompliance, comparePdfText, comparePdfReportText, estimateSkewAngle } from "../services/pdf-review.service.js";
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "../services/pdf-edit.service.js";
-import { BATES_POSITION_IDS, NUP_COUNTS, batesNumberPdf, createFormPdf, imposePdf, parseOutlineInput, parseSplitPages, readOutline, setOutline, smartSplitPdf } from "../services/pdf-advanced.service.js";
+import { BATES_POSITION_IDS, NUP_COUNTS, batesNumberPdf, blankPagesFromCoverage, pagesAfterRemovingBlanks, removePdfImages, createFormPdf, imposePdf, parseOutlineInput, parseSplitPages, readOutline, setOutline, smartSplitPdf } from "../services/pdf-advanced.service.js";
 import { extractPdfAssets, buildExtractionZip } from "../services/pdf-extract.service.js";
 import { LANGUAGE_OPTIONS, auditPdfAccessibility, buildAccessibilityReportText, extractAccessibilityContent, remediatePdfAccessibility } from "../services/pdf-accessibility.service.js";
 import { canvasToPdf, canvasesToPdf } from "../services/convert.service.js";
@@ -80,6 +80,98 @@ function ImagesToPdfTool({ tool }: { tool: Tool }) {
       const bytes = await imagesToPdf(valid, { pageSize });
       downloadBytes(bytes, "myfilekit-images.pdf", "application/pdf");
       return `Created a ${valid.length}-page PDF${pageSize === "a4" ? " on A4 pages" : ""}.`;
+    })} />
+  </ToolForm>;
+}
+
+
+/**
+ * Remove Blank Pages.
+ *
+ * Shows what it found and lets you untick before anything is dropped — the
+ * whole point of the tool is that you do not have to trust it blindly, and a
+ * page it wrongly calls blank would otherwise be gone from your document.
+ */
+function RemoveBlankPagesTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [found, setFound] = useState<{ page: number; ink: number; drop: boolean }[]>([]);
+  const [pageCount, setPageCount] = useState(0);
+  const [status, setStatus] = useState(initialStatus);
+
+  const reset = () => { setFiles([]); setFound([]); setPageCount(0); setStatus(initialStatus); };
+
+  // A new document invalidates the previous scan; showing page 3 as blank for a
+  // file it was not measured on is how the wrong page gets deleted.
+  useEffect(() => { setFound([]); setPageCount(0); }, [files]);
+
+  const scan = () => runSafely(setStatus, async () => {
+    const [file] = validateFiles(files, tool.file);
+    const { renderPdfPageToCanvas, loadPdfDocument } = await import("../lib/pdfjs");
+    const doc = await loadPdfDocument(new Uint8Array(await file.arrayBuffer()));
+    const coverage: number[] = [];
+    for (let page = 1; page <= doc.numPages; page += 1) {
+      setStatus({ tone: "idle", message: `Checking page ${page} of ${doc.numPages}…`, progress: { value: page, total: doc.numPages, label: "Checking…" } });
+      const canvas = await renderPdfPageToCanvas(doc, page, 0.4);
+      const data = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
+      let ink = 0;
+      for (let i = 0; i < data.length; i += 4) if (data[i] < 245 || data[i + 1] < 245 || data[i + 2] < 245) ink += 1;
+      coverage.push(ink / (canvas.width * canvas.height));
+    }
+    const blank = blankPagesFromCoverage(coverage);
+    setPageCount(doc.numPages);
+    setFound(blank.map((page) => ({ page, ink: coverage[page - 1], drop: true })));
+    return blank.length
+      ? `Found ${blank.length} blank page${blank.length === 1 ? "" : "s"} of ${doc.numPages}. Review them below, then remove.`
+      : `No blank pages found in ${doc.numPages} page${doc.numPages === 1 ? "" : "s"}.`;
+  });
+
+  return <ToolForm status={status} onReset={reset}>
+    <p className="tool-lead">Find the empty pages a scanner leaves behind, then drop the ones you confirm.</p>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <PrimaryButton label="Find blank pages" onClick={scan} />
+    {found.length > 0 && (
+      <div className="surface-card grid gap-2 p-3">
+        <p className="text-xs font-bold uppercase text-neutral-500">Looks blank · {found.filter((f) => f.drop).length} of {found.length} selected</p>
+        {found.map((entry, index) => (
+          <Checkbox
+            key={entry.page}
+            label={`Page ${entry.page} — ${(entry.ink * 100).toFixed(2)}% ink`}
+            checked={entry.drop}
+            onChange={(checked) => setFound((list) => list.map((item, i) => (i === index ? { ...item, drop: checked } : item)))}
+          />
+        ))}
+        <SecondaryButton label="Remove selected pages" onClick={() => runSafely(setStatus, async () => {
+          const [file] = validateFiles(files, tool.file);
+          const drop = found.filter((entry) => entry.drop).map((entry) => entry.page);
+          if (!drop.length) throw new Error("Tick at least one page to remove.");
+          const { keep, removed } = pagesAfterRemovingBlanks(pageCount, drop);
+          if (!removed.length) throw new Error("Every page looks blank, so nothing was removed — you would be left with an empty file.");
+          const bytes = await extractPdfPages(file, keep);
+          downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-cleaned`, "pdf"), "application/pdf");
+          return `Removed ${removed.length} page${removed.length === 1 ? "" : "s"} (${removed.join(", ")}). ${keep.length} page${keep.length === 1 ? "" : "s"} left.`;
+        })} />
+      </div>
+    )}
+  </ToolForm>;
+}
+
+/** Remove Images: strips pictures, keeps text selectable. */
+function RemovePdfImagesTool({ tool }: { tool: Tool }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [status, setStatus] = useState(initialStatus);
+  return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
+    <p className="tool-lead">Take the pictures out and keep the text selectable.</p>
+    <ToolNotes summary="What to know">
+      <li>Unlike Compress PDF, this does not turn your text into a picture — the words stay searchable.</li>
+      <li>Layout is unchanged, so removed images leave their space empty.</li>
+    </ToolNotes>
+    <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    <PrimaryButton label="Remove images" onClick={() => runSafely(setStatus, async () => {
+      const [file] = validateFiles(files, tool.file);
+      const { bytes, removed, before, after } = await removePdfImages(file);
+      if (!removed) throw new Error("This PDF has no embedded images to remove.");
+      downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-no-images`, "pdf"), "application/pdf");
+      return `Removed ${removed} image${removed === 1 ? "" : "s"}.\n${formatBytes(before)} → ${formatBytes(after)}`;
     })} />
   </ToolForm>;
 }
@@ -4236,6 +4328,8 @@ export default function PdfTools({ tool }: { tool: Tool }) {
   if (tool.id === "flatten-pdf-tool") return <FlattenPdfTool tool={tool} />;
   if (tool.id === "invert-pdf-tool") return <InvertPdfTool tool={tool} />;
   if (tool.id === "images-to-pdf-tool") return <ImagesToPdfTool tool={tool} />;
+  if (tool.id === "remove-blank-pages-tool") return <RemoveBlankPagesTool tool={tool} />;
+  if (tool.id === "remove-pdf-images-tool") return <RemovePdfImagesTool tool={tool} />;
   if (tool.id === "organize-pages-tool") return <OrganizePagesTool tool={tool} />;
   if (tool.id === "crop-resize-pdf-tool") return <CropResizePdfTool tool={tool} />;
   if (tool.id === "headers-footers-tool") return <HeadersFootersTool tool={tool} />;

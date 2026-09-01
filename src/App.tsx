@@ -1640,6 +1640,8 @@ const toolModuleById: Record<string, keyof typeof toolModules> = {
   "flatten-pdf-tool": "pdf",
   "invert-pdf-tool": "pdf",
   "images-to-pdf-tool": "pdf",
+  "remove-blank-pages-tool": "pdf",
+  "remove-pdf-images-tool": "pdf",
   "organize-pages-tool": "pdf",
   "crop-resize-pdf-tool": "pdf",
   "headers-footers-tool": "pdf",
