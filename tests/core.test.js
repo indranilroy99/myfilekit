@@ -8702,3 +8702,45 @@ test("removePdfImages strips image pixels and keeps the text", async () => {
   const reloaded = await PDFDocument.load(result.bytes, { throwOnInvalidObject: false });
   assert.equal(reloaded.getPageCount(), 1, "the page must still be there");
 });
+
+// --- Conversion server -------------------------------------------------------
+
+test("the server only accepts extensions it can actually convert", async () => {
+  const { OFFICE_EXTENSIONS, officeToPdf } = await import("../server/convert.js");
+  // An allowlist, never a denylist: anything not named here is refused.
+  for (const ext of ["docx", "xlsx", "pptx", "odt", "csv", "rtf"]) {
+    assert.ok(OFFICE_EXTENSIONS.has(ext), `${ext} should be convertible`);
+  }
+  for (const ext of ["exe", "sh", "js", "pdf", "zip", ""]) {
+    assert.ok(!OFFICE_EXTENSIONS.has(ext), `${ext} must NOT be accepted`);
+  }
+  // A rejected extension must fail before any file is written or any tool runs.
+  await assert.rejects(
+    () => officeToPdf(Buffer.from("not a document"), "exe"),
+    (error) => error.status === 415 && /does not convert/i.test(error.message),
+  );
+  // Empty and oversized bodies are refused with their own status codes.
+  await assert.rejects(() => officeToPdf(Buffer.alloc(0), "docx"), (e) => e.status === 400);
+});
+
+test("the server never puts a caller's filename on a path or a command line", async () => {
+  const source = fs.readFileSync(new URL("../server/convert.js", import.meta.url), "utf8");
+  // Filenames are generated, not taken from the request.
+  assert.match(source, /crypto\.randomBytes\(8\)\.toString\("hex"\)/);
+  // Every spawn must pass an argument array and disable the shell.
+  assert.match(source, /shell: false/);
+  assert.doesNotMatch(source, /\bexec\(|execSync\(/, "no shell execution anywhere");
+  // Scratch directories are removed whether or not the conversion succeeded.
+  assert.match(source, /finally \{\s*await fs\.rm\(dir, \{ recursive: true, force: true \}\)/);
+});
+
+test("the client reaches the API on its own origin, so connect-src stays 'self'", () => {
+  const client = fs.readFileSync(new URL("../src/services/server.service.js", import.meta.url), "utf8");
+  // A second origin here would force the CSP open; the whole point is that it does not.
+  assert.match(client, /const API_BASE = ""/);
+  assert.doesNotMatch(client, /https?:\/\/(?!127\.0\.0\.1)[a-z]/i, "no hardcoded remote origin in the client");
+  const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(html, /connect-src 'self';/, "the policy must stay closed");
+  // And an unreachable server must be a normal state, not an exception.
+  assert.match(client, /available: false/);
+});

@@ -35,10 +35,21 @@ export function LandingPage({ featured }: Props) {
           to a subordinate clause. No manual line break: 18ch and text-wrap do it
           at every width, and a <br/> lands mid-phrase once the type scale shifts.
         */}
-        <h1 className="landing-title">Your files never leave this device.</h1>
+        {/*
+          This headline changed when the conversion server arrived, and it had to.
+          "Your files never leave this device" was the strongest line in the
+          product and it is no longer absolutely true: an Office document can be
+          converted on our server, because a browser can only turn it into a
+          picture. The claim now states the guarantee that IS absolute — nothing
+          is uploaded unless the user picks the server for that one conversion —
+          and the lede names the exception rather than burying it. Weakening a
+          true claim is better than keeping a strong false one.
+        */}
+        <h1 className="landing-title">Nothing is uploaded unless you choose to.</h1>
         <p className="landing-lede">
-          {tools.length} tools for PDFs, images, spreadsheets and text — all running in this
-          browser tab. No upload, no account, no server to trust.
+          {tools.length} tools for PDFs, images, spreadsheets and text, running in this browser
+          tab. Only Office conversions can use our server — for real, selectable text instead of
+          a picture — and they ask you first.
         </p>
 
         <label
@@ -81,9 +92,9 @@ export function LandingPage({ featured }: Props) {
           <div>
             <h3 className="landing-h3">Confidential by construction</h3>
             <p className="landing-body">
-              Other online tools upload your document to their servers and promise to delete it
-              later. There is no server here to promise anything — the work happens in the page
-              you are already looking at.
+              Other online tools upload your document before you have decided anything. Here the
+              work happens in the page you are already looking at, and the one exception —
+              converting an Office file — is a button you press, not a default.
             </p>
           </div>
           <div>
@@ -96,8 +107,9 @@ export function LandingPage({ featured }: Props) {
           <div>
             <h3 className="landing-h3">Verifiable, not just claimed</h3>
             <p className="landing-body">
-              Open your browser's network tab while you work. Nothing leaves. The content security
-              policy blocks outbound connections, and a test in the repository enforces it.
+              Open your browser's network tab while you work. The content security policy names
+              exactly one outbound host — the converter — and blocks everything else, so there is
+              nowhere else a file could go. A test in the repository enforces it.
             </p>
           </div>
         </div>

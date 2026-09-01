@@ -1674,3 +1674,14 @@ body::before { display: none !important; }
 
 /* File-type cards in the editor's empty state. */
 .editor-empty-cards { display: flex; gap: 18px; justify-content: center; margin-bottom: 4px; }
+
+/* Two conversion paths, each with what it costs stated next to it. The server
+   option is never a silent default: uploading someone's document is a decision,
+   so both buttons and both consequences are on screen together. */
+.convert-choice { display: grid; gap: 4px; }
+.convert-choice-note {
+  margin: 0 0 8px !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  color: var(--c-text-dim) !important;
+}

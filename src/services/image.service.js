@@ -73,10 +73,25 @@ export async function resizeImage(file, width, height, preserveAspect) {
 
 export async function cropImage(file, x, y, width, height) {
   const source = await imageToCanvas(file);
-  const cropX = clamp(nonNegativeNumber(x, "X coordinate"), 0, source.width - 1);
-  const cropY = clamp(nonNegativeNumber(y, "Y coordinate"), 0, source.height - 1);
+  const askedX = nonNegativeNumber(x, "X coordinate");
+  const askedY = nonNegativeNumber(y, "Y coordinate");
+  // Refuse a crop that starts outside the image instead of clamping it.
+  // Clamping turned x=5000 on a 200x150 image into an 88-byte 1x1 PNG and
+  // reported "Done" — the user asked for a region that does not exist and got a
+  // single pixel back, which is a wrong result presented as a success.
+  if (askedX >= source.width || askedY >= source.height) {
+    throw new Error(`The crop starts outside the image. This one is ${source.width}x${source.height} pixels, so X must be under ${source.width} and Y under ${source.height}.`);
+  }
+  const cropX = clamp(askedX, 0, source.width - 1);
+  const cropY = clamp(askedY, 0, source.height - 1);
   const cropWidth = clamp(positiveNumber(width, "Crop width"), 1, source.width - cropX);
   const cropHeight = clamp(positiveNumber(height, "Crop height"), 1, source.height - cropY);
+  // A crop that had to be shrunk to fit is still useful, but the user must know
+  // the output is not the size they typed.
+  const clipped = cropWidth !== positiveNumber(width, "Crop width") || cropHeight !== positiveNumber(height, "Crop height");
+  if (clipped && (cropWidth < 8 || cropHeight < 8)) {
+    throw new Error(`That region barely overlaps the image — it would leave ${cropWidth}x${cropHeight} pixels. Check the X, Y, width and height against the ${source.width}x${source.height} original.`);
+  }
   const canvas = document.createElement("canvas");
   canvas.width = cropWidth;
   canvas.height = cropHeight;

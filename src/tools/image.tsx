@@ -123,6 +123,7 @@ function ResizeImageTool({ tool }: { tool: Tool }) {
   useSourceFormat(files, setFormat);
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
     <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
+    <SourceSize files={files} />
     <div className="grid gap-3 sm:grid-cols-2"><Input label="Width" value={width} onChange={setWidth} type="number" /><Input label="Height" value={height} onChange={setHeight} type="number" /></div>
     <Checkbox label="Preserve aspect ratio" checked={preserve} onChange={setPreserve} />
     <Select label="Output format" value={format} onChange={setFormat} options={["image/jpeg", "image/png", "image/webp"]} labels={["JPEG", "PNG", "WebP"]} />
@@ -137,12 +138,34 @@ function ResizeImageTool({ tool }: { tool: Tool }) {
   </ToolForm>;
 }
 
+
+/**
+ * The source image's pixel size, shown before the user types numbers at it.
+ *
+ * Crop and Resize both asked for pixel values while never stating the
+ * dimensions they applied to — so people resized and cropped blind, and a crop
+ * outside the image looked like a reasonable thing to ask for.
+ */
+function SourceSize({ files }: { files: File[] }) {
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const file = files[0];
+    if (!file) { setSize(null); return undefined; }
+    imageDimensions(file).then((next) => { if (!cancelled) setSize(next); }).catch(() => { if (!cancelled) setSize(null); });
+    return () => { cancelled = true; };
+  }, [files]);
+  if (!size) return null;
+  return <p className="tool-lead">This image is <strong>{size.width} × {size.height}</strong> pixels.</p>;
+}
+
 function CropImageTool({ tool }: { tool: Tool }) {
   const [files, setFiles] = useState<File[]>([]);
   const [values, setValues] = useState({ x: "0", y: "0", width: "500", height: "500" });
   const [status, setStatus] = useState(initialStatus);
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
     <FileControl accept="image/jpeg,image/png,image/webp" files={files} setFiles={setFiles} />
+    <SourceSize files={files} />
     <div className="grid gap-3 sm:grid-cols-4">{(["x", "y", "width", "height"] as const).map((key) => <Input key={key} label={key.toUpperCase()} value={values[key]} onChange={(value) => setValues({ ...values, [key]: value })} type="number" />)}</div>
     <PrimaryButton label="Crop image" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);

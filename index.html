@@ -6,13 +6,19 @@
   <!-- font-src allows data: because pdf.js hands the browser embedded PDF fonts as
        data: URLs when it rasterises a page; without it the render promise never
        settles and every rasterising tool hangs. -->
-  <!-- connect-src is pinned to 'self' on purpose: every tool runs locally, so the
-       app never needs an outbound connection. The optional bring-your-own-LLM
-       adapter is blocked by this line until an operator adds their own origin. -->
+  <!-- connect-src stays 'self', and the conversion server does not change that.
+       The API is served from the SAME origin as the app (/api, reverse-proxied
+       to the converter), so no origin had to be added here. That is deliberate:
+       this one line is the auditable proof that a default build cannot send a
+       document anywhere, and relaxing it to add a feature would have traded the
+       guarantee for convenience. A same-origin API keeps both. In development
+       Vite proxies /api to the local converter, so the client code never needs a
+       second origin either. The optional bring-your-own-LLM and e-sign adapters
+       remain blocked until an operator adds their own origin. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <title>MyFileKit — Local-first PDF, Image & File Tools</title>
-  <meta name="description" content="Privacy-first, local-first PDF, image, and file tools that run entirely in your browser. Nothing is uploaded — your files never leave your device.">
+  <meta name="description" content="Local-first PDF, image, and file tools. 107 tools run in your browser and nothing is uploaded unless you choose server conversion for an Office document.">
   <meta name="theme-color" content="#f1f2f4" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0d0e10" media="(prefers-color-scheme: dark)">
   <meta property="og:title" content="MyFileKit — Local-first PDF, Image & File Tools">

@@ -54,9 +54,18 @@ export default defineConfig({
     }
   },
   server: {
-    strictPort: false
+    strictPort: false,
+    // The conversion server is reached at /api on the SAME origin, so the
+    // shipped `connect-src 'self'` policy needs no second host. In development
+    // that origin is Vite, so it proxies through to the local converter.
+    proxy: {
+      "/api": { target: process.env.MFK_API_TARGET || "http://localhost:8081", changeOrigin: false }
+    }
   },
   preview: {
-    strictPort: false
+    strictPort: false,
+    proxy: {
+      "/api": { target: process.env.MFK_API_TARGET || "http://localhost:8081", changeOrigin: false }
+    }
   }
 });

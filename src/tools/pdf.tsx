@@ -24,6 +24,7 @@ import { MAX_BATCH_FILES, batchAcceptFor, batchOpList, defaultBatchOptions, runB
 import { captureVideoFrame, enhanceCanvas, getHtml2Canvas, startCameraStream, stopCameraStream } from "../services/capture.service.js";
 import { docxToHtml, epubToHtml, pptxToSlides, readWorkbookSheets, sanitizeHtmlForOffline, sheetsToHtml } from "../services/office.service.js";
 import { pdfToDocx, pdfToEpub, pdfToHtml, pdfToXlsx } from "../services/export.service.js";
+import { serverCapabilities, convertOfficeOnServer } from "../services/server.service.js";
 import { DEFAULT_OCR_LANG, OCR_ENGINE_SIZE_LABEL, OCR_LANGUAGES, mergeSearchablePdfPages, ocrImages, ocrPdf, terminateOcrWorker } from "../services/ocr.service.js";
 import { getSpeechSynthesis, loadSpeechVoices, speechSynthesisSupported, splitTextForSpeech } from "../services/audio.service.js";
 import { initialStatus, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, ToolNotes, canvasToBlob, requireOutput, copyText } from "./shared";
@@ -3399,23 +3400,69 @@ async function renderHtmlToCanvas(bodyHtml: string, { widthPx = 794, scale = 2 }
   }
 }
 
+/**
+ * Word to PDF, with two honestly-labelled paths.
+ *
+ * In the browser this can only RASTERISE the document — measured at 0
+ * extractable characters, so the output is a picture of the page. The
+ * conversion server runs LibreOffice and returns real text: the same document
+ * came back with 88 selectable characters.
+ *
+ * The server is OFFERED, never assumed. Uploading someone's document is not a
+ * default to be inherited from a build flag, and the product's central claim
+ * only survives if the user is the one who decides.
+ */
 function WordToPdfTool({ tool }: { tool: Tool }) {
   const [files, setFiles] = useState<File[]>([]);
+  const [server, setServer] = useState<{ available: boolean; office: boolean } | null>(null);
   const [status, setStatus] = useState(initialStatus);
+
+  useEffect(() => {
+    let cancelled = false;
+    serverCapabilities().then((probe) => { if (!cancelled) setServer(probe); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const canUseServer = Boolean(server?.available && server?.office);
+
+  const convertLocally = () => runSafely(setStatus, async () => {
+    const [file] = validateFiles(files, tool.file);
+    setStatus({ tone: "idle", message: "Reading document…" });
+    const html = sanitizeHtmlForOffline(await docxToHtml(file));
+    setStatus({ tone: "idle", message: "Rendering PDF…" });
+    const canvas = await renderHtmlToCanvas(html);
+    downloadBytes(await canvasToPdf(canvas), withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
+    return "Converted here. The text in this PDF is part of the picture, so it cannot be selected or searched.";
+  });
+
+  const convertOnServer = () => runSafely(setStatus, async () => {
+    const [file] = validateFiles(files, tool.file);
+    setStatus({ tone: "idle", message: "Uploading and converting…" });
+    const bytes = await convertOfficeOnServer(file);
+    downloadBytes(bytes, withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
+    return "Converted on our server. The text is real and selectable. Your file was deleted when the request finished.";
+  });
+
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
-    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Converts a Word .docx locally: styles, headings, bold/italic, lists, tables, and embedded images are preserved as faithfully as possible, then rendered to a PDF in your browser. Legacy .doc files must be re-saved as .docx first.
-    </div>
+    <p className="tool-lead">Turn a Word document into a PDF.</p>
     <FileControl accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" files={files} setFiles={setFiles} label="Choose or drop a Word file" />
-    <PrimaryButton label="Convert to PDF" onClick={() => runSafely(setStatus, async () => {
-      const [file] = validateFiles(files, tool.file);
-      setStatus({ tone: "idle", message: "Reading document…" });
-      const html = sanitizeHtmlForOffline(await docxToHtml(file));
-      setStatus({ tone: "idle", message: "Rendering PDF…" });
-      const canvas = await renderHtmlToCanvas(html);
-      downloadBytes(await canvasToPdf(canvas), withExtension(`${safeFilename(file.name)}`, "pdf"), "application/pdf");
-      return "Word document converted to PDF.";
-    })} />
+    {canUseServer ? (
+      <div className="convert-choice">
+        <PrimaryButton label="Convert on our server" onClick={convertOnServer} />
+        <p className="convert-choice-note">Real, selectable text. Your file is uploaded to our converter and deleted when the request finishes.</p>
+        <SecondaryButton label="Convert here instead" onClick={convertLocally} />
+        <p className="convert-choice-note">Nothing is uploaded, but the text becomes part of a picture — not selectable or searchable.</p>
+      </div>
+    ) : (
+      <>
+        <PrimaryButton label="Convert to PDF" onClick={convertLocally} />
+        <ToolNotes summary="About the output">
+          <li>Converting in the browser turns the text into a picture, so it cannot be selected or searched.</li>
+          <li>Legacy .doc files need re-saving as .docx first.</li>
+          {server && !server.available ? <li>Our converter, which produces real text, is unreachable right now.</li> : null}
+        </ToolNotes>
+      </>
+    )}
   </ToolForm>;
 }
 
