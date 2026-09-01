@@ -2188,7 +2188,7 @@ function ExtractImagesTool({ tool }: { tool: Tool }) {
             </div>
           )}
           {(result.images.length > 0 || result.attachments.length > 0) && (
-            <PrimaryButton label="Download ZIP" onClick={() => runSafely(setStatus, async () => {
+            <PrimaryButton label="Package as ZIP" onClick={() => runSafely(setStatus, async () => {
               const zipped = buildExtractionZip(result);
               downloadBytes(zipped, zipName, "application/zip");
               return `${zipName} ready to save (${result.images.length + result.attachments.length} file${result.images.length + result.attachments.length === 1 ? "" : "s"}).`;
@@ -3315,7 +3315,7 @@ function WordToPdfTool({ tool }: { tool: Tool }) {
       Converts a Word .docx locally: styles, headings, bold/italic, lists, tables, and embedded images are preserved as faithfully as possible, then rendered to a PDF in your browser. Legacy .doc files must be re-saved as .docx first.
     </div>
     <FileControl accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" files={files} setFiles={setFiles} label="Choose or drop a Word file" />
-    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
+    <PrimaryButton label="Convert to PDF" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       setStatus({ tone: "idle", message: "Reading document…" });
       const html = sanitizeHtmlForOffline(await docxToHtml(file));
@@ -3408,7 +3408,7 @@ function EbookToPdfTool({ tool }: { tool: Tool }) {
       Converts an .epub eBook locally: chapters are read in spine order, referenced images are inlined, scripts and remote references are stripped for offline safety, then rendered to a paginated PDF.
     </div>
     <FileControl accept=".epub,application/epub+zip" files={files} setFiles={setFiles} label="Choose or drop an eBook (.epub)" />
-    <PrimaryButton label="Download PDF" onClick={() => runSafely(setStatus, async () => {
+    <PrimaryButton label="Convert to PDF" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       setStatus({ tone: "idle", message: "Reading eBook…" });
       const html = await epubToHtml(file);
@@ -3430,7 +3430,7 @@ function PdfToWordTool({ tool }: { tool: Tool }) {
       Text-focused conversion: each line of selectable text becomes a Word paragraph, blank space becomes a blank line, and every PDF page ends with a page break. Multi-column layouts, tables, and images are not reproduced. A scanned PDF has no selectable text — run OCR first.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
-    <PrimaryButton label="Download .docx" onClick={() => runSafely(setStatus, async () => {
+    <PrimaryButton label="Convert to Word" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       const bytes = await pdfToDocx(file, { title: file.name, onProgress: pageProgress(setStatus, "Reading") });
       downloadBytes(bytes, withExtension(safeFilename(file.name), "docx"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
@@ -3455,7 +3455,7 @@ function PdfToExcelTool({ tool }: { tool: Tool }) {
       options={["8", "12", "20", "32"]}
       labels={["8 · many narrow columns", "12 · default", "20 · fewer columns", "32 · widest columns"]}
     />
-    <PrimaryButton label="Download .xlsx" onClick={() => runSafely(setStatus, async () => {
+    <PrimaryButton label="Convert to Excel" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       const { bytes, sheets, rows, columns } = await pdfToXlsx(file, {
         columnTolerance: Number(tolerance),
@@ -3483,7 +3483,7 @@ function PdfToHtmlTool({ tool }: { tool: Tool }) {
       options={["image", "text"]}
       labels={["Page images + selectable text · exact look, large file", "Text only · small file, no graphics"]}
     />
-    <PrimaryButton label="Download .html" onClick={() => runSafely(setStatus, async () => {
+    <PrimaryButton label="Convert to HTML" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       const html = await pdfToHtml(file, {
         pageImages: mode === "image",

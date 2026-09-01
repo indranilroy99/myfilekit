@@ -1471,7 +1471,16 @@ function ToolPage({ tool }: { tool: Tool }) {
           <a className="secondary-button" href={categoryRoute(tool.category)}>{tool.category.replace(" Tools", "")}</a>
         </span>
       </div>
-      <div className={`tool-shell ${activeFile || previewable ? "tool-shell-doc" : ""}`}>
+      {/*
+        The two-column class and the document pane must agree. They did not: the
+        class applied on `activeFile || previewable` while the pane below renders
+        only when `previewable`. A text-only tool that EMITS a pdf sets
+        activeFile from its result, so ~15 tools (Text to PDF, Markdown to PDF,
+        CSV to PDF, the invoice tools…) collapsed to a 380px column beside 654px
+        of nothing the moment they succeeded. My change; caught by the
+        architecture review, not by me.
+      */}
+      <div className={`tool-shell ${previewable ? "tool-shell-doc" : ""}`}>
         <div className="tool-canvas">
           <p className="doc-bar-meta" style={{ marginBottom: 12 }}>{tool.description}</p>
           {/* Keyed by tool id: several tools share one renderer (Split/Delete Pages
