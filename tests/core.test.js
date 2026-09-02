@@ -4919,6 +4919,69 @@ test("applyAnnotations draws shapes, arrows, ink and a sticky callout without er
   assert.ok(ops.includes(hexOf("Please review this")), "callout text drawn");
 });
 
+test("annotate burns every markup type into a PDF that still opens", async () => {
+  // The normaliser, the decimator and the coordinate mapping were each tested;
+  // the OUTPUT was not. Everything upstream can be right and still produce a
+  // file that will not open, or one where the markup was silently dropped.
+  const zlib = await import("node:zlib");
+  const svc = await import("../src/services/annotate.service.js");
+  const { PDFDocument, StandardFonts } = globalThis.window.PDFLib;
+
+  const base = await PDFDocument.create();
+  const font = await base.embedFont(StandardFonts.Helvetica);
+  base.addPage([612, 792]).drawText("Original line", { x: 40, y: 700, size: 12, font });
+  const bytes = await base.save();
+  const size = { width: 612, height: 792 };
+
+  const page1 = svc.normalizeAnnotations([
+    { type: "highlight", x: 40, y: 690, width: 200, height: 16, color: "#ffe066", opacity: 0.5 },
+    { type: "ink", color: "#2563eb", width: 2, points: [{ x: 60, y: 500 }, { x: 120, y: 540 }, { x: 200, y: 480 }] },
+    { type: "rect", x: 300, y: 400, width: 120, height: 80, color: "#dc2626" },
+    { type: "arrow", x1: 100, y1: 300, x2: 250, y2: 350, color: "#059669", width: 2 },
+    { type: "note", x: 400, y: 600, text: "CHECK THIS FIGURE", color: "#111827", fontSize: 11 },
+  ], size);
+  assert.equal(page1.length, 5, "all five markup types survive normalisation");
+
+  const result = await svc.applyAnnotations(bytes, { 1: page1 }, { 1: size });
+  const out = Buffer.from(result?.bytes || result);
+  assert.ok(out.length > bytes.length, "the output is larger than the input, so something was drawn");
+
+  // A PDF pdf-lib cannot reopen is not a deliverable, whatever it contains.
+  const reloaded = await PDFDocument.load(out);
+  assert.equal(reloaded.getPageCount(), 1);
+
+  // The note's text must be in the page content — pdf-lib writes drawn text as
+  // a hex string inside a Flate stream, so look for the hex form.
+  let noteBurnedIn = false;
+  let originalKept = false;
+  let from = 0;
+  for (;;) {
+    const open = out.indexOf("stream", from);
+    if (open < 0) break;
+    const close = out.indexOf("endstream", open);
+    if (close < 0) break;
+    let start = open + 6;
+    while (out[start] === 13 || out[start] === 10) start += 1;
+    try {
+      const content = zlib.inflateSync(out.subarray(start, close)).toString("latin1").toUpperCase();
+      if (content.includes(Buffer.from("CHECK THIS FIGURE").toString("hex").toUpperCase())) noteBurnedIn = true;
+      if (content.includes(Buffer.from("Original line").toString("hex").toUpperCase())) originalKept = true;
+    } catch {
+      // Not an inflatable stream.
+    }
+    from = close + 9;
+  }
+  assert.ok(noteBurnedIn, "the note text is written into the page, not just accepted");
+  assert.ok(originalKept, "and the document's own text is still there");
+
+  // Markup aimed at a page that does not exist is refused rather than dropped,
+  // which would lose someone's work silently.
+  await assert.rejects(
+    () => svc.applyAnnotations(bytes, { 7: page1 }, { 7: size }),
+    (error) => /page 7, which does not exist/i.test(error.message),
+  );
+});
+
 test("annotate-pdf tool is registered, routed, wired into ToolRenderer, and discoverable", () => {
   const found = tools.find((tool) => tool.id === "annotate-pdf-tool");
   assert.ok(found, "annotate-pdf-tool registered");
