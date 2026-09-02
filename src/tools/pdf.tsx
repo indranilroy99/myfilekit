@@ -3939,6 +3939,16 @@ function PdfToAudioTool({ tool }: { tool: Tool }) {
         : "No selectable text found — this PDF is likely scanned images. Run OCR first.";
     })} />
     <Textarea label="Text to read" value={text} onChange={setText} rows={10} />
+    {/* Reading a PDF aloud usually means someone wanted the words, not only the
+        audio — and having extracted and corrected them here, they had no way to
+        keep them. Every other text-producing tool offers both. */}
+    <div className="flex flex-wrap gap-2">
+      <SecondaryButton label="Copy text" onClick={() => runSafely(setStatus, async () => { await copyText(requireOutput(text)); return "Copied."; })} />
+      <SecondaryButton label="Download .txt" onClick={() => runSafely(setStatus, async () => {
+        downloadText(requireOutput(text), `${safeFilename(files[0]?.name || "text")}-text`, "txt");
+        return "Text file ready to save.";
+      })} />
+    </div>
     {voiceNames.length > 0 && <Select label="Voice" value={voiceName || voiceNames[0]} onChange={setVoiceName} options={voiceNames} />}
     <Select label="Speed" value={rate} onChange={setRate} options={["0.75", "1", "1.25", "1.5", "2"]} labels={["0.75× slower", "1× normal", "1.25×", "1.5×", "2× faster"]} />
     <div className="flex flex-wrap gap-2">

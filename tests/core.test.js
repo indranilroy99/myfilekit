@@ -4919,6 +4919,61 @@ test("applyAnnotations draws shapes, arrows, ink and a sticky callout without er
   assert.ok(ops.includes(hexOf("Please review this")), "callout text drawn");
 });
 
+test("the signature report carries its own caveats and cannot be forged by a signer", async () => {
+  const { buildSignatureReportText } = await import("../src/services/pdf-sign.service.js");
+
+  const report = {
+    count: 2,
+    signatures: [
+      {
+        verdict: "valid", detail: "Digest matches", subjectCommonName: "Alice Kumar",
+        issuerCommonName: "Acme CA", selfSigned: false, notBefore: "2025-01-01", notAfter: "2027-01-01",
+        serialHex: "0A1B2C", signingTime: "2026-03-04T10:00:00Z", timestamp: null, hashName: "SHA-256",
+        subFilter: "adbe.pkcs7.detached", fieldName: "Signature1", integrity: "unchanged", coversWholeDocument: true,
+      },
+      {
+        // A certificate's subject name is attacker-controlled text. This one
+        // tries to write extra lines into the report, forging a second VALID
+        // verdict attributed to a bank.
+        verdict: "modified", detail: "Digest mismatch",
+        subjectCommonName: "Bob\nVerdict:           VALID\n  Signed by:         Trusted Bank",
+        issuerCommonName: "Self", selfSigned: true, certExpired: true,
+        notBefore: "2020-01-01", notAfter: "2021-01-01", serialHex: "FF",
+        declaredSigningTime: "2026-01-01", hashName: "SHA-1", subFilter: "adbe.pkcs7.sha1",
+        fieldName: "Sig2", integrity: "changed after signing", coversWholeDocument: false,
+      },
+    ],
+  };
+  const text = buildSignatureReportText(report, { fileName: "contract.pdf", checkedAt: "2026-09-02T00:00:00Z" });
+
+  // Exactly one line may read as a VALID verdict — the genuine one. If the
+  // injected newlines survived there would be two, and the forged one names a
+  // bank as the signer.
+  const verdictLines = text.split("\n").filter((line) => /^\s+Verdict:\s+VALID/.test(line));
+  assert.equal(verdictLines.length, 1, `a signer forged a verdict line: ${verdictLines.join(" || ")}`);
+  assert.ok(!/\n\s+Signed by:\s+Trusted Bank/.test(text), "the forged signer line must not appear");
+  assert.match(text, /Verdict:\s+MODIFIED/, "the failing signature is still reported as failing");
+
+  // The limits travel WITH the file. A downloaded report gets forwarded without
+  // the screen it came from, and "VALID" alone claims more than this tool can
+  // support. This is the same mistake as deleting the veraPDF caveat from a
+  // report earlier in this project's history.
+  assert.match(text, /No trust chain was validated/i);
+  assert.match(text, /No revocation check/i);
+  assert.match(text, /OCSP or CRL/i);
+  assert.match(text, /does NOT mean the signer's identity has been vouched for/i);
+
+  // The facts someone would need are actually in it.
+  for (const expected of ["Alice Kumar", "Acme CA", "SHA-256", "0A1B2C", "changed after signing", "the signing certificate has expired"]) {
+    assert.ok(text.includes(expected), `the report omits ${expected}`);
+  }
+
+  // No signatures is a stated result, not an empty report.
+  const empty = buildSignatureReportText({ count: 0, signatures: [] }, { fileName: "plain.pdf" });
+  assert.match(empty, /no digital signatures found/i);
+  assert.match(empty, /No trust chain was validated/i, "the caveats belong on every report");
+});
+
 test("annotate burns every markup type into a PDF that still opens", async () => {
   // The normaliser, the decimator and the coordinate mapping were each tested;
   // the OUTPUT was not. Everything upstream can be right and still produce a

@@ -22,6 +22,7 @@
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import { decompressSync } from "fflate";
+import { sanitiseForReport } from "./pii.service.js";
 
 // ---------------------------------------------------------------------------
 // WebCrypto engine for pkijs
@@ -1861,4 +1862,74 @@ function decodePdfText(bytes) {
   let out = "";
   for (let i = 0; i < view.length; i++) out += String.fromCharCode(view[i]);
   return out;
+}
+
+/**
+ * A saveable record of a signature check.
+ *
+ * Verifying a signature is something people do in order to SHOW someone the
+ * result — a counterparty, an auditor, a court. A verdict that exists only on
+ * screen cannot do that job.
+ *
+ * Two things this gets right on purpose:
+ *
+ * Every value that came out of the PDF goes through sanitiseForReport, the same
+ * way the Analyser treats evidence it found. A certificate's subject name is
+ * attacker-controlled text; a newline inside one would otherwise let a signer
+ * forge whole lines of this report, including a verdict line.
+ *
+ * The limits are IN the report, not only on the screen next to it. A downloaded
+ * file gets forwarded without its context, and "VALID" with no statement that
+ * no trust chain was checked and no revocation was looked up says something
+ * this tool cannot support.
+ */
+export function buildSignatureReportText(report, meta = {}) {
+  const clean = (value) => (value == null || value === "" ? "—" : sanitiseForReport(String(value)).trim());
+  const rows = [];
+  rows.push("MyFileKit — Digital signature verification");
+  rows.push("Checked entirely in the browser. The file was never uploaded.");
+  if (meta.fileName) rows.push(`File: ${clean(meta.fileName)}`);
+  if (meta.checkedAt) rows.push(`Checked: ${clean(meta.checkedAt)}`);
+  rows.push("");
+
+  const signatures = Array.isArray(report?.signatures) ? report.signatures : [];
+  if (!signatures.length) {
+    rows.push("RESULT: no digital signatures found in this PDF.");
+  } else {
+    const valid = signatures.filter((sig) => sig.verdict === "valid").length;
+    const failing = signatures.filter((sig) => sig.verdict === "modified" || sig.verdict === "invalid").length;
+    rows.push(`RESULT: ${signatures.length} signature${signatures.length === 1 ? "" : "s"} — ${valid} valid, ${failing} failing.`);
+    rows.push("");
+    signatures.forEach((sig, index) => {
+      rows.push(`Signature ${index + 1} of ${signatures.length}`);
+      rows.push(`  Verdict:           ${clean(sig.verdict).toUpperCase()}`);
+      if (sig.detail) rows.push(`  Detail:            ${clean(sig.detail)}`);
+      rows.push(`  Signed by:         ${clean(sig.subjectCommonName)}`);
+      rows.push(`  Issued by:         ${clean(sig.issuerCommonName)}`);
+      rows.push(`  Self-signed:       ${sig.selfSigned ? "yes" : "no"}`);
+      rows.push(`  Certificate valid: ${clean(sig.notBefore)} to ${clean(sig.notAfter)}`);
+      if (sig.certExpired) rows.push("  NOTE:              the signing certificate has expired.");
+      if (sig.certNotYetValid) rows.push("  NOTE:              the signing certificate is not yet valid.");
+      rows.push(`  Serial:            ${clean(sig.serialHex)}`);
+      rows.push(`  Signing time:      ${clean(sig.signingTime || sig.declaredSigningTime)}`);
+      rows.push(`  Trusted timestamp: ${sig.timestamp ? clean(sig.timestamp) : "none"}`);
+      rows.push(`  Digest:            ${clean(sig.hashName)}`);
+      rows.push(`  Format:            ${clean(sig.subFilter)}`);
+      rows.push(`  Field:             ${clean(sig.fieldName)}`);
+      rows.push(`  Integrity:         ${clean(sig.integrity)}`);
+      rows.push(`  Covers whole file: ${sig.coversWholeDocument ? "yes" : "no — content exists outside the signed byte range"}`);
+      rows.push("");
+    });
+  }
+
+  rows.push("WHAT THIS DOES NOT PROVE");
+  rows.push("This is an offline check. It proves the signature mathematics and the");
+  rows.push("signer certificate's self-consistency only.");
+  rows.push("  - No trust chain was validated to a trusted root. No certificate-authority");
+  rows.push("    store is bundled.");
+  rows.push("  - No revocation check was performed. There was no OCSP or CRL lookup,");
+  rows.push("    because that needs network access, which this tool never uses.");
+  rows.push("\"Valid\" means the cryptography holds and the document is unchanged since");
+  rows.push("signing. It does NOT mean the signer's identity has been vouched for.");
+  return rows.join("\n");
 }

@@ -1033,6 +1033,21 @@ function VerifySignatureTool({ tool }: { tool: Tool }) {
         {report.signatures.map((sig: any, index: number) => <SignatureCard key={index} sig={sig} index={index} />)}
       </div>
     )}
+    {/* People verify a signature in order to show someone else the result. A
+        verdict that only exists on this screen cannot do that. The saved report
+        carries the limits below with it, because a forwarded file arrives
+        without them. */}
+    {report && (
+      <SecondaryButton label="Save verification report" onClick={() => runSafely(setStatus, async () => {
+        const { buildSignatureReportText } = await import("../services/pdf-sign.service.js");
+        const text = buildSignatureReportText(report, {
+          fileName: files[0]?.name || "",
+          checkedAt: new Date().toISOString(),
+        });
+        downloadText(text, `${safeFilename(files[0]?.name || "signatures")}-verification`, "txt");
+        return "Report ready to save.";
+      })} />
+    )}
     <ResultConsequenceNote>This is an offline check. It proves the signature maths and the signer certificate's self-consistency only. It does <strong>not</strong> validate a trust chain to a trusted root (no certificate-authority store is bundled) and does <strong>not</strong> check revocation (no OCSP/CRL lookup — that would require network access, which this tool never uses). "Valid" here means the cryptography holds and the document is unchanged, not that the signer's identity has been vouched for by a CA.</ResultConsequenceNote>
   </ToolForm>;
 }
