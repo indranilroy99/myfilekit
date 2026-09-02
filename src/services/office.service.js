@@ -329,25 +329,182 @@ function inlineImages(html, baseDir, entries) {
 
 // --- Shared HTML safety --------------------------------------------------------
 
-// Strip scripts, inline event handlers, and any remaining remote references so
-// the rendered document stays fully offline (defence in depth on top of the CSP
-// and the scriptless sandboxed iframe used to render it).
+/*
+ * This HTML comes out of a .docx/.epub the user opened, and gets rendered to a
+ * canvas in a sandboxed iframe. The sandbox and the CSP are the real controls;
+ * this is the layer under them.
+ *
+ * It used to be a blocklist — strip <script>, strip on*="..." — and a blocklist
+ * only stops the attacks you listed. Measured against the old version, all of
+ * these went straight through:
+ *
+ *   <img src=x onerror=alert(1)>          unquoted, so the on*="..." regex missed it
+ *   <img src=x onerror=`alert(1)`>        backticks, likewise
+ *   <svg onload=alert(1)>                 likewise
+ *   <iframe src=https://evil.test/x>      unquoted, so the remote-URL regex missed it
+ *
+ * So it is an ALLOWLIST now, which fails closed: an attribute nobody named is
+ * dropped whatever it is quoted with, and a tag nobody named loses its markup.
+ * Nothing here needs to know that `onerror` is dangerous.
+ */
+
+// Tags kept, with their attributes filtered. Everything else has its markup
+// removed and its text content preserved.
+const ALLOWED_TAGS = new Set([
+  "html", "head", "body", "title",
+  "p", "div", "span", "br", "hr", "pre", "blockquote", "center",
+  "h1", "h2", "h3", "h4", "h5", "h6",
+  "strong", "b", "em", "i", "u", "s", "strike", "sub", "sup", "small", "big", "font", "code", "kbd", "var", "abbr", "mark",
+  "ul", "ol", "li", "dl", "dt", "dd",
+  "table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "colgroup", "col",
+  "a", "img", "figure", "figcaption",
+  "section", "article", "header", "footer", "nav", "main", "aside", "style",
+]);
+
+// Elements removed WITH their contents: their text is markup, not prose, or
+// their whole purpose is to fetch or execute something.
+const DROP_WITH_CONTENT = ["script", "noscript", "template", "iframe", "object", "embed", "applet", "frameset", "frame", "svg", "math", "audio", "video", "canvas"];
+
+// Void elements dropped outright. `meta` earns its place here on its own:
+// <meta http-equiv="refresh"> navigates, which no document preview should do.
+const DROP_VOID = ["link", "base", "meta", "source", "track", "param"];
+
+// Presentation and structure only. No event handler can appear here, because
+// no name here starts with "on".
+const ALLOWED_ATTRS = new Set([
+  "class", "id", "style", "title", "alt", "dir", "lang",
+  "colspan", "rowspan", "align", "valign", "width", "height", "span",
+  "border", "cellpadding", "cellspacing", "bgcolor", "color", "face", "size",
+  "start", "value", "type", "reversed",
+  "src", "href",
+]);
+
+const VOID_TAGS = new Set(["br", "hr", "img", "col"]);
+
+/** Only data: URIs and same-document fragments survive. */
+function safeUrl(value) {
+  const trimmed = String(value).trim();
+  if (/^#/.test(trimmed)) return trimmed;
+  // An image embedded by the converter is a data: URI, which is the whole
+  // reason data: is allowed here at all. data:text/html would be a navigation
+  // target, so only images pass.
+  if (/^data:image\/(png|jpe?g|gif|webp|bmp|x-icon)[;,]/i.test(trimmed)) return trimmed;
+  return "";
+}
+
+/** Drop url(...) that points anywhere off this page, in CSS text or a style attribute. */
+function safeCss(value) {
+  return String(value).replace(/url\(\s*(['"]?)([^)'"]*)\1\s*\)/gi, (whole, quote, url) => {
+    const safe = safeUrl(url);
+    return safe ? `url(${quote}${safe}${quote})` : "none";
+  });
+}
+
+function sanitizeAttributes(raw) {
+  const kept = [];
+  // Matches name="value", name='value', name=value and bare name.
+  const pattern = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+)))?/g;
+  let match;
+  while ((match = pattern.exec(raw))) {
+    const name = match[1].toLowerCase();
+    if (!ALLOWED_ATTRS.has(name)) continue;
+    let value = match[2] ?? match[3] ?? match[4] ?? "";
+    if (name === "src" || name === "href") {
+      value = safeUrl(value);
+      // An <img> with no source renders as a broken-image box; dropping the
+      // attribute entirely is quieter and says the same thing.
+      if (!value) continue;
+    }
+    if (name === "style") value = safeCss(value);
+    kept.push(`${name}="${value.replace(/"/g, "&quot;")}"`);
+  }
+  return kept.length ? ` ${kept.join(" ")}` : "";
+}
+
 export function sanitizeHtmlForOffline(html) {
-  return String(html || "")
-    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
-    .replace(/<link\b[^>]*>/gi, "")
-    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
-    .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
-    .replace(/\b(src|href|xlink:href)\s*=\s*"(?:https?:|\/\/)[^"]*"/gi, '$1=""')
-    .replace(/\b(src|href|xlink:href)\s*=\s*'(?:https?:|\/\/)[^']*'/gi, "$1=''");
+  let out = String(html || "");
+  // Comments first: a conditional comment can hide a whole tag from the tag
+  // scanner below.
+  out = out.replace(/<!--[\s\S]*?(?:-->|$)/g, "");
+  for (const tag of DROP_WITH_CONTENT) {
+    out = out.replace(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?</${tag}\\s*>`, "gi"), "");
+    // An unclosed one would otherwise leave its opening tag behind.
+    out = out.replace(new RegExp(`</?${tag}\\b[^>]*>`, "gi"), "");
+  }
+  for (const tag of DROP_VOID) {
+    out = out.replace(new RegExp(`<${tag}\\b[^>]*>`, "gi"), "");
+  }
+  // CSS inside a surviving <style> can still fetch.
+  out = out.replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style\s*>)/gi, (whole, open, css, close) => open + safeCss(css) + close);
+  // Every remaining tag: keep it if it is allowlisted, with allowlisted
+  // attributes only; otherwise remove the markup and leave the text.
+  return out.replace(/<\s*(\/?)\s*([a-zA-Z][-a-zA-Z0-9]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g, (whole, slash, tag, attrs) => {
+    const name = tag.toLowerCase();
+    if (!ALLOWED_TAGS.has(name)) return "";
+    if (slash) return `</${name}>`;
+    const rendered = `<${name}${sanitizeAttributes(attrs)}`;
+    return VOID_TAGS.has(name) ? `${rendered} />` : `${rendered}>`;
+  });
 }
 
 // --- Low-level helpers ---------------------------------------------------------
 
+/*
+ * Zip-bomb limits.
+ *
+ * A .pptx and an .epub are both ZIP archives the user hands us, and
+ * unzipSync with no ceiling will happily expand a 40 KB file into every byte of
+ * memory the tab can get, which locks the whole page up. These numbers are
+ * generous for real documents — a photo-heavy deck runs to tens of megabytes
+ * unpacked — and nowhere near what a bomb needs.
+ */
+const ZIP_LIMITS = {
+  totalBytes: 300 * 1024 * 1024,
+  entryBytes: 100 * 1024 * 1024,
+  // Ratio alone is a bad test: a small file of repeated bytes compresses
+  // enormously and is harmless. Only ratios on entries that are already large
+  // once unpacked mean anything, hence the floor.
+  maxRatio: 200,
+  ratioFloorBytes: 1024 * 1024,
+};
+
 function unzipEntries(arrayBuffer, message) {
+  let budget = ZIP_LIMITS.totalBytes;
+  let refusal = "";
   try {
-    return unzipSync(new Uint8Array(arrayBuffer));
+    const entries = unzipSync(new Uint8Array(arrayBuffer), {
+      filter: (entry) => {
+        const unpacked = entry.originalSize || 0;
+        // A ZIP may name an entry "../../x" or "/etc/x". Nothing in these
+        // documents needs to escape its own archive, so refuse rather than
+        // normalise — the caller looks entries up by name and a name it does
+        // not expect simply goes unread.
+        if (/^([a-zA-Z]:)?[\\/]/.test(entry.name) || entry.name.split(/[\\/]/).includes("..")) {
+          refusal = refusal || "This archive contains a file path that points outside it, so it was not opened.";
+          return false;
+        }
+        if (unpacked > ZIP_LIMITS.entryBytes) {
+          refusal = refusal || "One part of this file is too large to open safely.";
+          return false;
+        }
+        if (unpacked > ZIP_LIMITS.ratioFloorBytes && entry.size > 0 && unpacked / entry.size > ZIP_LIMITS.maxRatio) {
+          refusal = refusal || "This file expands far more than its size suggests, so it was not opened.";
+          return false;
+        }
+        budget -= unpacked;
+        if (budget < 0) {
+          refusal = refusal || "This file unpacks to more than this tool will hold in memory.";
+          return false;
+        }
+        return true;
+      },
+    });
+    // A refusal that skipped a needed part would otherwise surface later as a
+    // confusing "could not find" error, so say what actually happened.
+    if (refusal) throw Object.assign(new Error(refusal), { zipRefusal: true });
+    return entries;
   } catch (error) {
+    if (error?.zipRefusal) throw error;
     throw new Error(message);
   }
 }

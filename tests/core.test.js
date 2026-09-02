@@ -871,16 +871,111 @@ test("Phase 4a office tools are registered under PDF Tools with renderers", () =
   }
 });
 
-test("sanitizeHtmlForOffline strips scripts, event handlers, and remote references", async () => {
+test("a zip bomb disguised as a .pptx is refused instead of unpacked", async () => {
+  const { zipSync } = await import("fflate");
+  const { pptxToSlides, epubToHtml } = await import("../src/services/office.service.js");
+  const asFile = (bytes, name) => ({
+    name,
+    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+  });
+
+  // 40 MB of zeros deflates to a few KB. Measured on the unguarded version with
+  // a 400 MB payload: 400 KB of input became 840 MB resident in 1.3 seconds,
+  // which in a browser tab is the page becoming unresponsive. A smaller payload
+  // here so the suite stays quick — the guard trips on the ratio either way.
+  const payload = new Uint8Array(40 * 1024 * 1024);
+  const bomb = zipSync({ "[Content_Types].xml": new Uint8Array([60, 63, 62]), "ppt/big.bin": payload }, { level: 9 });
+  assert.ok(bomb.length * 200 < payload.length, "the fixture really is a bomb");
+
+  await assert.rejects(
+    () => pptxToSlides(asFile(bomb, "bomb.pptx")),
+    (error) => /expands far more|too large to open safely|more than this tool will hold/i.test(error.message),
+    "the archive must be refused, and the message must say why",
+  );
+
+  // A ZIP entry may name a path outside its own archive. Nothing in these
+  // documents needs to, so it is refused rather than normalised.
+  const traversal = zipSync({ "../../etc/passwd": new Uint8Array([1, 2, 3]), mimetype: new Uint8Array([1]) });
+  await assert.rejects(
+    () => epubToHtml(asFile(traversal, "escape.epub")),
+    (error) => /points outside it/i.test(error.message),
+  );
+
+  // And a REALISTIC archive is still opened. This entry matters: a 1-byte
+  // fixture passes even a 10 KB entry cap, so it would let a guard tight enough
+  // to reject every real document through. An .epub or .pptx routinely carries
+  // multi-megabyte images that barely compress, so that is what is used here —
+  // 3 MB of incompressible bytes, which no honest limit may refuse.
+  const photo = new Uint8Array(3 * 1024 * 1024);
+  // A real PRNG, not `i % 251` — that has a period of 251 bytes and deflates to
+  // almost nothing, which is the opposite of the fixture this needs to be.
+  let seed = 0x9e3779b9;
+  for (let i = 0; i < photo.length; i += 1) {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+    photo[i] = seed & 0xff;
+  }
+  const ordinary = zipSync({ mimetype: new Uint8Array([1]), "OEBPS/cover.jpg": photo });
+  assert.ok(ordinary.length > 2 * 1024 * 1024, "the fixture is genuinely incompressible, like a photo");
+  await assert.rejects(
+    () => epubToHtml(asFile(ordinary, "plain.epub")),
+    (error) => !/points outside it|expands far more|too large|more than this tool will hold/i.test(error.message),
+    "a normal archive must fail on its CONTENT, not be rejected by the size guard",
+  );
+});
+
+test("sanitizeHtmlForOffline is an allowlist, so unquoted handlers cannot slip past", async () => {
   const { sanitizeHtmlForOffline } = await import("../src/services/office.service.js");
-  const dirty = '<p onclick="steal()">hi</p><script>alert(1)</script><img src="https://evil.com/x.png"><a href="//cdn.example/x">y</a><link rel="stylesheet" href="http://x/y.css">';
-  const clean = sanitizeHtmlForOffline(dirty);
-  assert.doesNotMatch(clean, /<script/i);
-  assert.doesNotMatch(clean, /onclick/i);
-  assert.doesNotMatch(clean, /evil\.com/);
-  assert.doesNotMatch(clean, /cdn\.example/);
-  assert.doesNotMatch(clean, /<link/i);
-  assert.match(clean, /hi<\/p>/);
+
+  // Each of the first four went STRAIGHT THROUGH the previous blocklist
+  // version, because its on*= regex required quotes and its remote-URL regex
+  // required quotes. That is the failure mode a blocklist has by construction,
+  // and the reason this is an allowlist now.
+  const attacks = [
+    '<img src=x onerror=alert(1)>',
+    '<img src=x onerror=`alert(1)`>',
+    '<svg onload=alert(1)>',
+    '<iframe src=https://evil.test/x></iframe>',
+    '<img src=x onerror="alert(1)">',
+    '<svg><foreignObject><script>alert(1)</script></foreignObject></svg>',
+    '<meta http-equiv=refresh content="0;url=https://evil.test">',
+    '<link rel=stylesheet href=https://evil.test/a.css>',
+    '<base href=https://evil.test/>',
+    '<a href="javascript:alert(1)">x</a>',
+    '<a href="data:text/html,<script>alert(1)</script>">x</a>',
+    '<div style="background:url(https://evil.test/p.png)">y</div>',
+    '<style>body{background:url(//evil.test/p.png)}</style>',
+    '<object data=https://evil.test/x></object>',
+    '<form action=https://evil.test><input name=a></form>',
+    '<body onload=alert(1)>z</body>',
+    '<!--[if IE]><script>alert(1)</script><![endif]-->',
+    '<img/src=x/onerror=alert(1)>',
+    '<IMG SRC=x ONERROR=alert(1)>',
+    '<a href="vbscript:msgbox(1)">x</a>',
+    '<p onclick="steal()">hi</p>',
+    '<img src="https://evil.com/x.png">',
+    '<a href="//cdn.example/x">y</a>',
+  ];
+  for (const dirty of attacks) {
+    const clean = sanitizeHtmlForOffline(dirty);
+    assert.doesNotMatch(clean, /\son\w+\s*=/i, `event handler survived: ${dirty} -> ${clean}`);
+    assert.doesNotMatch(clean, /javascript:|vbscript:/i, `script URL survived: ${dirty} -> ${clean}`);
+    assert.doesNotMatch(clean, /evil\.test|evil\.com|cdn\.example/i, `remote reference survived: ${dirty} -> ${clean}`);
+    assert.doesNotMatch(clean, /<script|<iframe|<object|<form|<link|<base|http-equiv/i, `dangerous element survived: ${dirty} -> ${clean}`);
+  }
+
+  // Text content is kept even when its wrapper is not, so a document does not
+  // silently lose words to sanitising.
+  assert.match(sanitizeHtmlForOffline('<p onclick="steal()">hi</p>'), /hi<\/p>/);
+  assert.match(sanitizeHtmlForOffline('<form action=x>keep me</form>'), /keep me/);
+
+  // And an ordinary converted document must come through unharmed — a
+  // sanitiser that eats real formatting is a bug, not caution.
+  const document = '<html><body><h1 class=t>Invoice</h1><p style="color:#111">Total <strong>128450.00</strong></p>'
+    + '<table border=1><tr><td colspan=2>x</td></tr></table><img src="data:image/png;base64,AAA" alt=logo></body></html>';
+  const kept = sanitizeHtmlForOffline(document);
+  for (const expected of ['class="t"', "Invoice", "<strong>128450.00</strong>", 'colspan="2"', "data:image/png;base64,AAA", 'alt="logo"', 'style="color:#111"']) {
+    assert.ok(kept.includes(expected), `an ordinary document lost ${expected}: ${kept}`);
+  }
 });
 
 test("readWorkbookSheets reads a generated workbook to rows and sheetsToHtml builds tables", async () => {
