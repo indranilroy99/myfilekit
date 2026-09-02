@@ -3977,6 +3977,44 @@ test("search strips stopwords and resolves natural security queries to the right
   }
 });
 
+test("search resolves how people actually phrase a task, not the tool's own name", () => {
+  // Every line here was a MISS before the synonyms were added — measured, not
+  // imagined. "make my pdf smaller" put Compress PDF fifth, behind Auto-Tag;
+  // "combine pdfs" put Compare PDF first; "lock my pdf" put Unlock PDF first,
+  // which is the opposite of the request.
+  const cases = [
+    ["make my pdf smaller", "compress-pdf-tool"],
+    ["shrink pdf", "compress-pdf-tool"],
+    ["reduce pdf size", "compress-pdf-tool"],
+    ["combine pdfs", "merge-pdf-tool"],
+    ["join two pdfs", "merge-pdf-tool"],
+    ["put pdfs together", "merge-pdf-tool"],
+    ["cut pdf in half", "split-pdf-tool"],
+    ["separate pages", "split-pdf-tool"],
+    ["turn pdf sideways", "rotate-pdf-tool"],
+    ["sign a document", "add-signature-to-pdf-tool"],
+    ["black out names", "redact-pdf-tool"],
+    ["hide personal info", "auto-redact-pii-tool"],
+    ["make it searchable", "ocr-pdf-tool"],
+    ["read text from a scan", "ocr-pdf-tool"],
+    ["lock my pdf", "encrypt-pdf-tool"],
+  ];
+  for (const [query, expectedId] of cases) {
+    const results = filterTools(query);
+    assert.equal(results[0]?.id, expectedId, `"${query}" should rank ${expectedId} first, got ${results[0]?.id}`);
+  }
+
+  // "lock" is a substring of "unlock", so a plain includes() scored the wrong
+  // tool higher. Both directions are pinned, because fixing one by breaking the
+  // other would be no fix at all.
+  assert.equal(filterTools("lock my pdf")[0].id, "encrypt-pdf-tool");
+  assert.equal(filterTools("unlock my pdf")[0].id, "unlock-pdf-tool");
+
+  // The conversion-direction handling must survive the new scoring.
+  assert.equal(filterTools("jpg to pdf")[0].id, "images-to-pdf-tool");
+  assert.equal(filterTools("pdf to jpg")[0].id, "pdf-to-image-tool");
+});
+
 test("search stopword-only queries fall back to the full tool list", () => {
   assert.equal(filterTools("how do i").length, tools.length);
 });

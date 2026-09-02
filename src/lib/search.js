@@ -37,7 +37,29 @@ export const SEARCH_SYNONYMS = {
   ua: ["accessib"],
   // Embedded-image intent resolves to Extract Images & Attachments.
   embedded: ["extract images"],
+  // Everything below was added from measurement, not guesswork: each of these
+  // was a natural phrasing that put the wrong tool first. "make my pdf smaller"
+  // ranked Compress PDF fifth, behind Auto-Tag.
+  smaller: ["compress"],
+  shrink: ["compress"],
+  reduce: ["compress"],
+  combine: ["merge"],
+  join: ["merge"],
+  together: ["merge"],
+  cut: ["split"],
+  separate: ["split"],
+  sideways: ["rotate"],
+  turn: ["rotate"],
+  searchable: ["ocr"],
+  scan: ["ocr"],
+  scanned: ["ocr"],
+  // "lock my pdf" wants Encrypt. Without this the substring in "Unlock PDF"
+  // won it, which is the opposite of what was asked for.
+  lock: ["encrypt"],
+  sign: ["add signature"],
+  personal: ["auto-redact"],
 };
+
 
 // Conversion queries are directional, but "jpg to pdf" and "pdf to jpg" reduce
 // to the same two tokens once "to" is stripped as a stopword — so token scoring
