@@ -1,11 +1,15 @@
 /**
  * Talking to the MyFileKit conversion server.
  *
- * The server exists for one job the browser cannot do: a browser can only
- * RASTERISE an Office document, so client-side Word/Excel/PowerPoint output is
- * a picture with no selectable text — measured at 0 extractable characters.
- * LibreOffice on a server produces real text; the same document came back with
- * 88 characters of searchable content.
+ * The server exists for the jobs the browser cannot do:
+ *
+ *   - Office to PDF. A browser can only RASTERISE a document, so client-side
+ *     Word/Excel/PowerPoint output is a picture with no selectable text —
+ *     measured at 0 extractable characters. LibreOffice produces real text; the
+ *     same document came back with 88 characters of searchable content.
+ *   - Compress PDF. The browser tool turns every page into a JPEG, which
+ *     destroys the text and inflates text-based files. Ghostscript recompresses
+ *     images and subsets fonts while leaving text as text.
  *
  * The design rule here is the one the whole product rests on: a file is never
  * uploaded unless the user chose it for that conversion. The server is offered,
@@ -47,11 +51,13 @@ export async function serverCapabilities({ force = false } = {}) {
       available: true,
       office: Boolean(body?.capabilities?.office),
       maxBytes: Number(body?.limits?.maxBytes) || 0,
+      ghostscript: Boolean(body?.capabilities?.ghostscript),
       accepts: Array.isArray(body?.accepts) ? body.accepts : [],
+      compressionLevels: Array.isArray(body?.compressionLevels) ? body.compressionLevels : [],
       retention: String(body?.retention || ""),
     };
   } catch {
-    cachedProbe = { available: false, office: false, maxBytes: 0, accepts: [], retention: "" };
+    cachedProbe = { available: false, office: false, ghostscript: false, maxBytes: 0, accepts: [], compressionLevels: [], retention: "" };
   }
   return cachedProbe;
 }
@@ -96,4 +102,39 @@ export async function convertOfficeOnServer(file) {
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (!bytes.length) throw new Error("The server returned an empty file.");
   return bytes;
+}
+
+/**
+ * Compress a PDF on the server, keeping its text as text.
+ *
+ * Returns the byte count of what was sent as well as what came back, and
+ * whether the server actually compressed anything: when a PDF is already
+ * optimised, Ghostscript's output is larger, and the server sends the original
+ * back rather than handing over a bigger file labelled "compressed". The UI has
+ * to be able to say that plainly, which is why `compressed` is part of the
+ * return value and not inferred from the sizes.
+ */
+export async function compressPdfOnServer(file, level = "balanced") {
+  const probe = await serverCapabilities();
+  if (!probe.available) throw new Error("The conversion server is not reachable. Compress here instead, or try again later.");
+  if (!probe.ghostscript) throw new Error("This server has no PDF compressor installed.");
+  if (probe.maxBytes && file.size > probe.maxBytes) {
+    throw new Error(`That file is larger than the server's ${Math.round(probe.maxBytes / 1024 / 1024)} MB limit. Compress it here instead.`);
+  }
+  const response = await fetch(`${API_BASE}/api/compress-pdf`, {
+    method: "POST",
+    headers: { "Content-Type": "application/pdf", "X-Compression-Level": level },
+    body: file,
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    throw new Error(detail?.error || `The server could not compress that file (${response.status}).`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.length) throw new Error("The server returned an empty file.");
+  return {
+    bytes,
+    originalBytes: Number(response.headers.get("X-Original-Bytes")) || file.size,
+    compressed: response.headers.get("X-Compressed") !== "false",
+  };
 }

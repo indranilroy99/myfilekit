@@ -255,35 +255,70 @@ function ToolNotes({ summary, children }: { summary: string; children: React.Rea
  * is the disclosure. If the copy explaining an upload lived in three places it
  * would eventually say three different things, and one of them would be wrong.
  */
+/**
+ * The one place the product's central promise is actually offered or kept.
+ *
+ * Every tool that can use the server renders this and nothing else, so the
+ * wording, the ordering and the defaults are decided once. Two rules are
+ * structural rather than cosmetic:
+ *
+ *  - The local path is always present and always requires no upload. If the
+ *    server is unreachable the tool still works; it does not degrade to an
+ *    error.
+ *  - Neither button is pre-selected and nothing runs on file choice. "Nothing
+ *    is uploaded unless you choose to" means a press, every time.
+ *
+ * Labels are props because "Convert on our server" is wrong for compressing,
+ * and copy that lies about what the button does is worse than duplicated JSX.
+ */
 function ServerConvertChoice({
   serverAvailable,
   serverProbed,
   onServer,
   onLocal,
   localWarning,
+  serverLabel = "Convert on our server",
+  localLabel = "Convert here instead",
+  offlineLabel = "Convert to PDF",
+  serverBenefit = "Real, selectable text.",
+  serverOffline = "Our converter, which returns real selectable text, is unreachable right now.",
+  serverOptions = null,
+  localOptions = null,
+  localDisabled = false,
 }: {
   serverAvailable: boolean;
   serverProbed: boolean;
   onServer: () => void;
   onLocal: () => void;
   localWarning: string;
+  serverLabel?: string;
+  localLabel?: string;
+  offlineLabel?: string;
+  serverBenefit?: string;
+  serverOffline?: string;
+  serverOptions?: React.ReactNode;
+  localOptions?: React.ReactNode;
+  localDisabled?: boolean;
 }) {
   if (!serverAvailable) {
     return (
       <>
-        <PrimaryButton label="Convert to PDF" onClick={onLocal} />
+        {localOptions}
+        <PrimaryButton label={offlineLabel} disabled={localDisabled} onClick={onLocal} />
         <ToolNotes summary="About the output">
           <li>{localWarning}</li>
-          {serverProbed ? <li>Our converter, which returns real selectable text, is unreachable right now.</li> : null}
+          {serverProbed ? <li>{serverOffline}</li> : null}
         </ToolNotes>
       </>
     );
   }
   return (
     <div className="convert-choice">
-      <PrimaryButton label="Convert on our server" onClick={onServer} />
-      <p className="convert-choice-note">Real, selectable text. Your file is uploaded to our converter and deleted when the request finishes.</p>
-      <SecondaryButton label="Convert here instead" onClick={onLocal} />
+      {serverOptions}
+      <PrimaryButton label={serverLabel} onClick={onServer} />
+      <p className="convert-choice-note">{serverBenefit} Your file is uploaded to our converter and deleted when the request finishes.</p>
+      {localOptions}
+      <SecondaryButton label={localLabel} disabled={localDisabled} onClick={onLocal} />
       <p className="convert-choice-note">Nothing is uploaded. {localWarning}</p>
     </div>
   );
@@ -518,9 +553,11 @@ function PrimaryButton({ label, onClick, disabled = false }: { label: string; on
   );
 }
 
-function SecondaryButton({ label, onClick }: { label: string; onClick: () => unknown }) {
+function SecondaryButton({ label, onClick, disabled = false }: { label: string; onClick: () => unknown; disabled?: boolean }) {
   const { pending, handleClick } = usePendingHandler(onClick);
-  return <button className="secondary-button" type="button" onClick={handleClick} disabled={pending} aria-busy={pending}>{label}</button>;
+  // `pending` still disables on its own, so a caller passing disabled cannot
+  // accidentally re-enable a button mid-run.
+  return <button className="secondary-button" type="button" onClick={handleClick} disabled={disabled || pending} aria-busy={pending}>{label}</button>;
 }
 
 function verdictTone(level: string) {

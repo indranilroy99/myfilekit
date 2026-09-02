@@ -25,6 +25,18 @@ export const OFFICE_EXTENSIONS = new Set([
   "ppt", "pptx", "odp",
 ]);
 
+/**
+ * Ghostscript presets we expose, mapped to a plain-language name.
+ *
+ * An allowlist because the value reaches a command line: -dPDFSETTINGS takes a
+ * token, and a caller-supplied token is a caller-supplied argument.
+ */
+export const COMPRESSION_LEVELS = new Map([
+  ["small", "/screen"],    // 72 dpi images — for reading on screen
+  ["balanced", "/ebook"],  // 150 dpi — the default, good for most documents
+  ["quality", "/printer"], // 300 dpi — keeps print quality
+]);
+
 export function isToolAvailable(command) {
   return new Promise((resolve) => {
     const probe = spawn(command, ["--version"], { stdio: "ignore" });
@@ -118,5 +130,83 @@ export async function officeToPdf(input, extension) {
       throw Object.assign(new Error("The converter produced no output. The document may be password-protected or corrupt."), { status: 422 });
     }
     return bytes;
+  });
+}
+
+/**
+ * A PDF really is a PDF.
+ *
+ * This matters more for Ghostscript than for anything else here. `gs` is a
+ * complete PostScript interpreter: hand it a .ps file and it will execute the
+ * program inside. Requiring the PDF header means the only thing we ever feed it
+ * is a document, not a program. `-dSAFER` is belt as well as braces.
+ *
+ * The header is allowed a small offset because real-world PDFs — ones that have
+ * been through a mail gateway or a bad scanner — often carry junk in front of
+ * it, and Acrobat itself tolerates that.
+ */
+function looksLikePdf(input) {
+  return input.subarray(0, 1024).includes(Buffer.from("%PDF-", "latin1"));
+}
+
+/**
+ * Compress a PDF properly, via Ghostscript.
+ *
+ * Different in kind from what the browser can do. The client-side tool turns
+ * every page into a JPEG, which destroys the text and often makes text-based
+ * files larger. Ghostscript recompresses the images, subsets the fonts and
+ * drops unused objects while leaving the text as text — so it stays selectable
+ * and searchable. This is the tool people actually want when they say
+ * "make my PDF smaller".
+ *
+ * Returns the ORIGINAL bytes when compression would make the file bigger,
+ * which happens on documents that are already optimised. Handing someone a
+ * larger file and calling it compression is a lie the client can't detect.
+ *
+ * @param {Buffer} input
+ * @param {string} level one of COMPRESSION_LEVELS' keys
+ * @returns {Promise<{ bytes: Buffer, originalBytes: number, compressed: boolean }>}
+ */
+export async function compressPdf(input, level) {
+  const preset = COMPRESSION_LEVELS.get(String(level || "balanced"));
+  if (!preset) {
+    throw Object.assign(new Error("Unknown compression level."), { status: 400 });
+  }
+  if (!Buffer.isBuffer(input) || !input.length) {
+    throw Object.assign(new Error("No file was received."), { status: 400 });
+  }
+  if (input.length > LIMITS.maxBytes) {
+    throw Object.assign(new Error(`That file is larger than the ${Math.round(LIMITS.maxBytes / 1024 / 1024)} MB limit.`), { status: 413 });
+  }
+  if (!looksLikePdf(input)) {
+    throw Object.assign(new Error("That does not look like a PDF."), { status: 415 });
+  }
+
+  return withScratch(async (dir) => {
+    const stem = crypto.randomBytes(8).toString("hex");
+    const source = path.join(dir, `${stem}.pdf`);
+    const target = path.join(dir, `${stem}-out.pdf`);
+    await fs.writeFile(source, input);
+    await run("gs", [
+      "-sDEVICE=pdfwrite",
+      "-dCompatibilityLevel=1.7",
+      `-dPDFSETTINGS=${preset}`,
+      "-dNOPAUSE", "-dBATCH", "-dQUIET",
+      // No file access outside the job, no shell escapes out of the interpreter.
+      "-dSAFER",
+      // Do not search the current directory for library files first, so a file
+      // that happens to sit next to the job cannot shadow one of Ghostscript's.
+      "-P-",
+      `-sOutputFile=${target}`,
+      source,
+    ], { cwd: dir });
+    const bytes = await fs.readFile(target).catch(() => null);
+    if (!bytes || !bytes.length) {
+      throw Object.assign(new Error("The compressor produced no output. The PDF may be password-protected or corrupt."), { status: 422 });
+    }
+    if (bytes.length >= input.length) {
+      return { bytes: input, originalBytes: input.length, compressed: false };
+    }
+    return { bytes, originalBytes: input.length, compressed: true };
   });
 }

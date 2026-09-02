@@ -24,7 +24,7 @@ import { MAX_BATCH_FILES, batchAcceptFor, batchOpList, defaultBatchOptions, runB
 import { captureVideoFrame, enhanceCanvas, getHtml2Canvas, startCameraStream, stopCameraStream } from "../services/capture.service.js";
 import { docxToHtml, epubToHtml, pptxToSlides, readWorkbookSheets, sanitizeHtmlForOffline, sheetsToHtml } from "../services/office.service.js";
 import { pdfToDocx, pdfToEpub, pdfToHtml, pdfToXlsx } from "../services/export.service.js";
-import { serverCapabilities, convertOfficeOnServer } from "../services/server.service.js";
+import { serverCapabilities, compressPdfOnServer, convertOfficeOnServer } from "../services/server.service.js";
 import { DEFAULT_OCR_LANG, OCR_ENGINE_SIZE_LABEL, OCR_LANGUAGES, mergeSearchablePdfPages, ocrImages, ocrPdf, terminateOcrWorker } from "../services/ocr.service.js";
 import { getSpeechSynthesis, loadSpeechVoices, speechSynthesisSupported, splitTextForSpeech } from "../services/audio.service.js";
 import { initialStatus, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, ToolNotes, ServerConvertChoice, canvasToBlob, requireOutput, copyText } from "./shared";
@@ -1944,6 +1944,8 @@ function CompressPdfTool({ tool }: { tool: Tool }) {
   const [status, setStatus] = useState(initialStatus);
   const [preflight, setPreflight] = useState<CompressPreflight | null>(null);
   const [flattenAnyway, setFlattenAnyway] = useState(false);
+  const [level, setLevel] = useState("balanced");
+  const { canCompressOnServer, probed } = useConversionServer();
 
   // Inspect the chosen PDF up front so the warning arrives before the damage,
   // not after. The check is advisory: if it fails, compressing still works.
@@ -1961,22 +1963,59 @@ function CompressPdfTool({ tool }: { tool: Tool }) {
 
   const blocked = Boolean(preflight?.textHeavy) && !flattenAnyway;
 
+  const compressOnServer = () => runSafely(setStatus, async () => {
+    const [file] = validateFiles(files, tool.file);
+    setStatus({ tone: "idle", message: "Uploading and compressing…" });
+    const { bytes, originalBytes, compressed } = await compressPdfOnServer(file, level);
+    if (!compressed) {
+      // The server already refused to hand back a bigger file. Say so instead of
+      // reporting a saving of zero as if something had happened.
+      throw new Error([
+        "Already about as small as it goes — nothing was changed.",
+        `This file is ${formatBytes(originalBytes)}, and compressing it produced a larger one, so your original is untouched.`,
+        "If you need it smaller, drop pages you don't need with Split / Extract PDF Pages, or try the Smallest setting.",
+      ].join("\n"));
+    }
+    downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-compressed`, "pdf"), "application/pdf");
+    const saved = Math.round((1 - bytes.length / originalBytes) * 100);
+    return `Original: ${formatBytes(originalBytes)}\nOutput: ${formatBytes(bytes.length)}\nSaved about ${saved}%. The text is still selectable and searchable.`;
+  });
+
   return <ToolForm status={status} onReset={() => { setFiles([]); setPreflight(null); setFlattenAnyway(false); setStatus(initialStatus); }}>
-    <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      This turns each page into a JPEG image, so selectable text becomes part of the image. Best for image-heavy or scanned PDFs. On a text-based PDF it destroys the text and usually makes the file <strong>bigger</strong>.
-    </div>
+    <p className="tool-lead">Make a PDF smaller.</p>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
+    {/*
+      The text-heavy warning changes meaning entirely depending on whether the
+      server is reachable, so it has two forms rather than one hedged one.
+      Locally it is a dead end — a picture of text is bigger than the text — and
+      the honest advice is to do something else. On the server it is not a
+      problem at all: Ghostscript recompresses the images and leaves the text as
+      text (measured: a 16 KB text PDF came back 11 KB with its figures still
+      extractable). Pointing at the button that works beats explaining why the
+      other one doesn't.
+    */}
     {preflight?.textHeavy && (
       <div className="surface-card wabi-card-edge grid gap-2 border-[var(--warning)] p-4 text-sm font-semibold leading-6 text-neutral-600">
-        <p className="text-xs font-bold uppercase text-[var(--warning)]">This is a text-based PDF — compressing will probably make it larger</p>
-        <p className="text-[var(--foreground)]">It carries about {preflight.chars.toLocaleString()} characters of selectable text across {preflight.pages} page{preflight.pages === 1 ? "" : "s"}, with {preflight.images === 0 ? "no" : preflight.images} embedded image{preflight.images === 1 ? "" : "s"}. Text is already tiny to store; a photograph of that text is not — so rasterising it typically inflates the file many times over <em>and</em> leaves you with no selectable, searchable, or copyable text.</p>
-        <p>What to do instead: keep this file as it is, drop pages you don't need with <a className="underline" href="#split-pdf-tool">Split / Extract PDF Pages</a>, pull out the heavy artwork with <a className="underline" href="#extract-images-tool">Extract Images &amp; Attachments</a>, or re-save it with <a className="underline" href="#repair-pdf-tool">Repair PDF</a> to drop unused objects.</p>
-        <Checkbox label="Do it anyway — I accept a bigger file with no selectable text" checked={flattenAnyway} onChange={setFlattenAnyway} />
+        {canCompressOnServer ? (
+          <>
+            <p className="text-xs font-bold uppercase text-[var(--warning)]">Use our server for this one</p>
+            <p className="text-[var(--foreground)]">This PDF is mostly text — about {preflight.chars.toLocaleString()} characters across {preflight.pages} page{preflight.pages === 1 ? "" : "s"}. Compressing it in your browser would turn that text into a picture, which is both larger and no longer selectable. Our server keeps it as text.</p>
+          </>
+        ) : (
+          <>
+            <p className="text-xs font-bold uppercase text-[var(--warning)]">This is a text-based PDF — compressing will probably make it larger</p>
+            <p className="text-[var(--foreground)]">It carries about {preflight.chars.toLocaleString()} characters of selectable text across {preflight.pages} page{preflight.pages === 1 ? "" : "s"}, with {preflight.images === 0 ? "no" : preflight.images} embedded image{preflight.images === 1 ? "" : "s"}. Text is already tiny to store; a photograph of that text is not — so turning it into an image typically inflates the file many times over <em>and</em> leaves you with no selectable, searchable, or copyable text.</p>
+            <p>What to do instead: keep this file as it is, drop pages you don't need with <a className="underline" href="#split-pdf-tool">Split / Extract PDF Pages</a>, pull out the heavy artwork with <a className="underline" href="#extract-images-tool">Extract Images &amp; Attachments</a>, or re-save it with <a className="underline" href="#repair-pdf-tool">Repair PDF</a> to drop unused objects.</p>
+            <Checkbox label="Do it anyway — I accept a bigger file with no selectable text" checked={flattenAnyway} onChange={setFlattenAnyway} />
+          </>
+        )}
       </div>
     )}
-    <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["96", "120", "150", "200"]} labels={["96 · smallest", "120 · default", "150 · sharp", "200 · sharpest"]} />
-    <Range label="JPEG quality" value={quality} onChange={setQuality} />
-    <PrimaryButton label="Compress PDF" disabled={blocked} onClick={() => runSafely(setStatus, async () => {
+    <ServerConvertChoice
+      serverAvailable={canCompressOnServer}
+      serverProbed={probed}
+      onServer={compressOnServer}
+      onLocal={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
       const { bytes, before, after } = await rasterCompressPdf(file, { quality: Number(quality), dpi: Number(dpi), onProgress: pageProgress(setStatus, "Compressing") });
       // Never hand back a worse file behind a success message. If the output is
@@ -1986,7 +2025,7 @@ function CompressPdfTool({ tool }: { tool: Tool }) {
         throw new Error([
           `Not compressed — this file got bigger, so nothing was saved.`,
           `Original: ${formatBytes(before)}`,
-          `Turn into an imaged output: ${formatBytes(after)}`,
+          `Output: ${formatBytes(after)}`,
           `Why: compressing turns every page into a JPEG. This PDF's pages are mostly text, and a picture of text costs far more to store than the text itself — so the output grew instead of shrinking, and it would have had no selectable text.`,
           `What to do instead: keep the original, remove pages you don't need with Split / Extract PDF Pages, or re-save it with Repair PDF. Compression only pays off on scans and image-heavy PDFs.`,
         ].join("\n"));
@@ -1994,7 +2033,20 @@ function CompressPdfTool({ tool }: { tool: Tool }) {
       downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-compressed`, "pdf"), "application/pdf");
       const saved = Math.round((1 - after / before) * 100);
       return `Original: ${formatBytes(before)}\nOutput: ${formatBytes(after)}\nSaved about ${saved}%.`;
-    })} />
+      })}
+      serverLabel="Compress on our server"
+      localLabel={blocked ? "Compress here — accept the warning above first" : "Compress here instead"}
+      offlineLabel="Compress PDF"
+      serverBenefit="Images are recompressed and fonts subset, so your text stays selectable and searchable."
+      serverOffline="Our server, which compresses without touching your text, is unreachable right now."
+      serverOptions={<Select label="How small" value={level} onChange={setLevel} options={["small", "balanced", "quality"]} labels={["Smallest · for reading on screen", "Balanced · good for most documents", "Best quality · safe to print"]} />}
+      localOptions={<>
+        <Select label="Resolution (DPI)" value={dpi} onChange={setDpi} options={["96", "120", "150", "200"]} labels={["96 · smallest", "120 · default", "150 · sharp", "200 · sharpest"]} />
+        <Range label="JPEG quality" value={quality} onChange={setQuality} />
+      </>}
+      localDisabled={blocked}
+      localWarning="Every page becomes a JPEG, so selectable text becomes part of the image. Good for scans and photo-heavy files; on a text PDF it usually makes things worse."
+    />
   </ToolForm>;
 }
 
@@ -3421,13 +3473,21 @@ async function renderHtmlToCanvas(bodyHtml: string, { widthPx = 794, scale = 2 }
  * state, so this never throws and every caller still works locally.
  */
 function useConversionServer() {
-  const [probe, setProbe] = useState<{ available: boolean; office: boolean } | null>(null);
+  const [probe, setProbe] = useState<{ available: boolean; office: boolean; ghostscript?: boolean } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    serverCapabilities().then((next) => { if (!cancelled) setProbe(next); }).catch(() => { if (!cancelled) setProbe({ available: false, office: false }); });
+    serverCapabilities().then((next) => { if (!cancelled) setProbe(next); }).catch(() => { if (!cancelled) setProbe({ available: false, office: false, ghostscript: false }); });
     return () => { cancelled = true; };
   }, []);
-  return { probe, canUseServer: Boolean(probe?.available && probe?.office), probed: probe !== null };
+  // Reported separately because the two jobs need different tools installed:
+  // documents need LibreOffice, compressing needs Ghostscript. A host can have
+  // one and not the other, and a tool must not offer what is not there.
+  return {
+    probe,
+    canUseServer: Boolean(probe?.available && probe?.office),
+    canCompressOnServer: Boolean(probe?.available && probe?.ghostscript),
+    probed: probe !== null,
+  };
 }
 
 function WordToPdfTool({ tool }: { tool: Tool }) {

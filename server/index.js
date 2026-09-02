@@ -17,7 +17,7 @@
  *   - Every external tool is spawned with an argument array, never a shell.
  */
 import http from "node:http";
-import { capabilities, officeToPdf, LIMITS, OFFICE_EXTENSIONS } from "./convert.js";
+import { capabilities, officeToPdf, compressPdf, LIMITS, OFFICE_EXTENSIONS, COMPRESSION_LEVELS } from "./convert.js";
 
 const PORT = Number(process.env.PORT || 8081);
 // Browsers enforce this; it is not a security boundary on its own, but it stops
@@ -53,7 +53,10 @@ function cors(req, res) {
     res.setHeader("Vary", "Origin");
   }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-File-Extension");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-File-Extension, X-Compression-Level");
+  // The client reads these off a PDF response; without this they are invisible
+  // to cross-origin fetch, and the size saving could not be shown honestly.
+  res.setHeader("Access-Control-Expose-Headers", "X-Original-Bytes, X-Compressed");
   res.setHeader("Access-Control-Max-Age", "600");
 }
 
@@ -104,6 +107,7 @@ const server = http.createServer(async (req, res) => {
         // will and will not do, rather than guessing.
         limits: { maxBytes: LIMITS.maxBytes, timeoutMs: LIMITS.timeoutMs },
         accepts: [...OFFICE_EXTENSIONS],
+        compressionLevels: [...COMPRESSION_LEVELS.keys()],
         retention: "none — files are deleted when the request finishes",
       });
     }
@@ -123,6 +127,27 @@ const server = http.createServer(async (req, res) => {
         "Cache-Control": "no-store",
       });
       return res.end(pdf);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/compress-pdf") {
+      if (rateLimited(ip)) return json(res, 429, { error: "Too many conversions from this address. Wait a minute and try again." });
+      const caps = await capabilities();
+      if (!caps.ghostscript) return json(res, 503, { error: "This server has no PDF compressor installed." });
+
+      const level = String(req.headers["x-compression-level"] || "balanced").toLowerCase().replace(/[^a-z]/g, "");
+      const body = await readBody(req, LIMITS.maxBytes);
+      const { bytes, originalBytes, compressed } = await compressPdf(body, level);
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Length": bytes.length,
+        // So the client can state the real saving rather than assuming there was
+        // one. `false` means we sent the original back untouched.
+        "X-Original-Bytes": String(originalBytes),
+        "X-Compressed": compressed ? "true" : "false",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store",
+      });
+      return res.end(bytes);
     }
 
     return json(res, 404, { error: "No such endpoint." });

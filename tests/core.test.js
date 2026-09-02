@@ -8028,16 +8028,24 @@ test("page geometry: the drawn areas are parsed from the coordinate list", async
 test("Compress PDF reports a larger-than-input result as a warning, never as a success", () => {
   const section = sourceOfComponents(["CompressPdfTool"]);
 
-  // The decision is made on the real before/after sizes the service reports.
-  assert.match(section, /const \{ bytes, before, after \} = await rasterCompressPdf/);
-  const guard = section.indexOf("if (after >= before)");
-  const download = section.indexOf("downloadBytes(");
+  // There are two compression paths now — our server and turning pages into
+  // images here — and BOTH can produce something bigger than the input. The
+  // rule is the same for both, so each path is checked on its own slice rather
+  // than on the component as a whole, where an `indexOf` would silently find
+  // the other path's guard and pass without proving anything.
+  const renderStart = section.indexOf("return <ToolForm");
+  const serverPath = section.slice(section.indexOf("const compressOnServer"), renderStart);
+  const localPath = section.slice(renderStart);
+  assert.ok(serverPath.length > 100 && localPath.length > 100, "both compression paths are present");
+
+  // --- turning pages into images, here in the browser ---
+  assert.match(localPath, /const \{ bytes, before, after \} = await rasterCompressPdf/);
+  const guard = localPath.indexOf("if (after >= before)");
+  const download = localPath.indexOf("downloadBytes(");
   assert.ok(guard > 0, "the output size must be compared against the input size");
   assert.ok(download > guard, "the comparison must happen before the file is handed back");
 
-  // A bigger output is never resolved as a success, so the 'Done — ready to
-  // save' card cannot appear for it.
-  const refusal = section.slice(guard, download);
+  const refusal = localPath.slice(guard, download);
   assert.match(refusal, /throw new Error/, "a bigger output must not resolve as a success");
   assert.match(refusal, /got bigger/i, "it says plainly that this file got bigger");
   assert.match(refusal, /formatBytes\(before\)/, "the original size is quoted");
@@ -8047,10 +8055,26 @@ test("Compress PDF reports a larger-than-input result as a warning, never as a s
   // is that the message says why the file grew, in language a user can follow.
   assert.match(refusal, /picture of text|turns every page into|into a JPEG/i, "it explains why the file grew");
   assert.match(refusal, /instead/i, "it tells the user what to do instead");
+  const savedLocally = localPath.indexOf("Saved about");
+  assert.ok(savedLocally > download, "'Saved about' may only be claimed after a real download");
 
-  // The savings message belongs only to the path that actually saved bytes.
-  const saved = section.indexOf("Saved about");
-  assert.ok(saved > download, "'Saved about' may only be claimed after a real download");
+  // --- our server ---
+  // The server sends the ORIGINAL back when Ghostscript's output is larger, and
+  // flags it with compressed:false. Measured: /printer on an already-optimised
+  // file returned the input untouched. The UI must not report that as a saving
+  // of nothing — it must say nothing changed.
+  const serverGuard = serverPath.indexOf("if (!compressed)");
+  const serverDownload = serverPath.indexOf("downloadBytes(");
+  assert.ok(serverGuard > 0, "the server's compressed flag is checked, not inferred from the sizes");
+  assert.ok(serverDownload > serverGuard, "and checked before the file is handed back");
+  const serverRefusal = serverPath.slice(serverGuard, serverDownload);
+  assert.match(serverRefusal, /throw new Error/, "an unchanged file must not resolve as a success");
+  assert.match(serverRefusal, /nothing was changed|untouched/i, "it says the original was left alone");
+  const savedOnServer = serverPath.indexOf("Saved about");
+  assert.ok(savedOnServer > serverDownload, "'Saved about' may only be claimed after a real download");
+  // The whole reason to use the server: the text survives. If that stops being
+  // true the claim must come out of the copy.
+  assert.match(serverPath.slice(serverDownload), /still selectable/i, "the server path states that the text survived");
 });
 
 test("Compress PDF flags a text-heavy PDF before it rasterises anything", () => {
@@ -8077,8 +8101,16 @@ test("Compress PDF flags a text-heavy PDF before it rasterises anything", () => 
   assert.match(warning, /selectable/i, "and that the selectable text is destroyed");
   assert.match(warning, /instead/i, "and what to do instead");
   assert.match(warning, /#split-pdf-tool/, "with a real alternative to go to");
-  assert.match(section, /<Checkbox/, "rasterising anyway is an explicit, deliberate choice");
-  assert.match(section, /disabled=\{blocked\}/, "until then the action is not available");
+  assert.match(section, /<Checkbox/, "turning it into an image anyway is an explicit, deliberate choice");
+  // The gate now travels through the shared choice component, so assert BOTH
+  // halves: the tool passes the flag, and the component actually disables the
+  // button with it. Asserting only the first half would pass against a prop
+  // that the component ignored.
+  assert.match(section, /localDisabled=\{blocked\}/, "until then the action is not available");
+  const shared = fs.readFileSync(new URL("../src/tools/shared.tsx", import.meta.url), "utf8");
+  const choice = shared.slice(shared.indexOf("function ServerConvertChoice"), shared.indexOf("function ResultConsequenceNote"));
+  const disabling = choice.match(/disabled=\{localDisabled\}/g) || [];
+  assert.equal(disabling.length, 2, "both the server-present and server-absent layouts honour it");
 });
 
 test("Excel to PDF warns that its output is a picture, and points at CSV to PDF", () => {
@@ -8721,6 +8753,68 @@ test("the server only accepts extensions it can actually convert", async () => {
   );
   // Empty and oversized bodies are refused with their own status codes.
   await assert.rejects(() => officeToPdf(Buffer.alloc(0), "docx"), (e) => e.status === 400);
+});
+
+test("the compressor refuses anything that is not a PDF, because gs runs programs", async () => {
+  const { compressPdf, COMPRESSION_LEVELS } = await import("../server/convert.js");
+
+  // This is the sharpest edge on the server. Ghostscript is a complete
+  // PostScript interpreter: handed a .ps file it executes the program inside,
+  // which can open files. Requiring the PDF header is what keeps the input a
+  // document rather than a program.
+  const postscript = Buffer.from("%!PS\n(/tmp/pwned) (w) file dup (owned) writestring closefile\nshowpage\n");
+  await assert.rejects(
+    () => compressPdf(postscript, "balanced"),
+    (error) => error.status === 415 && /not look like a PDF/i.test(error.message),
+    "a PostScript program must never reach gs",
+  );
+  // Nor may anything else that merely claims to be a PDF.
+  await assert.rejects(() => compressPdf(Buffer.from("MZ\x90\x00"), "balanced"), (e) => e.status === 415);
+  await assert.rejects(() => compressPdf(Buffer.alloc(0), "balanced"), (e) => e.status === 400);
+
+  // The level reaches a command line as -dPDFSETTINGS, so it is an allowlist
+  // lookup and never interpolated from the request.
+  for (const level of ["small", "balanced", "quality"]) {
+    assert.ok(COMPRESSION_LEVELS.get(level)?.startsWith("/"), `${level} maps to a gs preset`);
+  }
+  await assert.rejects(
+    () => compressPdf(Buffer.from("%PDF-1.7\n"), "/screen -dSAFER=false"),
+    (error) => error.status === 400 && /Unknown compression level/i.test(error.message),
+    "an unknown level is refused before gs is spawned",
+  );
+
+  const source = fs.readFileSync(new URL("../server/convert.js", import.meta.url), "utf8");
+  const body = source.slice(source.indexOf("export async function compressPdf"));
+  // The preset only ever comes from the map, and the interpreter is locked down.
+  assert.match(body, /`-dPDFSETTINGS=\$\{preset\}`/, "the preset comes from the allowlist, not the request");
+  assert.match(body, /"-dSAFER"/, "gs runs with file access restricted");
+  assert.match(body, /"-P-"/, "and does not prefer library files from the job directory");
+  // The header check must happen before anything is written to disk.
+  assert.ok(body.indexOf("looksLikePdf") < body.indexOf("fs.writeFile"), "the input is checked before it is stored");
+});
+
+test("the compressor returns the original when compressing would make it bigger", async () => {
+  const source = fs.readFileSync(new URL("../server/convert.js", import.meta.url), "utf8");
+  const body = source.slice(source.indexOf("export async function compressPdf"));
+
+  // Ghostscript's higher-quality presets genuinely inflate some files —
+  // measured: /printer on an already-optimised PDF came back at exactly the
+  // input size. Handing that back as "compressed" would be a lie the client
+  // cannot detect, so the server sends the input bytes and says what it did.
+  assert.match(body, /if \(bytes\.length >= input\.length\)/, "the output is compared against the input");
+  const refusal = body.slice(body.indexOf("if (bytes.length >= input.length)"));
+  assert.match(refusal, /bytes: input/, "the ORIGINAL bytes are returned, not the larger output");
+  assert.match(refusal, /compressed: false/, "and the caller is told nothing was compressed");
+
+  // The flag has to survive the HTTP hop, including cross-origin, or the client
+  // would have to guess from the sizes.
+  const server = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
+  assert.match(server, /"X-Compressed": compressed \? "true" : "false"/);
+  assert.match(server, /Access-Control-Expose-Headers[^)]*X-Compressed/, "and be readable by the client");
+
+  // And the client must trust the flag rather than re-deriving it.
+  const client = fs.readFileSync(new URL("../src/services/server.service.js", import.meta.url), "utf8");
+  assert.match(client, /compressed: response\.headers\.get\("X-Compressed"\) !== "false"/);
 });
 
 test("the server never puts a caller's filename on a path or a command line", async () => {
