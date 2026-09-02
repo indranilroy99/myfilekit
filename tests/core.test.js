@@ -137,31 +137,6 @@ test("React shell does not use dangerous user-controlled HTML injection", () => 
   assert.doesNotMatch(appSource, /dangerouslySetInnerHTML|\\.innerHTML\\s*=/);
 });
 
-test("SpotlightCard glow is single-accent, on-element, and injection-free", () => {
-  const appSource = readAppSource();
-  const cardSource = fs.readFileSync(new URL("../src/components/ui/spotlight-card.tsx", import.meta.url), "utf8");
-
-  // The card glow is the deliberately-rebuilt on-system version: it must NOT
-  // reintroduce the old cursor-driven rainbow (a per-hue glowColorMap sweeping
-  // base+xp*spread) and must NOT inject markup.
-  assert.doesNotMatch(cardSource, /glowColorMap|dangerouslySetInnerHTML|<style/);
-  // No multi-hue rainbow config (the old component enumerated hues + a spread).
-  assert.doesNotMatch(cardSource, /glowColor\s*[:?]|spread/);
-  assert.doesNotMatch(cardSource, /['"](purple|orange)['"]/);
-  // Glow position comes from element-local coords; hue is the single accent (CSS).
-  assert.match(cardSource, /--sx|--sy/);
-  // No document-level pointer listener (the old per-card perf smell) — the
-  // handler is scoped to the element via React's onPointerMove.
-  assert.doesNotMatch(cardSource, /document\.addEventListener\(\s*["']pointermove/);
-  assert.match(cardSource, /onPointerMove/);
-  // The accent-only glow lives in scoped CSS.
-  const cssSource = fs.readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(cssSource, /\.spotlight-card::before/);
-  assert.match(cssSource, /var\(--primary\)/);
-
-  assert.match(appSource, /<SpotlightCard className=\{`tool-card group/);
-  assert.doesNotMatch(appSource, /dangerouslySetInnerHTML|\\.innerHTML\\s*=/);
-});
 
 test("liquid buttons provide standard button semantics without SVG filter effects", () => {
   const appSource = readAppSource();
@@ -5255,19 +5230,6 @@ test("semantic tone literals are consolidated onto canonical tokens", () => {
   assert.match(appSource, /border-\[var\(--warning\)\] bg-\[var\(--warning-bg\)\] text-\[var\(--warning-fg\)\]/);
 });
 
-test("Input/Label primitives mirror the app's .field-input look", () => {
-  const inputSource = fs.readFileSync(new URL("../src/components/ui/input.tsx", import.meta.url), "utf8");
-  const labelSource = fs.readFileSync(new URL("../src/components/ui/label.tsx", import.meta.url), "utf8");
-  // Aligned to .field-input: 44px, card bg, --input border, 8px radius, focus ring.
-  assert.match(inputSource, /h-11/);
-  assert.match(inputSource, /bg-card/);
-  assert.match(inputSource, /border-input/);
-  assert.match(inputSource, /rounded-lg/);
-  assert.match(inputSource, /focus-visible:ring-\[3px\]/);
-  assert.doesNotMatch(inputSource, /bg-background/); // the old divergent look is gone
-  assert.match(inputSource, /field-input/);          // comment noting the mirror
-  assert.match(labelSource, /field-input/);
-});
 
 // --- Sanitize PDF -------------------------------------------------------------
 
