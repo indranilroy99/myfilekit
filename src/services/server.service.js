@@ -10,6 +10,10 @@
  *   - Compress PDF. The browser tool turns every page into a JPEG, which
  *     destroys the text and inflates text-based files. Ghostscript recompresses
  *     images and subsets fonts while leaving text as text.
+ *   - OCR. Tesseract in the browser recognises the words. OCRmyPDF also deskews
+ *     and cleans the page first, and positions the invisible text to match the
+ *     image — the difference between a searchable PDF and one where the
+ *     highlight lands on the wrong word.
  *
  * The design rule here is the one the whole product rests on: a file is never
  * uploaded unless the user chose it for that conversion. The server is offered,
@@ -52,12 +56,14 @@ export async function serverCapabilities({ force = false } = {}) {
       office: Boolean(body?.capabilities?.office),
       maxBytes: Number(body?.limits?.maxBytes) || 0,
       ghostscript: Boolean(body?.capabilities?.ghostscript),
+      ocr: Boolean(body?.capabilities?.ocr),
       accepts: Array.isArray(body?.accepts) ? body.accepts : [],
       compressionLevels: Array.isArray(body?.compressionLevels) ? body.compressionLevels : [],
+      ocrLanguages: Array.isArray(body?.ocrLanguages) ? body.ocrLanguages : [],
       retention: String(body?.retention || ""),
     };
   } catch {
-    cachedProbe = { available: false, office: false, ghostscript: false, maxBytes: 0, accepts: [], compressionLevels: [], retention: "" };
+    cachedProbe = { available: false, office: false, ghostscript: false, ocr: false, maxBytes: 0, accepts: [], compressionLevels: [], ocrLanguages: [], retention: "" };
   }
   return cachedProbe;
 }
@@ -137,4 +143,35 @@ export async function compressPdfOnServer(file, level = "balanced") {
     originalBytes: Number(response.headers.get("X-Original-Bytes")) || file.size,
     compressed: response.headers.get("X-Compressed") !== "false",
   };
+}
+
+/**
+ * Add a searchable text layer to a scanned PDF, on the server.
+ *
+ * Returns how many characters were recognised as well as the file, because a
+ * PDF that came back with nothing in it looks exactly like one that worked.
+ */
+export async function ocrPdfOnServer(file, { language = "eng", redoOcr = false } = {}) {
+  const probe = await serverCapabilities();
+  if (!probe.available) throw new Error("The conversion server is not reachable. Run OCR here instead, or try again later.");
+  if (!probe.ocr) throw new Error("This server has no OCR engine installed.");
+  if (probe.maxBytes && file.size > probe.maxBytes) {
+    throw new Error(`That file is larger than the server's ${Math.round(probe.maxBytes / 1024 / 1024)} MB limit. Run OCR here instead.`);
+  }
+  const response = await fetch(`${API_BASE}/api/ocr-pdf`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/pdf",
+      "X-Ocr-Language": language,
+      "X-Ocr-Redo": redoOcr ? "true" : "false",
+    },
+    body: file,
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    throw new Error(detail?.error || `The server could not read that file (${response.status}).`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.length) throw new Error("The server returned an empty file.");
+  return { bytes, chars: Number(response.headers.get("X-Ocr-Text-Chars")) || 0 };
 }

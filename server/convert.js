@@ -37,6 +37,17 @@ export const COMPRESSION_LEVELS = new Map([
   ["quality", "/printer"], // 300 dpi — keeps print quality
 ]);
 
+/**
+ * Languages the OCR endpoint will accept.
+ *
+ * Deliberately the same nine the browser ships models for, so choosing the
+ * server never silently changes which languages are on offer. The value reaches
+ * a command line as `-l`, so it is an allowlist rather than a sanitised string.
+ */
+export const OCR_LANGUAGES = new Set([
+  "eng", "hin", "spa", "fra", "deu", "por", "chi_sim", "ara", "rus",
+]);
+
 export function isToolAvailable(command) {
   return new Promise((resolve) => {
     const probe = spawn(command, ["--version"], { stdio: "ignore" });
@@ -208,5 +219,68 @@ export async function compressPdf(input, level) {
       return { bytes: input, originalBytes: input.length, compressed: false };
     }
     return { bytes, originalBytes: input.length, compressed: true };
+  });
+}
+
+/**
+ * Add a searchable text layer to a scanned PDF, via OCRmyPDF.
+ *
+ * The browser can already do this with Tesseract, and for one clean page it is
+ * fine. What it cannot do is the rest of what OCRmyPDF does around Tesseract:
+ * deskew and clean the page before recognition, position the invisible text to
+ * match the words on the image, and leave the original page image untouched
+ * underneath. That is the difference between a PDF you can search and a PDF
+ * where the highlight lands on the right word.
+ *
+ * `--skip-text` is not a default worth changing lightly. Running OCR over a
+ * page that ALREADY has text produces two overlapping text layers, so every
+ * word extracts twice — the exact defect this project's own accessibility
+ * checker looks for (see duplicateTextRatio). Skipping those pages is what
+ * keeps a re-run from corrupting a good file.
+ *
+ * @param {Buffer} input
+ * @param {{ language?: string, redoOcr?: boolean }} options
+ * @returns {Promise<{ bytes: Buffer, text: string }>}
+ */
+export async function ocrPdf(input, { language = "eng", redoOcr = false } = {}) {
+  const languages = String(language || "eng").split("+").map((part) => part.trim()).filter(Boolean);
+  if (!languages.length || languages.some((code) => !OCR_LANGUAGES.has(code))) {
+    throw Object.assign(new Error("This server does not recognise that language."), { status: 400 });
+  }
+  if (!Buffer.isBuffer(input) || !input.length) {
+    throw Object.assign(new Error("No file was received."), { status: 400 });
+  }
+  if (input.length > LIMITS.maxBytes) {
+    throw Object.assign(new Error(`That file is larger than the ${Math.round(LIMITS.maxBytes / 1024 / 1024)} MB limit.`), { status: 413 });
+  }
+  // OCRmyPDF hands the file to Ghostscript and Tesseract, so the same rule
+  // applies as for compressing: only ever a document, never a program.
+  if (!looksLikePdf(input)) {
+    throw Object.assign(new Error("That does not look like a PDF."), { status: 415 });
+  }
+
+  return withScratch(async (dir) => {
+    const stem = crypto.randomBytes(8).toString("hex");
+    const source = path.join(dir, `${stem}.pdf`);
+    const target = path.join(dir, `${stem}-ocr.pdf`);
+    const sidecar = path.join(dir, `${stem}.txt`);
+    await fs.writeFile(source, input);
+    await run("ocrmypdf", [
+      "-l", languages.join("+"),
+      // Either skip pages that already carry text, or replace their layer
+      // outright. Never add a second one on top of the first.
+      redoOcr ? "--redo-ocr" : "--skip-text",
+      "--output-type", "pdf",
+      // The recognised text, so the tool can show it without a second pass.
+      "--sidecar", sidecar,
+      "--quiet",
+      source, target,
+    ], { cwd: dir, timeoutMs: LIMITS.timeoutMs });
+    const bytes = await fs.readFile(target).catch(() => null);
+    if (!bytes || !bytes.length) {
+      throw Object.assign(new Error("The OCR step produced no output. The PDF may be password-protected or corrupt."), { status: 422 });
+    }
+    const text = await fs.readFile(sidecar, "utf8").catch(() => "");
+    return { bytes, text: text.trim() };
   });
 }

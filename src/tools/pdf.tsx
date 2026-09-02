@@ -24,7 +24,7 @@ import { MAX_BATCH_FILES, batchAcceptFor, batchOpList, defaultBatchOptions, runB
 import { captureVideoFrame, enhanceCanvas, getHtml2Canvas, startCameraStream, stopCameraStream } from "../services/capture.service.js";
 import { docxToHtml, epubToHtml, pptxToSlides, readWorkbookSheets, sanitizeHtmlForOffline, sheetsToHtml } from "../services/office.service.js";
 import { pdfToDocx, pdfToEpub, pdfToHtml, pdfToXlsx } from "../services/export.service.js";
-import { serverCapabilities, compressPdfOnServer, convertOfficeOnServer } from "../services/server.service.js";
+import { serverCapabilities, compressPdfOnServer, ocrPdfOnServer, convertOfficeOnServer } from "../services/server.service.js";
 import { DEFAULT_OCR_LANG, OCR_ENGINE_SIZE_LABEL, OCR_LANGUAGES, mergeSearchablePdfPages, ocrImages, ocrPdf, terminateOcrWorker } from "../services/ocr.service.js";
 import { getSpeechSynthesis, loadSpeechVoices, speechSynthesisSupported, splitTextForSpeech } from "../services/audio.service.js";
 import { initialStatus, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, ToolNotes, ServerConvertChoice, canvasToBlob, requireOutput, copyText } from "./shared";
@@ -3473,10 +3473,10 @@ async function renderHtmlToCanvas(bodyHtml: string, { widthPx = 794, scale = 2 }
  * state, so this never throws and every caller still works locally.
  */
 function useConversionServer() {
-  const [probe, setProbe] = useState<{ available: boolean; office: boolean; ghostscript?: boolean } | null>(null);
+  const [probe, setProbe] = useState<{ available: boolean; office: boolean; ghostscript?: boolean; ocr?: boolean } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    serverCapabilities().then((next) => { if (!cancelled) setProbe(next); }).catch(() => { if (!cancelled) setProbe({ available: false, office: false, ghostscript: false }); });
+    serverCapabilities().then((next) => { if (!cancelled) setProbe(next); }).catch(() => { if (!cancelled) setProbe({ available: false, office: false, ghostscript: false, ocr: false }); });
     return () => { cancelled = true; };
   }, []);
   // Reported separately because the two jobs need different tools installed:
@@ -3486,6 +3486,7 @@ function useConversionServer() {
     probe,
     canUseServer: Boolean(probe?.available && probe?.office),
     canCompressOnServer: Boolean(probe?.available && probe?.ghostscript),
+    canOcrOnServer: Boolean(probe?.available && probe?.ocr),
     probed: probe !== null,
   };
 }
@@ -3758,6 +3759,15 @@ function OcrPdfTool({ tool }: { tool: Tool }) {
   const [searchable, setSearchable] = useState(true);
   const [text, setText] = useState("");
   const [status, setStatus] = useState(initialStatus);
+  const [redoOcr, setRedoOcr] = useState(false);
+  const { canOcrOnServer, probed } = useConversionServer();
+
+  // The server endpoint takes one PDF. Images and multi-file batches stay on
+  // the local path, which handles them, rather than being offered a button that
+  // would reject them.
+  const chosen = files.filter(Boolean);
+  const isSinglePdf = chosen.length === 1
+    && (chosen[0].type === "application/pdf" || /\.pdf$/i.test(chosen[0].name));
 
   // The OCR engine keeps a worker (and a WebAssembly heap) alive between pages;
   // always release it when the tool unmounts or is reset.
@@ -3769,6 +3779,7 @@ function OcrPdfTool({ tool }: { tool: Tool }) {
     setText("");
     setLang(DEFAULT_OCR_LANG);
     setAlsoEnglish(false);
+    setRedoOcr(false);
     setStatus(initialStatus);
   };
 
@@ -3794,7 +3805,34 @@ function OcrPdfTool({ tool }: { tool: Tool }) {
     </p>
     <Select label="Render resolution (DPI)" value={dpi} onChange={setDpi} options={["150", "200", "300"]} labels={["150 · fastest", "200 · default", "300 · most accurate"]} />
     <Checkbox label="Also build a searchable PDF (image + invisible text layer)" checked={searchable} onChange={setSearchable} />
-    <PrimaryButton label="Run OCR" onClick={() => runSafely(setStatus, async () => {
+    <ServerConvertChoice
+      serverAvailable={canOcrOnServer && isSinglePdf}
+      serverProbed={probed}
+      onServer={() => runSafely(setStatus, async () => {
+        const [file] = validateFiles(files, tool.file);
+        setStatus({ tone: "idle", message: "Uploading and reading…" });
+        const { bytes, chars } = await ocrPdfOnServer(file, { language: effectiveLang, redoOcr });
+        if (!chars) {
+          // A PDF that came back with no text looks identical to one that
+          // worked, so this must be a failure, not a quiet success.
+          throw new Error("No text was recognised. The scan may be too faint, skewed or low-resolution — try a cleaner scan, or run it here at 300 DPI.");
+        }
+        downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-ocr`, "pdf"), "application/pdf");
+        // The text is already inside the PDF we just received, so read it back
+        // out of the file rather than having the server send it a second time.
+        // Same bytes, no extra transfer, and what lands in the box is exactly
+        // what is in the document.
+        const copy = new Uint8Array(bytes);
+        setText(await extractPdfText(new File([copy], "ocr.pdf", { type: "application/pdf" })).catch(() => ""));
+        return `Read about ${chars.toLocaleString()} characters. The searchable PDF keeps your original page images, with the text positioned over them.`;
+      })}
+      serverLabel="Read on our server"
+      localLabel="Read here instead"
+      offlineLabel="Run OCR"
+      serverBenefit="The page is deskewed and cleaned first, and the invisible text is positioned to match the image, so highlighting lands on the right words."
+      serverOffline="Our server, which deskews pages before reading them, is unreachable right now."
+      serverOptions={<Checkbox label="Replace any text layer this PDF already has (otherwise those pages are left alone)" checked={redoOcr} onChange={setRedoOcr} />}
+      onLocal={() => runSafely(setStatus, async () => {
       const valid = validateFiles(files, tool.file);
       const pdfs = valid.filter((file) => file.type === "application/pdf" || /\.pdf$/i.test(file.name));
       if (pdfs.length && pdfs.length !== valid.length) throw new Error("Choose either one PDF or a set of images, not both at once.");
@@ -3835,7 +3873,9 @@ function OcrPdfTool({ tool }: { tool: Tool }) {
       }
       if (!recognised) return `No text was recognised in ${results.length} image${results.length === 1 ? "" : "s"}.`;
       return `Read ${results.length} image${results.length === 1 ? "" : "s"}.`;
-    })} />
+      })}
+      localWarning="Nothing is uploaded, and you get the recognised text back on this page to copy or correct. Accuracy depends on the scan being straight and sharp."
+    />
     <Textarea label="Recognised text" value={text} onChange={setText} rows={12} />
     <div className="flex flex-wrap gap-2">
       <SecondaryButton label="Copy" onClick={() => runSafely(setStatus, async () => { await copyText(text); return "Copied."; })} />

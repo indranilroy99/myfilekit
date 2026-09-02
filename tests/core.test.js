@@ -8793,6 +8793,48 @@ test("the compressor refuses anything that is not a PDF, because gs runs program
   assert.ok(body.indexOf("looksLikePdf") < body.indexOf("fs.writeFile"), "the input is checked before it is stored");
 });
 
+test("server OCR never stacks a second text layer on a page that already has one", async () => {
+  const { ocrPdf, OCR_LANGUAGES } = await import("../server/convert.js");
+  const source = fs.readFileSync(new URL("../server/convert.js", import.meta.url), "utf8");
+  const body = source.slice(source.indexOf("export async function ocrPdf"));
+
+  // Running OCR across a page that already carries text leaves two overlapping
+  // layers, so every word extracts twice. That is not hypothetical here — this
+  // project ships a checker for exactly that defect (duplicateTextRatio). The
+  // endpoint must therefore either skip those pages or replace their layer, and
+  // never simply add to it.
+  assert.match(body, /--skip-text|--redo-ocr/, "one of the two safe modes is always passed");
+  assert.match(body, /redoOcr \? "--redo-ocr" : "--skip-text"/, "and it is one OR the other, never neither");
+  assert.doesNotMatch(body, /--force-ocr/, "--force-ocr would rasterise a good text layer away");
+
+  // The language reaches a command line as -l, so it is an allowlist lookup.
+  for (const code of ["eng", "hin", "chi_sim", "ara"]) {
+    assert.ok(OCR_LANGUAGES.has(code), `${code} is offered`);
+  }
+  await assert.rejects(
+    () => ocrPdf(Buffer.from("%PDF-1.7\n"), { language: "eng; rm -rf /" }),
+    (error) => error.status === 400 && /does not recognise that language/i.test(error.message),
+    "an unknown language is refused before ocrmypdf is spawned",
+  );
+  // A pair is allowed, but only if BOTH halves are on the list.
+  await assert.rejects(() => ocrPdf(Buffer.from("%PDF-1.7\n"), { language: "eng+klingon" }), (e) => e.status === 400);
+
+  // OCRmyPDF hands the file to Ghostscript and Tesseract, so the PDF header
+  // gate applies here too.
+  await assert.rejects(
+    () => ocrPdf(Buffer.from("%!PS\nshowpage\n"), { language: "eng" }),
+    (error) => error.status === 415,
+    "a PostScript program must not reach the OCR pipeline either",
+  );
+
+  // Recognising nothing must not read as success: an empty searchable PDF looks
+  // exactly like a working one.
+  const client = fs.readFileSync(new URL("../src/tools/pdf.tsx", import.meta.url), "utf8");
+  const tool = client.slice(client.indexOf("function OcrPdfTool"), client.indexOf("function ScanToPdfTool"));
+  const serverPath = tool.slice(tool.indexOf("ocrPdfOnServer"));
+  assert.match(serverPath.slice(0, serverPath.indexOf("downloadBytes")), /if \(!chars\)[\s\S]*throw new Error/, "no recognised text is reported as a failure");
+});
+
 test("the compressor returns the original when compressing would make it bigger", async () => {
   const source = fs.readFileSync(new URL("../server/convert.js", import.meta.url), "utf8");
   const body = source.slice(source.indexOf("export async function compressPdf"));

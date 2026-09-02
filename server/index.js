@@ -1,10 +1,14 @@
 /**
  * MyFileKit conversion server.
  *
- * Exists for one reason: a browser can only rasterise an Office document, so
- * client-side Word/Excel/PowerPoint output is a picture with no selectable
- * text. LibreOffice on a server produces real text. Everything the browser can
- * do well stays in the browser.
+ * Exists for the three jobs a browser genuinely cannot do well:
+ *   - Office to PDF. A browser can only rasterise a document, so its output is
+ *     a picture with no selectable text. LibreOffice produces real text.
+ *   - Compress. The browser turns pages into JPEGs, which destroys the text and
+ *     inflates text-based files. Ghostscript keeps the text as text.
+ *   - OCR. Tesseract in the browser recognises words; OCRmyPDF also deskews the
+ *     page and positions the invisible text to match it.
+ * Everything the browser can do well stays in the browser.
  *
  * Deliberately zero-dependency (node:http, no framework) to match the rest of
  * the project, which vendors rather than installs.
@@ -17,7 +21,7 @@
  *   - Every external tool is spawned with an argument array, never a shell.
  */
 import http from "node:http";
-import { capabilities, officeToPdf, compressPdf, LIMITS, OFFICE_EXTENSIONS, COMPRESSION_LEVELS } from "./convert.js";
+import { capabilities, officeToPdf, compressPdf, ocrPdf, LIMITS, OFFICE_EXTENSIONS, COMPRESSION_LEVELS, OCR_LANGUAGES } from "./convert.js";
 
 const PORT = Number(process.env.PORT || 8081);
 // Browsers enforce this; it is not a security boundary on its own, but it stops
@@ -53,10 +57,10 @@ function cors(req, res) {
     res.setHeader("Vary", "Origin");
   }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-File-Extension, X-Compression-Level");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-File-Extension, X-Compression-Level, X-Ocr-Language, X-Ocr-Redo");
   // The client reads these off a PDF response; without this they are invisible
   // to cross-origin fetch, and the size saving could not be shown honestly.
-  res.setHeader("Access-Control-Expose-Headers", "X-Original-Bytes, X-Compressed");
+  res.setHeader("Access-Control-Expose-Headers", "X-Original-Bytes, X-Compressed, X-Ocr-Text-Chars");
   res.setHeader("Access-Control-Max-Age", "600");
 }
 
@@ -108,6 +112,7 @@ const server = http.createServer(async (req, res) => {
         limits: { maxBytes: LIMITS.maxBytes, timeoutMs: LIMITS.timeoutMs },
         accepts: [...OFFICE_EXTENSIONS],
         compressionLevels: [...COMPRESSION_LEVELS.keys()],
+        ocrLanguages: [...OCR_LANGUAGES],
         retention: "none — files are deleted when the request finishes",
       });
     }
@@ -144,6 +149,30 @@ const server = http.createServer(async (req, res) => {
         // one. `false` means we sent the original back untouched.
         "X-Original-Bytes": String(originalBytes),
         "X-Compressed": compressed ? "true" : "false",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store",
+      });
+      return res.end(bytes);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/ocr-pdf") {
+      if (rateLimited(ip)) return json(res, 429, { error: "Too many conversions from this address. Wait a minute and try again." });
+      const caps = await capabilities();
+      if (!caps.ocr) return json(res, 503, { error: "This server has no OCR engine installed." });
+
+      // Language codes only: letters and the underscore in chi_sim, plus "+"
+      // for a pair. The allowlist in convert.js is the real gate; this only
+      // keeps obvious junk out of it.
+      const language = String(req.headers["x-ocr-language"] || "eng").toLowerCase().replace(/[^a-z_+]/g, "");
+      const redoOcr = String(req.headers["x-ocr-redo"] || "") === "true";
+      const body = await readBody(req, LIMITS.maxBytes);
+      const { bytes, text } = await ocrPdf(body, { language, redoOcr });
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Length": bytes.length,
+        // How much text came out, so the tool can say "nothing was recognised"
+        // instead of handing back a file that looks fine and is not searchable.
+        "X-Ocr-Text-Chars": String(text.length),
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "no-store",
       });
