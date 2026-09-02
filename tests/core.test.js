@@ -5411,6 +5411,118 @@ function countFilespecs(pdf) {
   return { filespecs, embeddedStreams };
 }
 
+test("encrypting a PDF leaves no stream readable without the password", async () => {
+  // The other unreproduced audit claim: that content could be scavenged out of
+  // an encrypted file. It cannot, and the test that shows it needs a POSITIVE
+  // CONTROL to mean anything — without one, "nothing was readable" is equally
+  // consistent with a detection method that cannot read anything at all.
+  //
+  // pdf-lib writes drawn text as a hex string inside a Flate stream, so the
+  // check inflates every stream and looks for the secret's HEX form. Searching
+  // for the ASCII finds nothing even in an unencrypted file, which is how a
+  // first attempt at this test passed while proving nothing.
+  const zlib = await import("node:zlib");
+  const { PDFDocument, StandardFonts } = globalThis.window.PDFLib;
+  const { encryptPdf } = await import("../src/services/pdf-crypto.service.js");
+
+  const secret = "SALARYSECRET4471828";
+  const hex = Buffer.from(secret, "latin1").toString("hex").toUpperCase();
+
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  pdf.addPage([400, 200]).drawText(secret, { x: 30, y: 120, size: 14, font });
+  const plain = Buffer.from(await pdf.save({ useObjectStreams: false }));
+
+  const scan = (buffer) => {
+    let from = 0, inflatable = 0, leaking = 0;
+    for (;;) {
+      const open = buffer.indexOf("stream", from);
+      if (open < 0) break;
+      const close = buffer.indexOf("endstream", open);
+      if (close < 0) break;
+      let start = open + 6;
+      while (buffer[start] === 13 || buffer[start] === 10) start += 1;
+      try {
+        const text = zlib.inflateSync(buffer.subarray(start, close)).toString("latin1");
+        inflatable += 1;
+        if (text.toUpperCase().includes(hex)) leaking += 1;
+      } catch {
+        // Not inflatable — either not Flate, or ciphertext.
+      }
+      from = close + 9;
+    }
+    return { inflatable, leaking };
+  };
+
+  // Control first. If the plaintext file does not leak, the method is broken
+  // and the encrypted result below would be meaningless.
+  const control = scan(plain);
+  assert.equal(control.inflatable, 1, "the control has exactly one readable stream");
+  assert.equal(control.leaking, 1, "the control leaks the secret, so the method can detect a leak");
+
+  const encrypted = Buffer.from((await encryptPdf(new Uint8Array(plain), { userPassword: "hunter2", ownerPassword: "hunter2" })).bytes);
+  assert.match(Buffer.from(encrypted).toString("latin1"), /\/Encrypt/, "the output really is encrypted");
+  const after = scan(encrypted);
+  assert.equal(after.leaking, 0, "no stream gives up the secret without the password");
+  assert.equal(after.inflatable, 0, "and no stream is readable at all — every one is ciphertext");
+});
+
+test("sanitize removes scripts wherever they sit, not just where they are referenced", async () => {
+  // An audit claimed Sanitize could report "clean" while active content
+  // survived. It does not, and this is the fixture that settles it: three
+  // placements a reference-following sanitiser would plausibly miss — two
+  // levels down an action /Next chain, on a page's own /AA, and on a form
+  // field's /AA.
+  //
+  // What actually catches all three is that Sanitize sweeps every indirect
+  // object rather than walking references from the catalog. Worth stating
+  // precisely, because a first version of this comment credited /Next
+  // traversal — and disabling /Next handling leaves this test passing, while
+  // skipping the object sweep fails it. The sweep is the mechanism.
+  const { PDFDocument, PDFName, PDFString } = globalThis.window.PDFLib;
+  const { sanitizePdf } = await import("../src/services/pdf-sanitize.service.js");
+  const { analyzePdfBytes } = await import("../src/services/pdf-analyzer.service.js");
+
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([300, 300]);
+  const ctx = pdf.context;
+
+  // 1. JavaScript two levels down an action's /Next chain, behind two /GoTos.
+  const deep = ctx.obj({ S: "JavaScript", JS: PDFString.of("app.alert('deep');") });
+  const mid = ctx.obj({ S: "GoTo", Next: ctx.register(deep) });
+  pdf.catalog.set(PDFName.of("OpenAction"), ctx.register(ctx.obj({ S: "GoTo", Next: ctx.register(mid) })));
+  // 2. A PAGE-level /AA, not the catalog's.
+  page.node.set(PDFName.of("AA"), ctx.register(ctx.obj({
+    O: ctx.register(ctx.obj({ S: "JavaScript", JS: PDFString.of("app.alert('page open');") })),
+  })));
+  // 3. A form field's /AA keystroke script.
+  const field = ctx.obj({
+    FT: PDFName.of("Tx"),
+    T: PDFString.of("amount"),
+    AA: ctx.register(ctx.obj({ K: ctx.register(ctx.obj({ S: "JavaScript", JS: PDFString.of("app.alert('keystroke');") })) })),
+  });
+  pdf.catalog.set(PDFName.of("AcroForm"), ctx.register(ctx.obj({ Fields: ctx.obj([ctx.register(field)]) })));
+
+  const bytes = await pdf.save();
+  // The fixture is only meaningful if the Analyser sees threats in it first.
+  const before = await analyzePdfBytes(new Uint8Array(bytes));
+  assert.ok(before.findings.some((f) => f.indicator === "Embedded JavaScript (/JS, /JavaScript)"), "the fixture really carries JavaScript");
+
+  const { bytes: cleaned, report } = await sanitizePdf(new Uint8Array(bytes));
+  assert.equal(report.clean, false, "a document with three scripts is not reported as clean");
+  assert.ok(report.total >= 3, `all three placements are removed, got ${report.total}`);
+
+  // The Analyser must find nothing afterwards, and the scripts must be gone
+  // from the bytes rather than merely unreferenced.
+  const after = await analyzePdfBytes(new Uint8Array(cleaned));
+  const residual = after.findings.filter((f) => /JavaScript|OpenAction|\/AA/.test(f.indicator));
+  assert.deepEqual(residual, [], `active content survived: ${residual.map((f) => f.indicator).join(", ")}`);
+  const raw = Buffer.from(cleaned).toString("latin1");
+  for (const script of ["app.alert('deep')", "app.alert('page open')", "app.alert('keystroke')"]) {
+    assert.ok(!raw.includes(script), `${script} is still in the file's bytes`);
+  }
+});
+
 test("sanitize: strips OpenAction, /AA, /Names JavaScript, Launch action, and attachments — and the Analyser agrees", async () => {
   const { sanitizePdf, residualActiveContent } = await import("../src/services/pdf-sanitize.service.js");
   const { PDFDocument, PDFName, PDFDict } = window.PDFLib;
