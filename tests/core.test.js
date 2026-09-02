@@ -1299,6 +1299,63 @@ test("GST invoice charges IGST at the full rate for inter-state supplies", () =>
   assert.equal(invoice.totals.grandTotal, 1530);
 });
 
+test("GST invoice follows the place of supply, not the buyer's registration state", () => {
+  const invoice = business.computeGstInvoice({
+    seller: { name: "S Ltd", gstin: SELLER_MH, address: "Mumbai" },
+    // Registered in Karnataka, taking delivery in Maharashtra. Routine, and the
+    // two states disagree — which is the only case where the distinction shows.
+    buyer: { name: "B Ltd", gstin: BUYER_KA, address: "Bengaluru" },
+    invoiceNo: "INV-1",
+    invoiceDate: "2026-09-01",
+    placeOfSupply: "27",
+    items: [{ description: "Consulting", qty: 1, rate: 1000, gstRate: 18 }],
+  });
+
+  // Seller in 27, place of supply 27, so this is an intra-state supply however
+  // the buyer happens to be registered. Following the buyer's GSTIN instead
+  // produced an invoice that contradicted itself: it printed "Place of supply:
+  // 27 - Maharashtra" and then charged inter-state tax on it.
+  assert.equal(invoice.interState, false);
+  assert.match(invoice.supplyType, /Intra-state/);
+  assert.equal(invoice.totals.igst, 0, "no IGST is due on an intra-state supply");
+  assert.equal(invoice.totals.cgst, 90);
+  assert.equal(invoice.totals.sgst, 90);
+  // The document must not state one thing and tax another.
+  assert.match(invoice.placeOfSupply, /^27 - /);
+
+  // The mismatch is still worth surfacing — it is usually a data-entry slip —
+  // but the warning must not claim the split follows the GSTIN any more.
+  const mismatch = invoice.warnings.find((line) => /place of supply/i.test(line) && /registered/i.test(line));
+  assert.ok(mismatch, "the state mismatch is reported");
+  assert.match(mismatch, /follows the place of supply/i);
+
+  // Reverse the place of supply and the same buyer becomes an inter-state sale.
+  const across = business.computeGstInvoice({
+    seller: { name: "S Ltd", gstin: SELLER_MH, address: "Mumbai" },
+    buyer: { name: "B Ltd", gstin: BUYER_KA, address: "Bengaluru" },
+    invoiceNo: "INV-2",
+    invoiceDate: "2026-09-01",
+    placeOfSupply: "29",
+    items: [{ description: "Consulting", qty: 1, rate: 1000, gstRate: 18 }],
+  });
+  assert.equal(across.interState, true);
+  assert.equal(across.totals.igst, 180);
+  assert.equal(across.totals.cgst, 0);
+
+  // And a buyer with no GSTIN at all still gets the right split from the place
+  // of supply alone, which is the common B2C case.
+  const b2c = business.computeGstInvoice({
+    seller: { name: "S Ltd", gstin: SELLER_MH, address: "Mumbai" },
+    buyer: { name: "Walk-in", gstin: "", address: "Pune" },
+    invoiceNo: "INV-3",
+    invoiceDate: "2026-09-01",
+    placeOfSupply: "27",
+    items: [{ description: "Consulting", qty: 1, rate: 1000, gstRate: 18 }],
+  });
+  assert.equal(b2c.interState, false);
+  assert.equal(b2c.totals.cgst, 90);
+});
+
 test("GST invoice components reconcile with the printed total at 2dp", () => {
   const invoice = business.computeGstInvoice({
     seller: { name: "Acme", gstin: SELLER_MH },

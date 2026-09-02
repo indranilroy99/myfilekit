@@ -65,7 +65,7 @@ function GstInvoiceTool() {
 
   return <ToolForm status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Builds an Indian GST tax invoice in this browser. The state code in each GSTIN decides the split: same state means CGST + SGST at half the rate each, different states mean IGST at the full rate. Reverse charge, GST cess, TDS/TCS, and composition-scheme invoices are not handled.
+      Builds an Indian GST tax invoice in this browser. The seller's state and the place of supply decide the split: same state means CGST + SGST at half the rate each, different states mean IGST at the full rate. Reverse charge, GST cess, TDS/TCS, and composition-scheme invoices are not handled.
     </div>
 
     <div className="grid gap-3 sm:grid-cols-2">

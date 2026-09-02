@@ -165,9 +165,17 @@ const STANDARD_SLABS = [0, 0.25, 3, 5, 12, 18, 28];
 /**
  * Computes a full Indian GST tax invoice.
  *
- * Tax split: when the seller's and the buyer's state codes match the supply is
- * intra-state and the GST rate is halved into CGST + SGST; otherwise it is
+ * Tax split: when the seller's state and the PLACE OF SUPPLY match, the supply
+ * is intra-state and the GST rate is halved into CGST + SGST; otherwise it is
  * inter-state and the full rate is charged as IGST.
+ *
+ * The place of supply governs, not the buyer's registration state. Those are
+ * often the same and it is tempting to treat them as interchangeable, but they
+ * come apart routinely — a buyer registered in Karnataka can take delivery in
+ * Maharashtra — and then only one of them gives the right answer. Using the
+ * buyer's GSTIN instead produced an invoice that contradicted itself on its
+ * face: "Place of supply: 27 - Maharashtra" from a Maharashtra seller, taxed as
+ * inter-state, ₹180 IGST where ₹90 CGST + ₹90 SGST was due.
  *
  * Discount on a line is a percentage of that line's gross value.
  */
@@ -196,12 +204,16 @@ export function computeGstInvoice(input = {}) {
   const sellerStateCode = resolveStateCode(seller.gstin, seller.state);
   const placeOfSupplyCode = resolveStateCode("", input.placeOfSupply || buyer.state);
   const buyerStateCode = buyerGstin.stateCode || placeOfSupplyCode;
+  // What the split is actually decided on. Falls back to the buyer's GSTIN only
+  // when no place of supply was given at all, since a wrong state is worse than
+  // a guessed one being visible in the warnings.
+  const supplyStateCode = placeOfSupplyCode || buyerGstin.stateCode;
   if (!sellerStateCode) warnings.push("Seller state code could not be determined, so CGST/SGST vs IGST was assumed inter-state.");
-  if (!buyerStateCode) warnings.push("Place of supply state code is missing, so CGST/SGST vs IGST was assumed inter-state.");
+  if (!supplyStateCode) warnings.push("Place of supply state code is missing, so CGST/SGST vs IGST was assumed inter-state.");
   if (buyerGstin.stateCode && placeOfSupplyCode && buyerGstin.stateCode !== placeOfSupplyCode) {
-    warnings.push(`Buyer GSTIN state (${buyerGstin.stateCode}) and place of supply (${placeOfSupplyCode}) differ — IGST/CGST split follows the buyer GSTIN.`);
+    warnings.push(`The buyer is registered in ${stateName(buyerGstin.stateCode)} (${buyerGstin.stateCode}) but the place of supply is ${stateName(placeOfSupplyCode)} (${placeOfSupplyCode}). The tax split follows the place of supply — check that it is right.`);
   }
-  const interState = !(sellerStateCode && buyerStateCode && sellerStateCode === buyerStateCode);
+  const interState = !(sellerStateCode && supplyStateCode && sellerStateCode === supplyStateCode);
 
   let taxablePaise = 0;
   let cgstPaise = 0;
