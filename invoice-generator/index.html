@@ -1744,6 +1744,8 @@
           <button class="btn btn-primary" id="downloadPdfBtn" type="button">Download PDF</button>
           <button class="btn btn-ghost" id="downloadHtmlBtn" type="button">Download HTML</button>
           <button class="btn btn-ghost" id="downloadJsonBtn" type="button">Download JSON</button>
+          <button class="btn btn-ghost" id="importJsonBtn" type="button">Import JSON</button>
+          <input id="importJsonInput" type="file" accept=".json,application/json" hidden>
           <button class="btn btn-ghost" id="resetBtn" type="button">Reset</button>
         </div>
         <p class="field-note">Download PDF saves the invoice as a picture, so your client cannot select or copy the invoice number or bank details from it. For a PDF with selectable text, use Print / PDF and choose "Save as PDF".</p>
@@ -2573,6 +2575,10 @@
     const MAX_SHORT_TEXT_LENGTH = 240;
     const MAX_IMAGE_BYTES = 1200000;
     const MAX_DATA_URL_LENGTH = 1800000;
+    // A real export tops out well under this even with both a logo and a
+    // signature near their own caps — generous for a genuine file, small
+    // enough to refuse an unrelated file before it is ever parsed.
+    const MAX_IMPORT_JSON_BYTES = 8000000;
     const SAFE_IMAGE_DATA_URL = /^data:image\/(?:png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=\s]+$/i;
     const SAFE_URL_PROTOCOLS = new Set(["https:", "http:", "mailto:", "upi:", "bitcoin:", "ethereum:"]);
     let currentExportUrl = "";
@@ -3416,6 +3422,52 @@
       document.getElementById("downloadJsonBtn").addEventListener("click", () => {
         const filename = `${safeName(state.documentTitle || state.invoiceNo || "invoice") || "invoice"}.json`;
         exportText(JSON.stringify(normalizeState(structuredClone(state)), null, 2), filename, "application/json;charset=utf-8");
+      });
+      document.getElementById("importJsonBtn").addEventListener("click", () => {
+        document.getElementById("importJsonInput").click();
+      });
+      document.getElementById("importJsonInput").addEventListener("change", (event) => {
+        const input = event.target;
+        const file = input.files && input.files[0];
+        if (!file) return;
+        // The extension is never trusted on its own — whatever is selected still
+        // has to parse as a plain JSON object below, or it is refused the same
+        // way a mistyped file would be.
+        if (file.size > MAX_IMPORT_JSON_BYTES) {
+          alert(`That file is larger than the ${Math.round(MAX_IMPORT_JSON_BYTES / 1000000)} MB this importer accepts. A genuine export from this page is never that large.`);
+          input.value = "";
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          input.value = "";
+          let parsed;
+          try {
+            parsed = JSON.parse(String(reader.result));
+          } catch {
+            alert("That file is not valid JSON. Export a file from this page's “Download JSON” button, then import that same file back.");
+            return;
+          }
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            alert("That JSON file does not describe an invoice.");
+            return;
+          }
+          // Missing fields fall back to defaults rather than to whatever the
+          // CURRENT on-screen invoice happens to hold, so an older or partial
+          // export behaves the same after import as it would fresh — never a
+          // silent mix of the file's data and the previous invoice's data.
+          // normalizeState is the same gate every typed edit already goes
+          // through: it clamps every number, caps every string, and validates
+          // every enum and image, so a hand-edited or corrupted file cannot put
+          // this page in a state normal editing could never reach.
+          state = normalizeState({ ...structuredClone(defaultState), ...parsed });
+          render(true);
+        };
+        reader.onerror = () => {
+          input.value = "";
+          alert("That file could not be read.");
+        };
+        reader.readAsText(file);
       });
       document.getElementById("resetBtn").addEventListener("click", () => {
         if (!confirm("Reset this invoice and clear all entered details?")) return;

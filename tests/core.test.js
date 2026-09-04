@@ -228,6 +228,52 @@ test("invoice defaults are neutral and drafts are not persisted", () => {
   assert.match(invoiceSource, /Private session/);
 });
 
+test("Invoice Studio: JSON import goes through the same sanitising gate every typed edit does", () => {
+  // Verified live in a real browser first, not just read: exported a real
+  // invoice, imported it back and every field matched; fed the importer an
+  // <img onerror> payload in the client name and a <script> tag in an item
+  // name and both rendered as inert text, never executed; taxRate 999999 and
+  // discount -50 both clamped; a javascript: payment link and a bogus
+  // logoData string were both dropped; malformed JSON, a JSON array, `null`,
+  // and an oversized file were all refused with a clear message and left the
+  // current invoice untouched. This pins the STRUCTURE that produced those
+  // results, so a later edit can't quietly drop one of them.
+  const source = readInvoiceSource();
+  const start = source.indexOf('document.getElementById("importJsonInput").addEventListener("change"');
+  assert.ok(start >= 0, "the JSON import handler is missing from invoice-generator/index.html");
+  const handler = source.slice(start, source.indexOf("\n      });", start) + 10);
+
+  // The size cap is checked BEFORE the file is even read, let alone parsed —
+  // a huge unrelated file must not reach JSON.parse in the first place.
+  const sizeCheckIndex = handler.indexOf("file.size > MAX_IMPORT_JSON_BYTES");
+  const readerIndex = handler.indexOf("new FileReader");
+  assert.ok(sizeCheckIndex >= 0 && sizeCheckIndex < readerIndex, "the size cap must be checked before the file is read");
+
+  // JSON.parse is never trusted bare.
+  assert.match(handler, /try\s*\{\s*parsed = JSON\.parse/);
+  assert.match(handler, /catch\s*\{[\s\S]*?not valid JSON/);
+
+  // A non-object (array, null, a bare string/number) is refused, not coerced.
+  assert.match(handler, /typeof parsed !== "object" \|\| Array\.isArray\(parsed\)/);
+
+  // The parsed value reaches state ONLY through normalizeState — the same gate
+  // every keystroke in the form already goes through — never assigned raw.
+  assert.match(handler, /state = normalizeState\(/);
+  assert.doesNotMatch(handler, /state = parsed/);
+
+  // Missing fields in an older or partial export fall back to defaultState,
+  // not to whatever the CURRENT on-screen invoice holds — importing a file
+  // must not silently blend the file's data with unrelated data already on
+  // screen.
+  assert.match(handler, /\{\s*\.\.\.structuredClone\(defaultState\),\s*\.\.\.parsed\s*\}/);
+
+  // The file input is reset after handling, success or failure, so selecting
+  // the same file twice in a row re-triggers the handler rather than being a
+  // no-op the second time.
+  const resetCount = (handler.match(/input\.value = ""/g) || []).length;
+  assert.ok(resetCount >= 3, `the input should be reset on the too-large, bad-JSON and read-error paths, found ${resetCount}`);
+});
+
 const readInvoiceSource = () => fs.readFileSync(new URL("../invoice-generator/index.html", import.meta.url), "utf8");
 
 // The export geometry is marked off in the invoice's inline script so it can be
