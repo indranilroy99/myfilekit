@@ -134,6 +134,43 @@ export async function watermarkPdf(file, text, options = {}) {
   return pdf.save();
 }
 
+// A watermark is usually a company logo or a seal, not a sentence, so this is
+// the same idea as watermarkPdf with the drawn content swapped from text to an
+// image — same defaults (centered, semi-transparent, diagonal), so switching
+// modes in the UI does not also mean relearning the controls.
+const WATERMARK_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"]);
+
+export async function watermarkImagePdf(file, imageFile, options = {}) {
+  const { degrees: pdfDegrees } = getPdfLib();
+  if (!imageFile || !WATERMARK_IMAGE_TYPES.has(imageFile.type)) {
+    throw new Error("Choose a PNG, JPG, WEBP, GIF, or BMP image to use as the watermark.");
+  }
+  const pdf = await loadPdf(file);
+  const imageBytes = new Uint8Array(await imageFile.arrayBuffer());
+  const image = imageFile.type === "image/png"
+    ? await pdf.embedPng(imageBytes)
+    : await pdf.embedJpg(await canvasJpegBytes(imageFile));
+  const opacity = clamp(finiteNumber(options.opacity ?? 0.18, "Opacity"), 0.05, 0.6);
+  const rotation = finiteNumber(options.rotation ?? -32, "Rotation");
+  // A fraction of page width, not an absolute size, so the same watermark
+  // reads the same on an A4 page and on a wide engineering drawing.
+  const widthFraction = clamp(finiteNumber(options.widthFraction ?? 0.4, "Width"), 0.05, 1);
+  pdf.getPages().forEach((page) => {
+    const { width: pageWidth, height: pageHeight } = page.getSize();
+    const width = pageWidth * widthFraction;
+    const height = width * (image.height / image.width);
+    page.drawImage(image, {
+      x: pageWidth / 2 - width / 2,
+      y: pageHeight / 2 - height / 2,
+      width,
+      height,
+      opacity,
+      rotate: pdfDegrees(rotation),
+    });
+  });
+  return pdf.save();
+}
+
 export async function cleanPdfMetadata(file) {
   const { PDFName } = getPdfLib();
   const pdf = await loadPdf(file, { updateMetadata: false });

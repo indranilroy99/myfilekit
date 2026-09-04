@@ -591,7 +591,12 @@ function MiniField({ label, value, onChange, type = "text", placeholder = "" }: 
  * Password tool and none of those messages mentioned it.
  */
 function friendlyError(error: any): string {
-  const raw = String(error?.message || "");
+  // Most thrown values are Error objects, but not all: pdf-lib's PNG-signature
+  // check throws a bare string ("The input is not a PNG file!"), not an Error.
+  // `error?.message` on a string is undefined, so this used to fall straight
+  // through to the generic "Something went wrong." — discarding the one
+  // message that would have told the person what to actually fix.
+  const raw = typeof error === "string" ? error : String(error?.message || "");
   if (/is encrypted|ignoreEncryption|No password given|password is incorrect/i.test(raw)) {
     return "This PDF is password-protected. Open it with Remove Password first, then try again.";
   }
@@ -666,4 +671,4 @@ function imageExt(type: string) {
 
 
 export type { Tool, Status, DownloadReady };
-export { initialStatus, printDownloadUrl, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, acceptHint, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, usePendingHandler, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, ToolNotes, ServerConvertChoice, canvasToBlob, dataUrlToBlob, requireOutput, copyText, imageExt };
+export { initialStatus, printDownloadUrl, ToolMetaPanel, ToolForm, ProgressBar, StatusBox, ResultConsequenceNote, acceptHint, FileControl, InfoRow, Input, Textarea, Select, Range, Checkbox, usePendingHandler, PrimaryButton, SecondaryButton, verdictTone, pageProgress, MiniField, runSafely, ToolNotes, ServerConvertChoice, canvasToBlob, dataUrlToBlob, requireOutput, copyText, imageExt, friendlyError };

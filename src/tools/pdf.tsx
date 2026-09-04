@@ -8,7 +8,7 @@ import { safeFilename, withExtension } from "../utils/safe-filename.js";
 import { validateFiles } from "../services/file-validator.js";
 import { downloadBlob, downloadBytes, downloadText, revokeDownloadUrl } from "../services/download.service.js";
 import { imageToCanvas } from "../services/image.service.js";
-import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, deletePdfPages, extractPdfPages, getPdfLib, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkPdf } from "../services/pdf.service.js";
+import { addPdfPageNumbers, addSignatureImageToPdf, addTextToPdf, deletePdfPages, extractPdfPages, getPdfLib, imagesToPdf, loadPdf, mergePdfs, rotatePdfPages, textToPdf, watermarkImagePdf, watermarkPdf } from "../services/pdf.service.js";
 import { compressPdf as rasterCompressPdf, extractPdfText, flattenPdf, invertPdf, pdfToImages, pdfToZip, rasterRebuild } from "../services/pdf-render.service.js";
 import { applyTextEdits, mapPdfFontToStandard, standardFontKey, textItemToPageRect } from "../services/pdf-textedit.service.js";
 import { parseParagraphs, detectColumnLayout, flowBlocks, rebuildReflowedPdf } from "../services/pdf-reflow.service.js";
@@ -1866,18 +1866,32 @@ function PdfPageNumbersTool({ tool }: { tool: Tool }) {
   </ToolForm>;
 }
 
+const WATERMARK_IMAGE_OPTIONS = { maxFiles: 1, types: ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"], extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] };
+
 function WatermarkPdfTool({ tool }: { tool: Tool }) {
   const [files, setFiles] = useState<File[]>([]);
+  const [mode, setMode] = useState<"text" | "image">("text");
   const [text, setText] = useState("CONFIDENTIAL");
+  const [images, setImages] = useState<File[]>([]);
+  const [widthFraction, setWidthFraction] = useState("0.4");
   const [opacity, setOpacity] = useState("0.18");
   const [status, setStatus] = useState(initialStatus);
-  return <ToolForm status={status} onReset={() => { setFiles([]); setText("CONFIDENTIAL"); setOpacity("0.18"); setStatus(initialStatus); }}>
+  const reset = () => { setFiles([]); setMode("text"); setText("CONFIDENTIAL"); setImages([]); setWidthFraction("0.4"); setOpacity("0.18"); setStatus(initialStatus); };
+  return <ToolForm status={status} onReset={reset}>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
-    <Input label="Watermark text" value={text} onChange={setText} />
+    <Select label="Watermark" value={mode} onChange={(value) => setMode(value as "text" | "image")} options={["text", "image"]} labels={["Text", "Image (logo, seal, stamp)"]} />
+    {mode === "text"
+      ? <Input label="Watermark text" value={text} onChange={setText} />
+      : <>
+          <FileControl accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" files={images} setFiles={setImages} label="Choose watermark image" />
+          <Input label="Width (fraction of page width)" value={widthFraction} onChange={setWidthFraction} type="number" helper="Use a value from 0.05 to 1 — 0.4 covers about two fifths of the page." />
+        </>}
     <Input label="Opacity" value={opacity} onChange={setOpacity} type="number" helper="Use a value from 0.05 to 0.6." />
     <PrimaryButton label="Watermark PDF" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
-      const bytes = await watermarkPdf(file, text, { opacity: Number(opacity) });
+      const bytes = mode === "text"
+        ? await watermarkPdf(file, text, { opacity: Number(opacity) })
+        : await watermarkImagePdf(file, validateFiles(images, WATERMARK_IMAGE_OPTIONS)[0], { opacity: Number(opacity), widthFraction: Number(widthFraction) });
       downloadBytes(bytes, withExtension(`${safeFilename(file.name)}-watermarked`, "pdf"), "application/pdf");
       return `Watermark applied to ${file.name}.`;
     })} />

@@ -8582,6 +8582,89 @@ test("Compress PDF flags a text-heavy PDF before it rasterises anything", () => 
   assert.equal(disabling.length, 2, "both the server-present and server-absent layouts honour it");
 });
 
+test("watermarkImagePdf embeds a real image on every page, and refuses a non-image cleanly", async () => {
+  // Gap found comparing against Stirling-PDF's MIT-licensed tool set (not its
+  // code, which was never read or copied — see WatermarkController /
+  // OverlayImageController for the feature this closes): watermark-pdf-tool
+  // only ever drew text. A logo or seal watermark is at least as common a need.
+  const { watermarkImagePdf } = await import("../src/services/pdf.service.js");
+  const { PDFDocument, PDFName } = window.PDFLib;
+
+  const base = await PDFDocument.create();
+  base.addPage([612, 792]);
+  base.addPage([300, 300]); // a differently-sized page, so centering must be per-page
+  const pdfBytes = await base.save();
+  const pdfFile = { arrayBuffer: async () => pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength) };
+
+  const png1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  const imageFile = { type: "image/png", arrayBuffer: async () => png1x1.buffer.slice(png1x1.byteOffset, png1x1.byteOffset + png1x1.byteLength) };
+
+  const out = await watermarkImagePdf(pdfFile, imageFile, { opacity: 0.3, widthFraction: 0.5 });
+  assert.ok(out.length > pdfBytes.length, "an image was actually drawn, not silently skipped");
+
+  const reloaded = await PDFDocument.load(out);
+  assert.equal(reloaded.getPageCount(), 2, "the document itself is not corrupted");
+
+  // pdf.embedPng() registers the image in the document's object table as a
+  // side effect of embedding it, WHETHER OR NOT page.drawImage ever runs — so
+  // counting /Subtype /Image objects anywhere in the document proves only that
+  // embedding happened, not that anything was actually drawn on a page. First
+  // version of this test used exactly that count and passed even when the
+  // per-page draw loop was mutated to return immediately for every page,
+  // drawing nothing. The real check is each PAGE's own Resources/XObject
+  // dictionary, which is only populated when drawImage runs on that page.
+  for (const page of reloaded.getPages()) {
+    const xobjects = page.node.Resources()?.lookup(PDFName.of("XObject"));
+    const names = xobjects && typeof xobjects.keys === "function" ? xobjects.keys().length : 0;
+    assert.ok(names > 0, "each page's own Resources/XObject dictionary must reference the drawn image");
+  }
+
+  // A file that is not an image at all is refused with a specific message,
+  // not a cryptic failure three layers down inside embedPng/embedJpg.
+  await assert.rejects(
+    () => watermarkImagePdf(pdfFile, { type: "text/plain", arrayBuffer: async () => new ArrayBuffer(0) }),
+    /Choose a PNG, JPG, WEBP, GIF, or BMP image/,
+  );
+  await assert.rejects(() => watermarkImagePdf(pdfFile, null), /Choose a PNG, JPG, WEBP, GIF, or BMP image/);
+
+  // A file that CLAIMS to be a PNG but is not still fails — pdf-lib's own
+  // check runs — and, per the test above, that failure now surfaces its real
+  // message rather than "Something went wrong."
+  await assert.rejects(
+    () => watermarkImagePdf(pdfFile, { type: "image/png", arrayBuffer: async () => new TextEncoder().encode("not a real png").buffer }),
+    (error) => error === "The input is not a PNG file!" || /not a PNG file/i.test(String(error)),
+  );
+});
+
+test("friendlyError shows a real message when a library throws a bare string, not an Error", () => {
+  // Found while building the image-watermark feature: pdf-lib's PNG-signature
+  // check throws a plain string ("The input is not a PNG file!"), not
+  // `new Error(...)`. friendlyError read `error?.message`, which is undefined
+  // on a string, so this silently degraded to the generic "Something went
+  // wrong." for exactly the case where the library's own message would have
+  // told the person what to fix. Not a one-off either — pdf-lib is used
+  // throughout this codebase, so the same defect could resurface anywhere it
+  // hits this one non-Error throw path, or a future one like it.
+  const shared = fs.readFileSync(new URL("../src/tools/shared.tsx", import.meta.url), "utf8");
+  const start = shared.indexOf("function friendlyError(error: any): string {");
+  assert.ok(start >= 0, "friendlyError not found in shared.tsx");
+  const body = shared.slice(start, shared.indexOf("\n}", start) + 2)
+    .replace("function friendlyError(error: any): string {", "function friendlyError(error) {");
+  const friendlyError = new Function(`${body}
+return friendlyError;`)();
+
+  // The actual pdf-lib throw, verbatim.
+  assert.equal(friendlyError("The input is not a PNG file!"), "The input is not a PNG file!");
+  // A normal Error still works exactly as before.
+  assert.equal(friendlyError(new Error("No PDF header found")), "This file could not be read as a PDF. If it is damaged, try Repair PDF.");
+  assert.equal(friendlyError(new Error("this PDF is encrypted")), "This PDF is password-protected. Open it with Remove Password first, then try again.");
+  // An empty string, an empty Error, and undefined all fall back honestly
+  // rather than showing an empty status message.
+  assert.equal(friendlyError(""), "Something went wrong.");
+  assert.equal(friendlyError(new Error("")), "Something went wrong.");
+  assert.equal(friendlyError(undefined), "Something went wrong.");
+});
+
 test("Excel to PDF warns that its output is a picture, and points at CSV to PDF", () => {
   const section = sourceOfComponents(["ExcelToPdfTool"]);
   assert.match(section, /no selectable/i, "the UI warns the output has no selectable text");
