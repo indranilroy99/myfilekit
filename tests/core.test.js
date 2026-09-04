@@ -9216,6 +9216,83 @@ test("the compressor refuses anything that is not a PDF, because gs runs program
   assert.ok(body.indexOf("looksLikePdf") < body.indexOf("fs.writeFile"), "the input is checked before it is stored");
 });
 
+test("P2P transfer: a hostile peer cannot escape the filename, spoof a MIME type, or overrun the assembler", () => {
+  // webrtc.service.js had zero test coverage on the half of it that is pure and
+  // fully Node-testable — everything that parses a REMOTE PEER'S bytes, which is
+  // exactly the kind of surface the sanitiser and zip-bomb bugs earlier in this
+  // project came from. Attacked it directly rather than reading it: every case
+  // below held up, so this pins that behaviour as a guarantee rather than an
+  // impression.
+
+  // Path traversal in a received filename.
+  assert.equal(webrtc.sanitizeReceivedFilename("../../etc/passwd"), "passwd");
+  assert.equal(webrtc.sanitizeReceivedFilename("..\\..\\windows\\system32\\evil.dll"), "evil.dll");
+  assert.equal(webrtc.sanitizeReceivedFilename("/etc/passwd"), "passwd");
+  assert.equal(webrtc.sanitizeReceivedFilename(".."), "myfilekit-received");
+  assert.equal(webrtc.sanitizeReceivedFilename("."), "myfilekit-received");
+
+  // RLO extension-spoofing: a peer names a file so it DISPLAYS as "invoice.txt"
+  // while the real extension is .exe, a real technique used to disguise
+  // malware. The Unicode override character must not survive, and the TRUE
+  // extension must not be hidden.
+  const spoofed = webrtc.sanitizeReceivedFilename("invoice\u202Etxt.exe");
+  assert.ok(!spoofed.includes("\u202E"), "the override character must not survive");
+  assert.match(spoofed, /\.exe$/, "the real extension must not be hidden by the spoof");
+
+  // A multi-dot filename keeps its shape rather than mangling to a wrong
+  // extension or a double one.
+  assert.equal(webrtc.sanitizeReceivedFilename("archive.tar.gz"), "archive.tar.gz");
+  assert.equal(webrtc.sanitizeReceivedFilename("report.pdf"), "report.pdf");
+
+  // Case, NUL bytes, and an absurdly long name are all handled.
+  assert.equal(webrtc.sanitizeReceivedFilename("file.PDF"), "file.pdf");
+  assert.equal(webrtc.sanitizeReceivedFilename("\x00file.pdf"), "file.pdf");
+  const long = webrtc.sanitizeReceivedFilename("a".repeat(500) + ".pdf");
+  assert.ok(long.length <= 90, `an oversized name must be capped, got ${long.length} chars`);
+
+  // MIME type: a CRLF-injected value (an attempt at header/response splitting
+  // if this string were ever used to build a response) collapses to the safe
+  // default rather than surviving.
+  assert.equal(webrtc.sanitizeMimeType("TEXT/HTML; charset=utf-8\r\nSet-Cookie: x=1"), "application/octet-stream");
+  assert.equal(webrtc.sanitizeMimeType("image/svg+xml"), "image/svg+xml");
+  assert.equal(webrtc.sanitizeMimeType("a".repeat(300)), "application/octet-stream");
+
+  // The assembler: size bounds, and protocol violations that must stop a
+  // transfer rather than silently accept bad data.
+  for (const size of [-1, NaN, Infinity, 1.5]) {
+    assert.throws(() => webrtc.createAssembler({ size }), /invalid file size/);
+  }
+  assert.throws(() => webrtc.createAssembler({ size: 300 * 1024 * 1024 }), /larger than the/);
+
+  const outOfOrder = webrtc.createAssembler({ size: 10 });
+  assert.throws(
+    () => outOfOrder.push({ kind: webrtc.FRAME_KIND.CHUNK, seq: 1, payload: new Uint8Array(5) }),
+    /out of order/,
+    "a chunk arriving out of sequence must stop the transfer, not silently reorder",
+  );
+
+  const overrun = webrtc.createAssembler({ size: 5 });
+  assert.throws(
+    () => overrun.push({ kind: webrtc.FRAME_KIND.CHUNK, seq: 0, payload: new Uint8Array(10) }),
+    /more data than it announced/,
+    "a chunk bigger than the announced size must not silently overrun the buffer",
+  );
+
+  // normalizeIncomingMeta: a hostile shape is refused outright; a merely
+  // suspicious field (a fake hash) is dropped rather than trusted, and the file
+  // metadata that DOES matter (size) still gates correctly.
+  assert.throws(() => webrtc.normalizeIncomingMeta(null), /unexpected shape/);
+  assert.throws(() => webrtc.normalizeIncomingMeta({ size: -5 }), /invalid file size/);
+  const meta = webrtc.normalizeIncomingMeta({ size: 5, hash: "'; DROP TABLE", total: 999, index: -1 });
+  assert.equal(meta.hash, "", "an invalid hash is dropped, not passed through");
+  assert.equal(meta.total, 50, "an absurd total is clamped, not trusted");
+  assert.equal(meta.index, 0, "a negative index is refused, not trusted");
+
+  // A signaling code is bounded and prefix-checked before anything is decoded.
+  assert.throws(() => webrtc.decodeSignal(webrtc.SIGNAL_PREFIX + "A".repeat(30000)), /too long/);
+  assert.throws(() => webrtc.decodeSignal("not-the-right-prefix"), /does not look like/);
+});
+
 test("OCR skip-page placeholders never count as recognised text", async () => {
   // Found only by actually running ocrmypdf 17.11.0 against real fixtures — its
   // sidecar does not omit a skipped page's slot, it fills it with the literal
