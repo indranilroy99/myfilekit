@@ -261,6 +261,95 @@ export async function smartSplitPdf(file, options = {}) {
   return { zipped: zipSync(entries, { level: 6 }), partCount: groups.length, sizes, mode };
 }
 
+/**
+ * Splits a PDF into parts that each fit under a target byte size — for an
+ * email attachment limit, an upload cap, that kind of thing.
+ *
+ * Every other split mode works out its page groups from page COUNT alone,
+ * which is exactly what does not work here: a page carrying a full-bleed photo
+ * can be a hundred times the bytes of a page of plain text, and pdf-lib's
+ * output size is not simply "sum of the pages' sizes" either — shared
+ * resources (an embedded font used by every page, say) are stored once per
+ * OUTPUT FILE, not once per page. The only accurate way to know whether a part
+ * fits is to actually build it and measure it, so that is what this does:
+ * pages are added one at a time to the current part, saved, and measured.
+ *
+ * @param {import("./pdf.service.js").PdfLike} file
+ * @param {number} targetBytes
+ * @param {{ onProgress?: (done: number, total: number) => void }} [options]
+ * @returns {Promise<{ zipped: Uint8Array, partCount: number, sizes: number[], byteSizes: number[], target: number, oversizedParts: number }>}
+ */
+export async function splitPdfBySize(file, targetBytes, options = {}) {
+  const { PDFDocument } = getPdfLib();
+  const target = positiveInteger(targetBytes, "Target size");
+  const source = await loadPdf(file);
+  const pageCount = source.getPageCount();
+  if (!pageCount) throw new Error("This PDF has no pages to split.");
+
+  const stem = String(file.name || "document").replace(/\.[^.]*$/, "") || "document";
+  const entries = {};
+  const sizes = [];
+  const byteSizes = [];
+  const onProgress = options.onProgress;
+
+  let cursor = 0;
+  while (cursor < pageCount) {
+    const out = await PDFDocument.create();
+    // No save() here while `out` is still empty. Confirmed by direct testing:
+    // saving a PDFDocument at 0 pages, then continuing to add pages to that
+    // SAME object and saving again, corrupts its page tree — the file reloads
+    // with one MORE page than was actually added, silently. Isolated to
+    // exactly that sequence; a document that is only ever saved once it has
+    // pages does not show it. So `bytes` starts unset and the first real save
+    // happens only after the first page lands.
+    let bytes = null;
+    let pagesInPart = 0;
+
+    while (cursor < pageCount) {
+      const [nextPage] = await out.copyPages(source, [cursor]);
+      out.addPage(nextPage);
+      const candidateBytes = await out.save();
+      if (candidateBytes.length > target && pagesInPart > 0) {
+        // This page would blow the budget and the part already holds at least
+        // one page. No explicit rollback needed: `bytes` still holds the last
+        // ACCEPTED save (it is only reassigned below, past this check), `out`
+        // itself is about to be abandoned when the outer loop starts its next
+        // part fresh, and `cursor` was never advanced for this page — so it is
+        // simply retried as the first page of that next part. (Verified: an
+        // earlier version called out.removePage() here on the theory that the
+        // mutation needed undoing; stripping it and re-running across a dozen
+        // page-count/target combinations produced byte-identical results —
+        // the page was never in `bytes` to begin with.)
+        break;
+      }
+      bytes = candidateBytes;
+      pagesInPart += 1;
+      cursor += 1;
+      if (bytes.length > target) {
+        // A single page, alone, already exceeds the target — a page's content
+        // cannot be split further, so it becomes its own oversized part rather
+        // than being silently dropped or looping forever trying to shrink it.
+        break;
+      }
+    }
+
+    // pagesInPart is never 0 here: the inner loop's oversize check only
+    // applies once a part already holds a page (`pagesInPart > 0`), so a
+    // part's FIRST page is always accepted no matter how large — otherwise a
+    // single page bigger than the target would have nowhere to go at all.
+    // That makes an outright "target too small" refusal impossible to reach
+    // honestly; what actually happens is reported instead, below.
+
+    entries[`${stem}-part-${String(sizes.length + 1).padStart(String(pageCount).length, "0")}.pdf`] = bytes;
+    sizes.push(pagesInPart);
+    byteSizes.push(bytes.length);
+    onProgress?.(cursor, pageCount);
+  }
+
+  const oversizedParts = byteSizes.filter((size) => size > target).length;
+  return { zipped: zipSync(entries, { level: 6 }), partCount: sizes.length, sizes, byteSizes, target, oversizedParts };
+}
+
 // =============================================================================
 // 2. BATES NUMBERING
 // =============================================================================

@@ -8582,6 +8582,83 @@ test("Compress PDF flags a text-heavy PDF before it rasterises anything", () => 
   assert.equal(disabling.length, 2, "both the server-present and server-absent layouts honour it");
 });
 
+test("splitPdfBySize measures real output bytes, and never loses a page to a pdf-lib quirk it triggers", async () => {
+  // Gap found comparing against Stirling-PDF's MIT-licensed tool set (its
+  // SplitPdfBySizeController). Every other split mode works from page COUNT;
+  // this one can't, because pdf-lib's output size is not "sum of the pages'
+  // sizes" — shared resources are stored once per FILE, not once per page —
+  // so the only accurate way to know whether a part fits is to build it and
+  // measure it.
+  const { splitPdfBySize } = await import("../src/services/pdf-advanced.service.js");
+  const { PDFDocument, StandardFonts } = window.PDFLib;
+  const { unzipSync } = await import("fflate");
+
+  const png1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const png = await doc.embedPng(new Uint8Array(png1x1));
+  // A genuinely mixed document: some pages carry a lot of distinct text (heavier),
+  // others just the tiny image (lighter) — so page byte sizes actually differ,
+  // which is the entire premise of "split by size".
+  for (let i = 0; i < 10; i++) {
+    const page = doc.addPage([300, 300]);
+    if (i % 3 === 0) {
+      for (let line = 0; line < 40; line++) {
+        page.drawText(`Line ${line} on page ${i} ${Math.random().toString(36).slice(2)}`, { x: 5, y: 290 - line * 7, size: 6, font });
+      }
+    } else {
+      page.drawImage(png, { x: 100, y: 100, width: 50, height: 50 });
+    }
+  }
+  const sourceBytes = await doc.save();
+  const file = { name: "mixed.pdf", arrayBuffer: async () => sourceBytes.buffer.slice(sourceBytes.byteOffset, sourceBytes.byteOffset + sourceBytes.byteLength) };
+
+  const target = Math.round(sourceBytes.length / 3);
+  const result = await splitPdfBySize(file, target);
+  assert.equal(result.oversizedParts, 0, "a reasonable target should not need any oversized parts");
+  assert.equal(result.sizes.reduce((a, b) => a + b, 0), 10, "no page is dropped or duplicated in the page-count accounting");
+  // The boundary itself, not just the derived oversizedParts count: a part
+  // that ended up with MORE than one page must actually fit the target —
+  // otherwise the loop kept adding pages past the budget instead of stopping.
+  // (A lone single-page part is exempt: a page that alone exceeds the target
+  // has nowhere else to go.) This is the assertion that actually pins
+  // "adding one more page would overflow, so stop and start a new part" —
+  // aggregate counts alone did not catch skipping that stop.
+  for (let i = 0; i < result.sizes.length; i++) {
+    if (result.sizes[i] > 1) assert.ok(result.byteSizes[i] <= target, `part ${i + 1} has ${result.sizes[i]} pages but is ${result.byteSizes[i]} bytes, over the ${target}-byte target`);
+  }
+
+  // This is the check that actually matters, and the one a first version of
+  // this test got wrong by only checking page counts INSIDE splitPdfBySize's
+  // own accounting. Reloading the ZIP's actual PDF files caught a real bug:
+  // the function saved its accumulating output document once while it had
+  // ZERO pages (to size an "empty PDF" for an error message), then kept
+  // adding pages and saving again — and pdf-lib's page tree came back with
+  // one MORE page than was actually added on every subsequent reload. The
+  // in-memory accounting (getPageCount(), the returned `sizes` array) never
+  // showed it; only reading the bytes back did. Fixed by never saving the
+  // accumulating document while it is still empty.
+  const zipEntries = unzipSync(new Uint8Array(result.zipped));
+  let reloadedTotal = 0;
+  for (const name of Object.keys(zipEntries)) {
+    const part = await PDFDocument.load(zipEntries[name]);
+    reloadedTotal += part.getPageCount();
+  }
+  assert.equal(reloadedTotal, 10, "every part's ACTUAL saved bytes, reloaded from the zip, must total the source page count");
+
+  // A page whose own content already exceeds the target still goes somewhere
+  // — it becomes its own oversized part rather than being dropped, and that
+  // is reported honestly rather than silently.
+  const tiny = await splitPdfBySize(file, 1);
+  assert.equal(tiny.partCount, 10, "one page per part when nothing fits the target");
+  assert.equal(tiny.oversizedParts, 10, "every part is honestly reported as over the (impossible) target");
+
+  // A target comfortably larger than the whole document needs only one part.
+  const huge = await splitPdfBySize(file, sourceBytes.length * 2);
+  assert.equal(huge.partCount, 1);
+  assert.equal(huge.oversizedParts, 0);
+});
+
 test("watermarkImagePdf embeds a real image on every page, and refuses a non-image cleanly", async () => {
   // Gap found comparing against Stirling-PDF's MIT-licensed tool set (not its
   // code, which was never read or copied — see WatermarkController /

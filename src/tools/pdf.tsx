@@ -15,7 +15,7 @@ import { parseParagraphs, detectColumnLayout, flowBlocks, rebuildReflowedPdf } f
 import { applyAnnotations, screenToPagePoint, pagePointToScreen, HIGHLIGHT_PALETTE, MAX_ANNOTATIONS_PER_PAGE } from "../services/annotate.service.js";
 import { archivalPrepPdf, assertPdfDecryptable, checkPdfACompliance, comparePdfText, comparePdfReportText, estimateSkewAngle } from "../services/pdf-review.service.js";
 import { addHeadersFooters, createPdf, cropResizePdf, fillPdfForm, organizePdfPages, readPdfFormFields, redactPdf, repairPdf } from "../services/pdf-edit.service.js";
-import { BATES_POSITION_IDS, NUP_COUNTS, batesNumberPdf, blankPagesFromCoverage, pagesAfterRemovingBlanks, removePdfImages, createFormPdf, imposePdf, parseOutlineInput, parseSplitPages, readOutline, setOutline, smartSplitPdf } from "../services/pdf-advanced.service.js";
+import { BATES_POSITION_IDS, NUP_COUNTS, batesNumberPdf, blankPagesFromCoverage, pagesAfterRemovingBlanks, removePdfImages, createFormPdf, imposePdf, parseOutlineInput, parseSplitPages, readOutline, setOutline, smartSplitPdf, splitPdfBySize } from "../services/pdf-advanced.service.js";
 import { extractPdfAssets, buildExtractionZip } from "../services/pdf-extract.service.js";
 import { LANGUAGE_OPTIONS, auditPdfAccessibility, buildAccessibilityReportText, extractAccessibilityContent, remediatePdfAccessibility } from "../services/pdf-accessibility.service.js";
 import { canvasToPdf, canvasesToPdf } from "../services/convert.service.js";
@@ -2400,21 +2400,23 @@ function SmartSplitPdfTool({ tool }: { tool: Tool }) {
   const [everyN, setEveryN] = useState("5");
   const [parts, setParts] = useState("2");
   const [atPages, setAtPages] = useState("");
+  const [targetMb, setTargetMb] = useState("10");
   const [outline, setOutlineEntries] = useState<Array<{ title: string; page: number | null; level: number }> | null>(null);
   const [status, setStatus] = useState(initialStatus);
 
-  const reset = () => { setFiles([]); setMode("everyN"); setEveryN("5"); setParts("2"); setAtPages(""); setOutlineEntries(null); setStatus(initialStatus); };
+  const reset = () => { setFiles([]); setMode("everyN"); setEveryN("5"); setParts("2"); setAtPages(""); setTargetMb("10"); setOutlineEntries(null); setStatus(initialStatus); };
   const topBookmarks = outline ? outline.filter((entry) => entry.level === 0 && entry.page) : [];
 
   return <ToolForm status={status} onReset={reset}>
     <div className="surface-muted wabi-card-edge p-4 text-sm font-semibold leading-6 text-neutral-600">
-      Splits one PDF into several files and bundles them into a ZIP. Choose how to split: fixed page counts, a number of equal parts, specific page numbers, or one file per top-level bookmark.
+      Splits one PDF into several files and bundles them into a ZIP. Choose how to split: fixed page counts, a number of equal parts, specific page numbers, one file per top-level bookmark, or a target file size.
     </div>
     <FileControl accept="application/pdf" files={files} setFiles={(next) => { setFiles(next); setOutlineEntries(null); }} />
-    <Select label="Split mode" value={mode} onChange={setMode} options={["everyN", "equalParts", "atPages", "bookmarks"]} labels={["Every N pages", "Into K equal parts", "At specific page numbers", "One file per bookmark"]} />
+    <Select label="Split mode" value={mode} onChange={setMode} options={["everyN", "equalParts", "atPages", "bookmarks", "bySize"]} labels={["Every N pages", "Into K equal parts", "At specific page numbers", "One file per bookmark", "Under a target file size"]} />
     {mode === "everyN" && <Input label="Pages per file" value={everyN} onChange={setEveryN} type="number" helper="Each output file gets this many pages (the last may have fewer)." />}
     {mode === "equalParts" && <Input label="Number of parts" value={parts} onChange={setParts} type="number" helper="Pages are distributed as evenly as possible; any remainder goes to the earliest parts." />}
     {mode === "atPages" && <Input label="Split at pages" value={atPages} onChange={setAtPages} placeholder="Example: 5, 12, 20" helper="Each listed page starts a new file." />}
+    {mode === "bySize" && <Input label="Target size per file (MB)" value={targetMb} onChange={setTargetMb} type="number" helper="For an email attachment limit or an upload cap. A single page bigger than this limit still becomes its own file — one page cannot be split further." />}
     {mode === "bookmarks" && (
       <div className="grid gap-3">
         <SecondaryButton label="Read bookmarks" onClick={() => runSafely(setStatus, async () => {
@@ -2433,6 +2435,17 @@ function SmartSplitPdfTool({ tool }: { tool: Tool }) {
     )}
     <PrimaryButton label="Split into ZIP" onClick={() => runSafely(setStatus, async () => {
       const [file] = validateFiles(files, tool.file);
+      if (mode === "bySize") {
+        const targetBytes = Math.round(Number(targetMb) * 1024 * 1024);
+        const { zipped, partCount, sizes, oversizedParts } = await splitPdfBySize(file, targetBytes, { onProgress: pageProgress(setStatus, "Writing") });
+        const buffer = new ArrayBuffer(zipped.byteLength);
+        new Uint8Array(buffer).set(zipped);
+        downloadBlob(new Blob([buffer], { type: "application/zip" }), `${safeFilename(file.name)}-split.zip`);
+        const base = `Produced ${partCount} file${partCount === 1 ? "" : "s"} (pages per file: ${sizes.join(", ")}).`;
+        return oversizedParts
+          ? `${base} ${oversizedParts} of them are still over ${targetMb} MB — a single page's own content is bigger than that on its own, and a page cannot be split further.`
+          : base;
+      }
       const opts: any = { mode, onProgress: pageProgress(setStatus, "Writing") };
       if (mode === "everyN") opts.everyN = Number(everyN);
       if (mode === "equalParts") opts.parts = Number(parts);
