@@ -45,6 +45,15 @@ language. A value not on the list is refused before the tool is spawned.
   text leaves two overlapping layers, so every word extracts twice. The server
   always passes either `--skip-text` or `--redo-ocr`, never neither, and never
   `--force-ocr` (which would rasterise a good text layer away).
+- **A page OCRmyPDF skips is not a page it stayed silent about.** With
+  `--skip-text`, a page that already had text contributes the literal string
+  `[OCR skipped on page(s) 1-3]` to the sidecar output, not its real text and
+  not nothing. Found by running the actual binary (17.11.0): on a PDF where
+  every page already has text, that placeholder is the entire sidecar, so a
+  naive character count is non-zero and a "nothing was recognised" check never
+  fires — the server would report success for a run that did no real OCR.
+  `stripOcrSkipPlaceholders` removes it before the character count the client
+  relies on is computed.
 
 ## Why the app still ships `connect-src 'self'`
 

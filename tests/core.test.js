@@ -9216,6 +9216,34 @@ test("the compressor refuses anything that is not a PDF, because gs runs program
   assert.ok(body.indexOf("looksLikePdf") < body.indexOf("fs.writeFile"), "the input is checked before it is stored");
 });
 
+test("OCR skip-page placeholders never count as recognised text", async () => {
+  // Found only by actually running ocrmypdf 17.11.0 against real fixtures — its
+  // sidecar does not omit a skipped page's slot, it fills it with the literal
+  // string "[OCR skipped on page(s) 1-3]". On a PDF where every page already
+  // has text, that placeholder IS the whole sidecar: character count is
+  // non-zero, so a naive "no text recognised means it failed" check never
+  // fires, and the tool reports success for a run that did zero real OCR.
+  // These three strings are captured from that real binary, not invented.
+  const { stripOcrSkipPlaceholders } = await import("../server/convert.js");
+
+  assert.equal(stripOcrSkipPlaceholders("[OCR skipped on page(s) 1-3]"), "", "an all-skipped document must count as zero recognised characters");
+  assert.equal(stripOcrSkipPlaceholders("[OCR skipped on page(s) 1]"), "");
+  assert.equal(
+    stripOcrSkipPlaceholders("[OCR skipped on page(s) 1]\fINVOICE TOTAL 128450.00 USD"),
+    "INVOICE TOTAL 128450.00 USD",
+    "a mixed document keeps only the genuinely recognised text, not the placeholder noise mixed into its count",
+  );
+  // Real recognised text with no placeholder at all must survive untouched.
+  assert.equal(stripOcrSkipPlaceholders("Genuinely recognised words"), "Genuinely recognised words");
+  assert.equal(stripOcrSkipPlaceholders(""), "");
+
+  // The client's failure message ("No text was recognised…") fires on
+  // chars === 0 — confirm the server-side function that feeds that count is
+  // actually wired to strip the placeholder before the sidecar is returned.
+  const source = fs.readFileSync(new URL("../server/convert.js", import.meta.url), "utf8");
+  assert.match(source, /text:\s*stripOcrSkipPlaceholders\(rawText\)/, "ocrPdf must return the STRIPPED text, not the raw sidecar");
+});
+
 test("server OCR never stacks a second text layer on a page that already has one", async () => {
   const { ocrPdf, OCR_LANGUAGES } = await import("../server/convert.js");
   const source = fs.readFileSync(new URL("../server/convert.js", import.meta.url), "utf8");

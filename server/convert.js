@@ -223,6 +223,32 @@ export async function compressPdf(input, level) {
 }
 
 /**
+ * Strips OCRmyPDF's own skip-page placeholders out of its sidecar text.
+ *
+ * Found by actually running the real binary, not by reading its docs: with
+ * `--skip-text`, a page that already had text does not contribute its real
+ * text to the sidecar — it contributes the literal string
+ * "[OCR skipped on page(s) 1-3]" instead. On a PDF where every page already
+ * has text, that placeholder is the ENTIRE sidecar: character count is
+ * non-zero, so the "no text recognised" failure check downstream never fires,
+ * and the tool would report success ("Read about 29 characters") for a run
+ * that did zero real OCR.
+ *
+ * The exact strings below are captured from ocrmypdf 17.11.0 output, not
+ * guessed, and serve as the regression fixture — the format is not part of
+ * OCRmyPDF's documented API and could change under a future version.
+ */
+export function stripOcrSkipPlaceholders(text) {
+  return String(text || "")
+    .replace(/\[OCR skipped on page\(s\)[^\]]*\]/g, "")
+    // The page separator OCRmyPDF puts between pages' text (form feed) can be
+    // left dangling once the placeholder it bracketed is gone.
+    .replace(/\f+/g, "\f")
+    .replace(/^\f+|\f+$/g, "")
+    .trim();
+}
+
+/**
  * Add a searchable text layer to a scanned PDF, via OCRmyPDF.
  *
  * The browser can already do this with Tesseract, and for one clean page it is
@@ -280,7 +306,7 @@ export async function ocrPdf(input, { language = "eng", redoOcr = false } = {}) 
     if (!bytes || !bytes.length) {
       throw Object.assign(new Error("The OCR step produced no output. The PDF may be password-protected or corrupt."), { status: 422 });
     }
-    const text = await fs.readFile(sidecar, "utf8").catch(() => "");
-    return { bytes, text: text.trim() };
+    const rawText = await fs.readFile(sidecar, "utf8").catch(() => "");
+    return { bytes, text: stripOcrSkipPlaceholders(rawText) };
   });
 }
