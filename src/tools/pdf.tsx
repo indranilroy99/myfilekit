@@ -1982,7 +1982,6 @@ function CompressPdfTool({ tool }: { tool: Tool }) {
   });
 
   return <ToolForm status={status} onReset={() => { setFiles([]); setPreflight(null); setFlattenAnyway(false); setStatus(initialStatus); }}>
-    <p className="tool-lead">Make a PDF smaller.</p>
     <FileControl accept="application/pdf" files={files} setFiles={setFiles} />
     {/*
       The text-heavy warning changes meaning entirely depending on whether the
@@ -2991,7 +2990,6 @@ function PdfaPrepTool({ tool }: { tool: Tool }) {
   const reset = () => { setFiles([]); setRaster(false); setOcrLayer(false); setOcrLang(DEFAULT_OCR_LANG); setTitle(""); setAuthor(""); setLang("en"); setReport(null); setCompliance(null); setStatus(initialStatus); };
 
   return <ToolForm status={status} onReset={reset}>
-    <p className="tool-lead">Prepare a PDF for long-term archiving.</p>
     <ToolNotes summary="What this does, and what it cannot promise">
       <li>Embeds the colour profile and the archival identifier the format needs.</li>
       <li>Sets the document title and language, and removes scripts and auto-run actions.</li>
@@ -3541,7 +3539,6 @@ function ExcelToPdfTool({ tool }: { tool: Tool }) {
   });
 
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
-    <p className="tool-lead">Turn a spreadsheet into a PDF, one table per sheet.</p>
     <FileControl accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" files={files} setFiles={setFiles} label="Choose or drop a spreadsheet" />
     <ServerConvertChoice
       serverAvailable={canUseServer}
@@ -3582,7 +3579,6 @@ function PowerpointToPdfTool({ tool }: { tool: Tool }) {
   });
 
   return <ToolForm status={status} onReset={() => { setFiles([]); setStatus(initialStatus); }}>
-    <p className="tool-lead">Turn a PowerPoint deck into a PDF, one page per slide.</p>
     <FileControl accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" files={files} setFiles={setFiles} label="Choose or drop a PowerPoint file" />
     <ServerConvertChoice
       serverAvailable={canUseServer}

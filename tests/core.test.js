@@ -1697,6 +1697,47 @@ test("workflow builder reports the failing step and keeps the prior output", asy
   assert.equal(business.workflowOpList().every((op) => typeof op.label === "string" && Array.isArray(op.fields)), true);
 });
 
+test("a tool page never repeats its own registry description as a second lead line", () => {
+  // Every tool page shows the registry's one-line description above the tool
+  // component (App.tsx: doc-bar-meta). Four tool components ALSO opened with
+  // their own <p className="tool-lead"> or intro block restating close to the
+  // same sentence — found by screenshotting the pages, not by reading the code.
+  // Compress PDF: "Make a PDF smaller. Best for scans..." then, one line below
+  // it, "Make a PDF smaller." again. Excel to PDF and PowerPoint to PDF picked
+  // up the same pattern when their server-choice UI was added.
+  //
+  // This sweeps every tool for the same mistake so it has to be caught once,
+  // not once per tool. The two texts don't need to be identical — a lead line
+  // that is a near-verbatim PREFIX of the registry description is what a reader
+  // actually experiences as "wait, didn't I just read this."
+  const appSource = readAppSource();
+  const routeMap = new Map();
+  for (const match of appSource.matchAll(/tool\.id === "([a-z0-9-]+)"\)\s*return\s*<(\w+Tool)\b/g)) {
+    routeMap.set(match[1], match[2]);
+  }
+
+  const normalize = (text) => text.toLowerCase().replace(/[^a-z ]/g, "").trim();
+  const offenders = [];
+  for (const tool of tools) {
+    const componentName = routeMap.get(tool.id);
+    if (!componentName) continue; // Not every id routes through this pattern (some share a renderer keyed elsewhere).
+    let body;
+    try {
+      body = sourceOfComponents([componentName]);
+    } catch {
+      continue;
+    }
+    const leadMatch = body.match(/<p className="tool-lead">([^<]*)<\/p>/);
+    if (!leadMatch) continue;
+    const lead = normalize(leadMatch[1]);
+    const desc = normalize(tool.description);
+    if (lead && desc && (desc.startsWith(lead) || lead.startsWith(desc))) {
+      offenders.push(`${tool.id}: registry says "${tool.description}", tool-lead says "${leadMatch[1].trim()}"`);
+    }
+  }
+  assert.deepEqual(offenders, [], `tool page(s) repeat their own registry description:\n${offenders.join("\n")}`);
+});
+
 test("Phase 5 business tools are registered, routable, and discoverable", () => {
   const expected = {
     "gst-invoice-tool": "Business Tools",
