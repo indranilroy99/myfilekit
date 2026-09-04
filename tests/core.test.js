@@ -9216,6 +9216,47 @@ test("the compressor refuses anything that is not a PDF, because gs runs program
   assert.ok(body.indexOf("looksLikePdf") < body.indexOf("fs.writeFile"), "the input is checked before it is stored");
 });
 
+test("scan-to-pdf's camera error mapping tells the user something they can act on", async () => {
+  // captureVideoFrame and enhanceCanvas need a real <canvas> 2D context, which
+  // this project has no Canvas emulation for in Node — that half stays
+  // browser-only, verified visually. startCameraStream's error mapping is pure
+  // logic over a DOMException's .name, though, and needs no camera to test: it
+  // only needs navigator.mediaDevices.getUserMedia to reject.
+  const { startCameraStream, stopCameraStream } = await import("../src/services/capture.service.js");
+
+  const originalNavigator = globalThis.navigator;
+  const setNavigator = (value) => Object.defineProperty(globalThis, "navigator", { value, configurable: true, writable: true });
+
+  try {
+    setNavigator({});
+    await assert.rejects(() => startCameraStream(), /no camera access/i, "no mediaDevices at all must fail with an actionable message, not a raw TypeError");
+
+    const cases = [
+      ["NotAllowedError", /permission was denied/i],
+      ["SecurityError", /permission was denied/i],
+      ["NotFoundError", /no camera was found/i],
+      ["OverconstrainedError", /no camera was found/i],
+      ["DevicesNotFoundError", /no camera was found/i],
+      ["NotReadableError", /already in use/i],
+      ["SomeUnmappedBrowserError", /could not start the camera/i],
+    ];
+    for (const [domName, expected] of cases) {
+      setNavigator({ mediaDevices: { getUserMedia: () => Promise.reject(Object.assign(new Error("dom"), { name: domName })) } });
+      await assert.rejects(() => startCameraStream(), expected, `${domName} should map to a message matching ${expected}`);
+    }
+  } finally {
+    setNavigator(originalNavigator);
+  }
+
+  // stopCameraStream runs on unmount and on every "stop camera" click. A track
+  // that throws on stop() (already stopped, revoked permission mid-session)
+  // must not crash the caller, and neither should a null/absent stream.
+  const hostileStream = { getTracks: () => [{ stop: () => { throw new Error("already stopped"); } }] };
+  assert.doesNotThrow(() => stopCameraStream(hostileStream));
+  assert.doesNotThrow(() => stopCameraStream(null));
+  assert.doesNotThrow(() => stopCameraStream(undefined));
+});
+
 test("P2P transfer: a hostile peer cannot escape the filename, spoof a MIME type, or overrun the assembler", () => {
   // webrtc.service.js had zero test coverage on the half of it that is pure and
   // fully Node-testable — everything that parses a REMOTE PEER'S bytes, which is
